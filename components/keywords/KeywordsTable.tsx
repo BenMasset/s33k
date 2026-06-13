@@ -201,6 +201,7 @@ const KeywordsTable = (props: KeywordsTableProps) => {
                      <span className={`domKeywords_head_history flex-1 basis-20 grow-0  ${shouldHideColumn('History')}`}>History (7d)</span>
                      <span className={`domKeywords_head_volume flex-1 basis-24 grow-0 text-center ${shouldHideColumn('Volume')}`}>Volume</span>
                      <span className='domKeywords_head_url flex-1'>URL</span>
+                     <span className='domKeywords_head_target_page flex-1'>Target Page</span>
                      <span className='domKeywords_head_updated flex-1 relative left-3 max-w-[150px]'>Updated</span>
                      {showSCData && tableColumns.includes('Search Console') && (
                         <div className='domKeywords_head_sc flex-1 min-w-[170px] lg:max-w-[170px] mr-7 text-center'>

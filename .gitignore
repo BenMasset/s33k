@@ -46,3 +46,5 @@ data/
 
 #copilot
 .github/*.md
+mcp/node_modules
+mcp/dist

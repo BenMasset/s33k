@@ -83,7 +83,7 @@ const addKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGet
       const keywordsToAdd: any = []; // QuickFIX for bug: https://github.com/sequelize/sequelize-typescript/issues/936
 
       keywords.forEach((kwrd: KeywordAddPayload) => {
-         const { keyword, device, country, domain, tags, city } = kwrd;
+         const { keyword, device, country, domain, tags, city, target_page } = kwrd;
          const tagsArray = tags ? tags.split(',').map((item:string) => item.trim()) : [];
          const newKeyword = {
             keyword,
@@ -91,6 +91,7 @@ const addKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGet
             domain,
             country,
             city,
+            target_page: target_page || '',
             position: 0,
             updating: true,
             history: JSON.stringify({}),
@@ -156,14 +157,21 @@ const updateKeywords = async (req: NextApiRequest, res: NextApiResponse<Keywords
    if (!req.query.id && typeof req.query.id !== 'string') {
       return res.status(400).json({ error: 'keyword ID is Required!' });
    }
-   if (req.body.sticky === undefined && !req.body.tags === undefined) {
+   if (req.body.sticky === undefined && !req.body.tags === undefined && req.body.target_page === undefined) {
       return res.status(400).json({ error: 'keyword Payload Missing!' });
    }
    const keywordIDs = (req.query.id as string).split(',').map((item) => parseInt(item, 10));
-   const { sticky, tags } = req.body;
+   const { sticky, tags, target_page } = req.body;
 
    try {
       let keywords: KeywordType[] = [];
+      if (target_page !== undefined) {
+         await Keyword.update({ target_page }, { where: { ID: { [Op.in]: keywordIDs } } });
+         const updatedKeywords:Keyword[] = await Keyword.findAll({ where: { ID: { [Op.in]: keywordIDs } } });
+         const formattedKeywords = updatedKeywords.map((el) => el.get({ plain: true }));
+         keywords = parseKeywords(formattedKeywords);
+         return res.status(200).json({ keywords });
+      }
       if (sticky !== undefined) {
          await Keyword.update({ sticky }, { where: { ID: { [Op.in]: keywordIDs } } });
          const updateQuery = { where: { ID: { [Op.in]: keywordIDs } } };

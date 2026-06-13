@@ -46,6 +46,7 @@ const Keyword = (props: KeywordProps) => {
    } = props;
    const {
       keyword, domain, ID, city, position, url = '', lastUpdated, country, sticky, history = {}, updating = false, lastUpdateError = false, volume,
+      target_page = '',
    } = keywordData;
 
    const [showOptions, setShowOptions] = useState(false);
@@ -165,6 +166,13 @@ const Keyword = (props: KeywordProps) => {
             <a href={url} target="_blank" rel="noreferrer"><span className='mr-3 lg:hidden'>
                <Icon type="link-alt" size={14} color="#999" /></span>{turncatedURL || '-'}
             </a>
+         </div>
+
+         <div
+         title={target_page || ''}
+         className={`keyword_target_page inline-block mt-4 mr-5 ml-5 lg:flex-1 text-gray-400 lg:m-0 max-w-[70px]
+         overflow-hidden text-ellipsis whitespace-nowrap lg:max-w-none lg:pr-5 lg:pl-3`}>
+            <span className='mr-3 lg:hidden'><Icon type="link" size={14} color="#999" /></span>{target_page || '-'}
          </div>
 
          <div

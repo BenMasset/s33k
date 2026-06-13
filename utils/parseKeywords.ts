@@ -8,6 +8,7 @@ import Keyword from '../database/models/keyword';
 const parseKeywords = (allKeywords: Keyword[]) : KeywordType[] => {
    const parsedItems = allKeywords.map((keywrd:Keyword) => ({
          ...keywrd,
+         target_page: keywrd.target_page || '',
          history: JSON.parse(keywrd.history),
          tags: JSON.parse(keywrd.tags),
          lastResult: JSON.parse(keywrd.lastResult),

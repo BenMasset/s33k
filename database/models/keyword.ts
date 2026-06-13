@@ -53,6 +53,9 @@ class Keyword extends Model {
    @Column({ type: DataType.STRING, allowNull: true, defaultValue: JSON.stringify([]) })
    url!: string;
 
+   @Column({ type: DataType.STRING, allowNull: true, defaultValue: '' })
+   target_page!: string;
+
    @Column({ type: DataType.STRING, allowNull: true, defaultValue: JSON.stringify([]) })
    tags!: string;
 

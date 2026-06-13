@@ -20,6 +20,7 @@ type KeywordsInput = {
    domain: string,
    tags: string,
    city?:string,
+   targetPage?:string,
 }
 
 const AddKeywords = ({ closeModal, domain, keywords, scraperName = '', allowsCity = false }: AddKeywordsProps) => {
@@ -28,7 +29,9 @@ const AddKeywords = ({ closeModal, domain, keywords, scraperName = '', allowsCit
 
    const [error, setError] = useState<string>('');
    const [showTagSuggestions, setShowTagSuggestions] = useState(false);
-   const [newKeywordsData, setNewKeywordsData] = useState<KeywordsInput>({ keywords: '', device: 'desktop', country: defCountry, domain, tags: '' });
+   const [newKeywordsData, setNewKeywordsData] = useState<KeywordsInput>(
+      { keywords: '', device: 'desktop', country: defCountry, domain, tags: '', targetPage: '' },
+   );
    const { mutate: addMutate, isLoading: isAdding } = useAddKeywords(() => closeModal(false));
 
    const existingTags: string[] = useMemo(() => {
@@ -72,6 +75,7 @@ const AddKeywords = ({ closeModal, domain, keywords, scraperName = '', allowsCit
                  domain: nkwrds.domain,
                  tags: nkwrds.tags,
                  city: nkwrds.city,
+                 target_page: nkwrds.targetPage,
                })),
              );
             addMutate(newKeywords);
@@ -172,6 +176,15 @@ const AddKeywords = ({ closeModal, domain, keywords, scraperName = '', allowsCit
                      onChange={(e) => setNewKeywordsData({ ...newKeywordsData, city: e.target.value })}
                   />
                   <span className='absolute text-gray-400 top-2 left-2'><Icon type="city" size={16} /></span>
+               </div>
+               <div className='relative mt-2'>
+                  <input
+                     className='w-full border rounded border-gray-200 py-2 px-4 pl-8 outline-none focus:border-indigo-300'
+                     placeholder='Target Page (Optional). The page you want to rank for these keywords.'
+                     value={newKeywordsData.targetPage}
+                     onChange={(e) => setNewKeywordsData({ ...newKeywordsData, targetPage: e.target.value })}
+                  />
+                  <span className='absolute text-gray-400 top-2 left-2'><Icon type="link" size={16} /></span>
                </div>
             </div>
             {error && <div className='w-full mt-4 p-3 text-sm bg-red-50 text-red-700'>{error}</div>}
