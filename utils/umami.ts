@@ -166,7 +166,8 @@ export class UmamiProvider implements AnalyticsProvider {
       const { websiteId, error: idError } = await resolveWebsiteId(base, token, domain);
       if (!websiteId) { return { pages: [], error: idError }; }
 
-      const metricsType = (process.env.UMAMI_METRICS_TYPE || 'url').trim();
+      // Umami v3 groups per-page metrics under type "path" (v2 used "url").
+      const metricsType = (process.env.UMAMI_METRICS_TYPE || 'path').trim();
       const { startAt, endAt } = periodToRange(period);
       const params = new URLSearchParams({
          type: metricsType,
