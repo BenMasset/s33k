@@ -42,9 +42,11 @@ A friend should get from install to seeing real data in about five minutes. This
 - [ ] Stretch: shape the MCP server as the upstream pull request to SerpBear
 - [ ] Follow-up: `get_insight` needs Search Console connected (Phase 1.5), not yet wired
 
-## Phase 3 — Analytics join (Day 6)
-- [ ] Pull page traffic from Lodd's API (already in use, no new analytics tool needed yet)
-- [ ] Join: per page, show traffic + target keywords + live rank in one view and one MCP tool
+## Phase 3 — Analytics join (Day 6) — DONE (API + MCP; UI pending)
+- [x] Pull page traffic from Lodd's API (utils/lodd.ts, env-driven, getmasset.com site)
+- [x] Join per page: traffic + target keywords + live rank, via GET /api/scoreboard and the MCP tool page_scoreboard. Also surfaces content-gap pages (traffic, no keyword) and unmatched keywords.
+- [ ] A visible scoreboard view in the UI (currently API + MCP only)
+- [ ] Minor: aggregate UTM URL variants by clean path (so "/" and "/?utm_medium=redirect" merge); display rank 0 as "not ranked"
 
 ## Phase 4 — AEO / AI-visibility (Day 6-7, native feature)
 - [ ] Run buyer-style prompts against the LLMs via the MCP layer; record brand mention + citation vs competitors
