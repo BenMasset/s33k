@@ -22,9 +22,9 @@ A friend should get from install to seeing real data in about five minutes. This
 - [x] Fork SerpBear to `BenMasset/s33k`, name it, register s33k.io
 - [x] Create local `.env`, boot locally (Node 20 pinned; runs on port 3005)
 - [x] Install deps and boot s33k locally (login works: admin / local placeholder)
-- [ ] Get a **Serper** API key (Ben) and wire it as the SERP source (the 5-min path)
-- [ ] Add the starter keyword set (below), each mapped to its target page
-- [ ] First live Google rankings on the board
+- [x] Wire **Serper** as the SERP source (Ben added his key; verified working)
+- [x] Add the starter keyword set, each mapped to its target page (target page parked in the `tags` field until Phase 1)
+- [x] First live Google rankings on the board (getmasset.com: "masset" #1, "Seismic alternative" #38, the other 5 are opportunity gaps not yet in top 100). Scrape ran in ~11s.
 - [ ] (Optional, level 2) Connect Google Search Console for real impression data
 
 ## Phase 1 — Per-page mapping (Day 4)
