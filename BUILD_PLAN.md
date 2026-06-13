@@ -45,7 +45,7 @@ A friend should get from install to seeing real data in about five minutes. This
 ## Phase 3 — Analytics join (Day 6) — DONE (API + MCP; UI pending)
 - [x] Pull page traffic from Lodd's API (utils/lodd.ts, env-driven, getmasset.com site)
 - [x] Join per page: traffic + target keywords + live rank, via GET /api/scoreboard and the MCP tool page_scoreboard. Also surfaces content-gap pages (traffic, no keyword) and unmatched keywords.
-- [ ] A visible scoreboard view in the UI (currently API + MCP only)
+- [x] A visible Scoreboard view in the UI (new "Scoreboard" tab on the domain page; UTM variants aggregated, rank 0 shown as "Not ranked", content-gap and no-traffic sections)
 - [ ] Minor: aggregate UTM URL variants by clean path (so "/" and "/?utm_medium=redirect" merge); display rank 0 as "not ranked"
 
 ## Phase 4 — AEO / AI-visibility (Day 6-7, native feature)
