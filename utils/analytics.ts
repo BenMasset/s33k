@@ -45,6 +45,38 @@ export type AnalyticsResult = {
    error: string | null,
 }
 
+/**
+ * A referral source normalized across providers, for AI-referral tracking.
+ *
+ * Required everywhere:
+ *   name             The referrer host or label as reported by the provider
+ *                    (e.g. "chatgpt.com", "ChatGPT", "google.com").
+ *   type             The provider's source type if any ("ai", "search",
+ *                    "social", "referral", ...) or "unknown" when not provided.
+ *   engine           The normalized AI engine label (e.g. "ChatGPT") or null.
+ *   isAI             Whether this source is an AI engine.
+ *   unique_visitors  Visitor count for the source.
+ *
+ * Optional, because not every provider reports them:
+ *   page_views, utm_source, utm_medium, utm_campaign.
+ */
+export type ReferralSource = {
+   name: string,
+   type: string,
+   engine: string | null,
+   isAI: boolean,
+   page_views?: number,
+   unique_visitors: number,
+   utm_source?: string,
+   utm_medium?: string,
+   utm_campaign?: string,
+}
+
+export type ReferralResult = {
+   sources: ReferralSource[],
+   error: string | null,
+}
+
 export interface AnalyticsProvider {
    /**
     * Return per-page traffic for a domain.
@@ -53,6 +85,17 @@ export interface AnalyticsProvider {
     * @returns {Promise<AnalyticsResult>} Never rejects; errors come back in `error`.
     */
    getPageTraffic(domain: string, period?: string): Promise<AnalyticsResult>,
+
+   /**
+    * Return referral sources for a domain, classified for AI-referral tracking.
+    * Each source is tagged with isAI / engine via the AI classifier
+    * (utils/ai-sources.ts). Used by the AI Traffic feature to show which AI
+    * engines are sending real visitors.
+    * @param {string} domain - The site domain, e.g. "getmasset.com".
+    * @param {string} [period] - Reporting window hint, e.g. "90d". Provider-specific.
+    * @returns {Promise<ReferralResult>} Never rejects; errors come back in `error`.
+    */
+   getReferralSources(domain: string, period?: string): Promise<ReferralResult>,
 }
 
 export type AnalyticsProviderName = 'umami' | 'lodd';
@@ -66,6 +109,10 @@ export type AnalyticsProviderName = 'umami' | 'lodd';
 const unconfiguredProvider = (name: string): AnalyticsProvider => ({
    getPageTraffic: async (): Promise<AnalyticsResult> => ({
       pages: [],
+      error: `Analytics provider ${name} is not configured`,
+   }),
+   getReferralSources: async (): Promise<ReferralResult> => ({
+      sources: [],
       error: `Analytics provider ${name} is not configured`,
    }),
 });

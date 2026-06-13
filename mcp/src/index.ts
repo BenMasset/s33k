@@ -278,10 +278,39 @@ server.registerTool(
    },
 );
 
+// ---------------------------------------------------------------------------
+// ai_referrals
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'ai_referrals',
+   {
+      title: 'AI referrals',
+      description:
+         'Report which AI engines (ChatGPT, Perplexity, Gemini, Claude, Copilot, etc.) are sending real visitors to a domain, measured from analytics REFERRAL data (not by querying any LLM). Returns a per-engine breakdown (visitors and page views, sorted desc) plus totals: AI visitors, all referred visitors, and the AI share of referred traffic.',
+      inputSchema: {
+         domain: z.string().describe('The domain to report AI referrals for, e.g. "getmasset.com".'),
+         period: z
+            .string()
+            .optional()
+            .describe('Reporting window for analytics, e.g. "90d", "30d". Defaults to "90d".'),
+      },
+   },
+   async ({ domain, period }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         const data = await s33kFetch('/api/ai-referrals', { query });
+         return jsonResult({ byEngine: data.byEngine, totals: data.totals, error: data.error });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
 async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
-   process.stderr.write(`s33k-mcp connected (base URL: ${BASE_URL}). 6 tools registered.\n`);
+   process.stderr.write(`s33k-mcp connected (base URL: ${BASE_URL}). 7 tools registered.\n`);
 }
 
 main().catch((err) => {

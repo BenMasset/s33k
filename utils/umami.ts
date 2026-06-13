@@ -35,8 +35,11 @@
  * { pages: [], error: <message> } so the scoreboard degrades gracefully.
  */
 
-import type { AnalyticsProvider, AnalyticsResult, NormalizedPage } from './analytics';
+import type {
+   AnalyticsProvider, AnalyticsResult, NormalizedPage, ReferralResult, ReferralSource,
+} from './analytics';
 import { cleanPath } from './lodd';
+import { classifyReferrer } from './ai-sources';
 
 /** Strip a trailing slash and a trailing /api so we can build /api/... cleanly. */
 const normalizeBaseUrl = (raw: string): string => {
@@ -197,6 +200,58 @@ export class UmamiProvider implements AnalyticsProvider {
       } catch (error) {
          const message = error instanceof Error ? error.message : String(error);
          return { pages: [], error: `Umami metrics request error: ${message}` };
+      }
+   }
+
+   // eslint-disable-next-line class-methods-use-this
+   async getReferralSources(domain: string, period = '90d'): Promise<ReferralResult> {
+      const rawBase = process.env.UMAMI_BASE_URL;
+      if (!rawBase) {
+         return { sources: [], error: 'Analytics provider umami is not configured' };
+      }
+      const base = normalizeBaseUrl(rawBase);
+
+      const { token, error: tokenError } = await getToken(base);
+      if (!token) { return { sources: [], error: tokenError }; }
+
+      const { websiteId, error: idError } = await resolveWebsiteId(base, token, domain);
+      if (!websiteId) { return { sources: [], error: idError }; }
+
+      // Umami reports referrers via the metrics endpoint with type=referrer.
+      // Each row is { x: <referrer host/url>, y: <count> }. Umami does NOT tag
+      // AI; classification is done entirely by the classifier.
+      const { startAt, endAt } = periodToRange(period);
+      const params = new URLSearchParams({
+         type: 'referrer',
+         startAt: String(startAt),
+         endAt: String(endAt),
+         limit: '500',
+      });
+      const url = `${base}/api/websites/${websiteId}/metrics?${params.toString()}`;
+
+      try {
+         const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+         if (!res.ok) {
+            const text = await res.text().catch(() => '');
+            return { sources: [], error: `Umami referrer metrics request failed (${res.status}): ${text || res.statusText}` };
+         }
+         const json: any = await res.json();
+         const rows: any[] = Array.isArray(json) ? json : (Array.isArray(json?.data) ? json.data : []);
+         const sources: ReferralSource[] = rows.map((row) => {
+            const name = String(row?.x ?? '');
+            const classified = classifyReferrer(name);
+            return {
+               name,
+               type: classified.isAI ? 'ai' : 'referral',
+               engine: classified.engine,
+               isAI: classified.isAI,
+               unique_visitors: Number(row?.y ?? 0),
+            };
+         });
+         return { sources, error: null };
+      } catch (error) {
+         const message = error instanceof Error ? error.message : String(error);
+         return { sources: [], error: `Umami referrer metrics request error: ${message}` };
       }
    }
 }

@@ -14,7 +14,10 @@
  *   LODD_BASE_URL  Base URL of the Lodd API (optional, defaults to https://api.lodd.dev/v1)
  */
 
-import type { AnalyticsProvider, AnalyticsResult, NormalizedPage } from './analytics';
+import type {
+   AnalyticsProvider, AnalyticsResult, NormalizedPage, ReferralResult, ReferralSource,
+} from './analytics';
+import { classifyReferrer } from './ai-sources';
 
 export type LoddPage = {
    url: string,
@@ -108,6 +111,62 @@ const getLoddPages = async (period = '30d', limit = 200): Promise<LoddResult> =>
 };
 
 /**
+ * Fetch referral sources from Lodd for the configured site.
+ * Lodd already tags AI referrers with source_type === "ai" and puts the engine
+ * name in source_name. We honor that, and also run the classifier to normalize
+ * the engine label and to catch any AI source Lodd did not tag.
+ * Never throws: returns an empty list and a clear error string on failure.
+ * @param {string} period - Reporting window, e.g. "90d". Defaults to "90d".
+ * @param {number} limit - Max sources to request. Defaults to 200.
+ * @returns {Promise<ReferralResult>}
+ */
+const getLoddReferrals = async (period = '90d', limit = 200): Promise<ReferralResult> => {
+   const apiKey = process.env.LODD_API_KEY;
+   const site = process.env.LODD_SITE;
+   const baseUrl = (process.env.LODD_BASE_URL || 'https://api.lodd.dev/v1').replace(/\/$/, '');
+
+   if (!apiKey || !site) {
+      const missing = [!apiKey ? 'LODD_API_KEY' : '', !site ? 'LODD_SITE' : ''].filter(Boolean).join(', ');
+      return { sources: [], error: `Lodd analytics not configured. Missing env: ${missing}.` };
+   }
+
+   const url = `${baseUrl}/sites/${site}/sources?period=${encodeURIComponent(period)}&limit=${limit}`;
+
+   try {
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } });
+      if (!res.ok) {
+         const text = await res.text().catch(() => '');
+         return { sources: [], error: `Lodd API request failed (${res.status}): ${text || res.statusText}` };
+      }
+      const json: any = await res.json();
+      const rows: any[] = Array.isArray(json?.data) ? json.data : [];
+      const sources: ReferralSource[] = rows.map((row) => {
+         const name = String(row?.source_name ?? '');
+         const sourceType = String(row?.source_type ?? '').toLowerCase();
+         // Classify against the source name (Lodd labels AI engines there).
+         const classified = classifyReferrer(name);
+         const taggedAI = sourceType === 'ai';
+         const isAI = taggedAI || classified.isAI;
+         return {
+            name,
+            type: sourceType || 'unknown',
+            engine: classified.engine,
+            isAI,
+            page_views: Number(row?.page_views ?? 0),
+            unique_visitors: Number(row?.unique_visitors ?? 0),
+            utm_source: row?.utm_source ? String(row.utm_source) : undefined,
+            utm_medium: row?.utm_medium ? String(row.utm_medium) : undefined,
+            utm_campaign: row?.utm_campaign ? String(row.utm_campaign) : undefined,
+         };
+      });
+      return { sources, error: null };
+   } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { sources: [], error: `Lodd API request error: ${message}` };
+   }
+};
+
+/**
  * Lodd implementation of the AnalyticsProvider interface.
  * Wraps getLoddPages. A LoddPage already satisfies NormalizedPage (its extra
  * fields are the optional ones), so the page list passes straight through.
@@ -118,6 +177,11 @@ export class LoddProvider implements AnalyticsProvider {
    async getPageTraffic(_domain: string, period = '30d'): Promise<AnalyticsResult> {
       const { pages, error } = await getLoddPages(period);
       return { pages: pages as NormalizedPage[], error };
+   }
+
+   // eslint-disable-next-line class-methods-use-this, @typescript-eslint/no-unused-vars
+   async getReferralSources(_domain: string, period = '90d'): Promise<ReferralResult> {
+      return getLoddReferrals(period);
    }
 }
 
