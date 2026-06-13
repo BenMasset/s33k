@@ -11,17 +11,30 @@ The product is the **unified MCP control plane** that joins all three. Forked fr
 
 ---
 
+## Guiding principle: 5 minutes to value
+
+A friend should get from install to seeing real data in about five minutes. This is the bar every onboarding decision is measured against. Implication for data sources:
+- **Serper is the day-one value path.** One API key, paste it, add keywords, see live rankings in ~2 minutes. This is what onboarding leads with.
+- **Google Search Console is the richer opt-in layer, not the first step.** SerpBear's GSC connection is a service-account flow (create a Google Cloud project, service account, download a JSON key, paste client_email + private_key, add as a user in GSC): a 15-30 minute slog that breaks the 5-minute promise. So GSC is "level 2," connected after first value.
+- **Build a one-click "Connect Google Search Console" OAuth** to replace the slog. SerpBear lacks this; it is a real differentiator and a strong upstream PR. Self-hosted wrinkle (OAuth redirect URIs) solved with a device-code flow or a small hosted auth broker. Roadmap item, not day one.
+
 ## Phase 0 — Foundation (Day 3)
 - [x] Fork SerpBear to `BenMasset/s33k`, name it, register s33k.io
-- [x] Create local `.env`, run on port 3001 (marketing site holds 3000)
-- [ ] Install deps and boot s33k locally
-- [ ] Get a free **ScrapingRobot** API key (Ben: free account) and wire it as the SERP scraper
+- [x] Create local `.env`, boot locally (Node 20 pinned; runs on port 3005)
+- [x] Install deps and boot s33k locally (login works: admin / local placeholder)
+- [ ] Get a **Serper** API key (Ben) and wire it as the SERP source (the 5-min path)
 - [ ] Add the starter keyword set (below), each mapped to its target page
 - [ ] First live Google rankings on the board
+- [ ] (Optional, level 2) Connect Google Search Console for real impression data
 
 ## Phase 1 — Per-page mapping (Day 4)
 - [ ] Add a `target page` field to keywords (first real code we write into the fork)
 - [ ] Group the keyword view by target page
+
+## Phase 1.5 — Kill the GSC friction (the 5-min-to-value differentiator)
+- [ ] Replace the GSC service-account paste with a one-click "Connect Google Search Console" OAuth button
+- [ ] Handle the self-hosted redirect-URI problem (device-code flow or a small hosted auth broker)
+- [ ] Shape it as an upstream pull request to SerpBear
 
 ## Phase 2 — The MCP control layer (Day 5, the headline)
 - [ ] Build an MCP server over s33k's REST API: list/add/update keywords, read rankings + history, trigger refresh, read insights
