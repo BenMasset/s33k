@@ -27,19 +27,20 @@ A friend should get from install to seeing real data in about five minutes. This
 - [x] First live Google rankings on the board (getmasset.com: "masset" #1, "Seismic alternative" #38, the other 5 are opportunity gaps not yet in top 100). Scrape ran in ~11s.
 - [ ] (Optional, level 2) Connect Google Search Console for real impression data
 
-## Phase 1 — Per-page mapping (Day 4)
-- [ ] Add a `target page` field to keywords (first real code we write into the fork)
-- [ ] Group the keyword view by target page
+## Phase 1 — Per-page mapping (Day 4) — DONE
+- [x] Add a `target_page` field to keywords (model + migration + API + types + parseKeywords). Existing keywords backfilled from tags.
+- [x] Show target page in the keyword list (Target Page column) and an optional Target Page input in the Add-Keyword form. (Full per-page grouping view can come later; the column is in.)
 
 ## Phase 1.5 — Kill the GSC friction (the 5-min-to-value differentiator)
 - [ ] Replace the GSC service-account paste with a one-click "Connect Google Search Console" OAuth button
 - [ ] Handle the self-hosted redirect-URI problem (device-code flow or a small hosted auth broker)
 - [ ] Shape it as an upstream pull request to SerpBear
 
-## Phase 2 — The MCP control layer (Day 5, the headline)
-- [ ] Build an MCP server over s33k's REST API: list/add/update keywords, read rankings + history, trigger refresh, read insights
-- [ ] Connect it in Claude Code; from here, operate s33k entirely from AI
+## Phase 2 — The MCP control layer (Day 5, the headline) — DONE
+- [x] Built an MCP server (`mcp/`) over s33k's REST API: list_domains, list_keywords (with target_page), add_keyword, refresh_keywords, get_insight. Verified returning live data over the MCP protocol.
+- [x] verifyUser whitelist extended so add_keyword/add_domain work with the Bearer API key (headless). README has the Claude Code connect command. (Ben runs `claude mcp add` to wire it in.)
 - [ ] Stretch: shape the MCP server as the upstream pull request to SerpBear
+- [ ] Follow-up: `get_insight` needs Search Console connected (Phase 1.5), not yet wired
 
 ## Phase 3 — Analytics join (Day 6)
 - [ ] Pull page traffic from Lodd's API (already in use, no new analytics tool needed yet)
