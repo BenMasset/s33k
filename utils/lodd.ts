@@ -4,11 +4,17 @@
  * Reads per-page traffic for a site from the Lodd Analytics API and normalizes
  * it for joining against s33k keywords by page path.
  *
+ * Lodd is a closed third-party SaaS. It is kept as a legacy/dev analytics
+ * provider; the standalone, owned analytics engine is self-hosted Umami
+ * (see utils/umami.ts). Provider selection lives in utils/analytics.ts.
+ *
  * Configuration comes from environment variables:
  *   LODD_API_KEY   Bearer token for the Lodd API (required)
  *   LODD_SITE      The Lodd site UUID to read traffic for (required)
  *   LODD_BASE_URL  Base URL of the Lodd API (optional, defaults to https://api.lodd.dev/v1)
  */
+
+import type { AnalyticsProvider, AnalyticsResult, NormalizedPage } from './analytics';
 
 export type LoddPage = {
    url: string,
@@ -100,5 +106,19 @@ const getLoddPages = async (period = '30d', limit = 200): Promise<LoddResult> =>
       return { pages: [], error: `Lodd API request error: ${message}` };
    }
 };
+
+/**
+ * Lodd implementation of the AnalyticsProvider interface.
+ * Wraps getLoddPages. A LoddPage already satisfies NormalizedPage (its extra
+ * fields are the optional ones), so the page list passes straight through.
+ * The `domain` argument is unused: Lodd is keyed by LODD_SITE, not by domain.
+ */
+export class LoddProvider implements AnalyticsProvider {
+   // eslint-disable-next-line class-methods-use-this, @typescript-eslint/no-unused-vars
+   async getPageTraffic(_domain: string, period = '30d'): Promise<AnalyticsResult> {
+      const { pages, error } = await getLoddPages(period);
+      return { pages: pages as NormalizedPage[], error };
+   }
+}
 
 export default getLoddPages;

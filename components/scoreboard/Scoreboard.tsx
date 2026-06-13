@@ -12,22 +12,22 @@ type ScoreboardKeyword = {
 type ScoreboardPage = {
    url: string,
    pathClean: string,
-   page_title: string,
+   page_title?: string,
    page_views: number,
-   unique_visitors: number,
-   bounce_rate: number,
-   avg_duration: number,
+   unique_visitors?: number,
+   bounce_rate?: number,
+   avg_duration?: number,
    keywords: ScoreboardKeyword[],
 }
 
 type ContentGapPage = {
    url: string,
    pathClean: string,
-   page_title: string,
+   page_title?: string,
    page_views: number,
-   unique_visitors: number,
-   bounce_rate: number,
-   avg_duration: number,
+   unique_visitors?: number,
+   bounce_rate?: number,
+   avg_duration?: number,
 }
 
 type UnmatchedKeyword = ScoreboardKeyword & { target_page: string }
@@ -59,7 +59,10 @@ const aggregateByPath = (pages: ScoreboardPage[]): ScoreboardPage[] => {
          });
       } else {
          existing.page_views += page.page_views;
-         existing.unique_visitors += page.unique_visitors;
+         // unique_visitors is optional (not every analytics provider reports it).
+         if (typeof page.unique_visitors === 'number') {
+            existing.unique_visitors = (existing.unique_visitors || 0) + page.unique_visitors;
+         }
          // Merge keywords, de-duplicating by keyword + device.
          const seen = new Set(existing.keywords.map((k) => `${k.keyword}|${k.device}`));
          page.keywords.forEach((k) => {
@@ -149,11 +152,11 @@ const Scoreboard = ({ data, isLoading = true, domain }: ScoreboardProps) => {
                            </span>
                            <span className='flex-1 text-left lg:text-center'>
                               <span className='lg:hidden text-gray-400 mr-2'>Unique Visitors:</span>
-                              {page.unique_visitors.toLocaleString()}
+                              {typeof page.unique_visitors === 'number' ? page.unique_visitors.toLocaleString() : 'n/a'}
                            </span>
                            <span className='flex-1 text-left lg:text-center'>
                               <span className='lg:hidden text-gray-400 mr-2'>Bounce Rate:</span>
-                              {Math.round(page.bounce_rate)}%
+                              {typeof page.bounce_rate === 'number' ? `${Math.round(page.bounce_rate)}%` : 'n/a'}
                            </span>
                            <span className='flex-[2] flex flex-wrap mt-2 lg:mt-0 lg:justify-center'>
                               {page.keywords.length === 0 && <span className='text-gray-400 text-xs'>None</span>}

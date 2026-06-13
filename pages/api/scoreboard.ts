@@ -3,7 +3,8 @@ import db from '../../database/database';
 import Keyword from '../../database/models/keyword';
 import verifyUser from '../../utils/verifyUser';
 import parseKeywords from '../../utils/parseKeywords';
-import getLoddPages, { cleanPath, LoddPage } from '../../utils/lodd';
+import { cleanPath } from '../../utils/lodd';
+import { getAnalyticsProvider, NormalizedPage } from '../../utils/analytics';
 
 type ScoreboardKeyword = {
    keyword: string,
@@ -15,22 +16,22 @@ type ScoreboardKeyword = {
 type ScoreboardPage = {
    url: string,
    pathClean: string,
-   page_title: string,
+   page_title?: string,
    page_views: number,
-   unique_visitors: number,
-   bounce_rate: number,
-   avg_duration: number,
+   unique_visitors?: number,
+   bounce_rate?: number,
+   avg_duration?: number,
    keywords: ScoreboardKeyword[],
 }
 
 type ContentGapPage = {
    url: string,
    pathClean: string,
-   page_title: string,
+   page_title?: string,
    page_views: number,
-   unique_visitors: number,
-   bounce_rate: number,
-   avg_duration: number,
+   unique_visitors?: number,
+   bounce_rate?: number,
+   avg_duration?: number,
 }
 
 type UnmatchedKeyword = ScoreboardKeyword & { target_page: string }
@@ -41,6 +42,7 @@ type ScoreboardResponse = {
    scoreboard?: ScoreboardPage[],
    pagesWithTrafficNoKeywords?: ContentGapPage[],
    keywordsWithNoMatchingPage?: UnmatchedKeyword[],
+   analyticsError?: string | null,
    loddError?: string | null,
    error?: string | null,
 }
@@ -69,12 +71,12 @@ const getScoreboard = async (req: NextApiRequest, res: NextApiResponse<Scoreboar
       const allKeywords: Keyword[] = await Keyword.findAll({ where: { domain } });
       const keywords: KeywordType[] = parseKeywords(allKeywords.map((e) => e.get({ plain: true })));
 
-      // 2. Fetch Lodd per-page traffic.
-      const { pages: loddPages, error: loddError } = await getLoddPages(period);
+      // 2. Fetch per-page traffic from the configured analytics provider.
+      const { pages: trafficPages, error: analyticsError } = await getAnalyticsProvider().getPageTraffic(domain, period);
 
-      // 3. Build a lookup of Lodd pages by clean path.
-      const pageByPath = new Map<string, LoddPage>();
-      loddPages.forEach((page) => { pageByPath.set(page.pathClean, page); });
+      // 3. Build a lookup of traffic pages by clean path.
+      const pageByPath = new Map<string, NormalizedPage>();
+      trafficPages.forEach((page) => { pageByPath.set(page.pathClean, page); });
 
       // 4. Group keywords by their normalized target_page path.
       const keywordsByPath = new Map<string, ScoreboardKeyword[]>();
@@ -104,7 +106,7 @@ const getScoreboard = async (req: NextApiRequest, res: NextApiResponse<Scoreboar
       const scoreboard: ScoreboardPage[] = [];
       const pagesWithTrafficNoKeywords: ContentGapPage[] = [];
 
-      loddPages.forEach((page) => {
+      trafficPages.forEach((page) => {
          const matched = keywordsByPath.get(page.pathClean) || [];
          if (matched.length > 0) {
             scoreboard.push({
@@ -141,7 +143,9 @@ const getScoreboard = async (req: NextApiRequest, res: NextApiResponse<Scoreboar
          scoreboard,
          pagesWithTrafficNoKeywords,
          keywordsWithNoMatchingPage,
-         loddError,
+         analyticsError,
+         // Back-compat alias: existing UI/MCP consumers may still read loddError.
+         loddError: analyticsError,
       });
    } catch (error) {
       console.log('[ERROR] Building Scoreboard for ', domain, error);

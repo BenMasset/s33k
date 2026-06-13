@@ -57,8 +57,13 @@ A friend should get from install to seeing real data in about five minutes. This
 - [ ] Open the MCP pull request upstream
 - [ ] Decide the model: free lead-gen for Masset, paid, or open-core (log in roadmap)
 
+## Analytics ownership: replace Lodd with self-hosted Umami (the standalone/sellable requirement)
+- [x] Integration code: analytics layer is now provider-pluggable (utils/analytics.ts). Umami provider written (utils/umami.ts); Lodd demoted to legacy/dev. Default provider is umami. Lodd no longer load-bearing.
+- [ ] Host the instance: run Umami + the official Postgres image via docker-compose (Postgres is the chosen DB: free, commercially unrestricted PostgreSQL License, flexible). This same compose doubles as the product installer.
+- [ ] Point s33k at the live Umami (UMAMI_BASE_URL / website id / auth) and add the Umami tracking script to getmasset.com so owned data starts flowing.
+
 ## Post-week (beyond Fork Week)
-- [ ] Replace Lodd with self-hosted Umami for a fully owned analytics layer (the true Lodd replacement)
+- [ ] Migrate s33k's own DB from SQLite to the same Postgres (one owned stack)
 - [ ] s33k.io landing page
 
 ---
