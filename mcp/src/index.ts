@@ -249,10 +249,39 @@ server.registerTool(
    },
 );
 
+// ---------------------------------------------------------------------------
+// page_scoreboard
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'page_scoreboard',
+   {
+      title: 'Page scoreboard',
+      description:
+         'Join per-page traffic (from Lodd analytics) with tracked keywords for a domain. Returns a per-page scoreboard (traffic plus the keywords targeting each page, sorted by page views), pages that have traffic but no tracked keyword (a content-gap signal), and keywords whose target page matched no analytics page.',
+      inputSchema: {
+         domain: z.string().describe('The domain to build the scoreboard for, e.g. "getmasset.com".'),
+         period: z
+            .string()
+            .optional()
+            .describe('Reporting window for analytics, e.g. "30d", "7d". Defaults to "30d".'),
+      },
+   },
+   async ({ domain, period }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         const data = await s33kFetch('/api/scoreboard', { query });
+         return jsonResult(data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
 async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
-   process.stderr.write(`s33k-mcp connected (base URL: ${BASE_URL}). 5 tools registered.\n`);
+   process.stderr.write(`s33k-mcp connected (base URL: ${BASE_URL}). 6 tools registered.\n`);
 }
 
 main().catch((err) => {
