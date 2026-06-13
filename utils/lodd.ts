@@ -16,6 +16,9 @@
 
 import type {
    AnalyticsProvider, AnalyticsResult, NormalizedPage, ReferralResult, ReferralSource,
+   SummaryResult, BreakdownResult, BreakdownRow, BreakdownDimension,
+   TimeSeriesResult, TimeSeriesPoint, EventsResult, EventRow,
+   EngagementResult, EngagementTier,
 } from './analytics';
 import { classifyReferrer } from './ai-sources';
 
@@ -166,6 +169,160 @@ const getLoddReferrals = async (period = '90d', limit = 200): Promise<ReferralRe
    }
 };
 
+/** Resolve Lodd config (api key, site, base url) from the environment. */
+const loddConfig = (): { apiKey?: string, site?: string, baseUrl: string } => ({
+   apiKey: process.env.LODD_API_KEY,
+   site: process.env.LODD_SITE,
+   baseUrl: (process.env.LODD_BASE_URL || 'https://api.lodd.dev/v1').replace(/\/$/, ''),
+});
+
+/**
+ * GET a Lodd endpoint and return its `data` payload (the array or object Lodd
+ * wraps under `data`). Never throws: on a config, network, or HTTP problem it
+ * returns { data: null, error: <message> }.
+ * @param {string} path - The path after /sites/{site}, e.g. "/analytics" or "/countries".
+ * @param {Record<string, string | number>} [query] - Query params (period, limit, ...).
+ * @returns {Promise<{ data: any, error: string | null }>}
+ */
+const loddGet = async (
+   path: string,
+   query: Record<string, string | number> = {},
+): Promise<{ data: any, error: string | null }> => {
+   const { apiKey, site, baseUrl } = loddConfig();
+   if (!apiKey || !site) {
+      const missing = [!apiKey ? 'LODD_API_KEY' : '', !site ? 'LODD_SITE' : ''].filter(Boolean).join(', ');
+      return { data: null, error: `Lodd analytics not configured. Missing env: ${missing}.` };
+   }
+   const params = new URLSearchParams();
+   Object.entries(query).forEach(([k, v]) => params.set(k, String(v)));
+   const qs = params.toString();
+   const url = `${baseUrl}/sites/${site}${path}${qs ? `?${qs}` : ''}`;
+   try {
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } });
+      if (!res.ok) {
+         const text = await res.text().catch(() => '');
+         return { data: null, error: `Lodd API request failed (${res.status}): ${text || res.statusText}` };
+      }
+      const json: any = await res.json();
+      return { data: json?.data ?? null, error: null };
+   } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { data: null, error: `Lodd API request error: ${message}` };
+   }
+};
+
+/**
+ * Fetch site-wide totals from Lodd /analytics and map them to SummaryResult.
+ * @param {string} period - Reporting window, e.g. "30d". Defaults to "30d".
+ * @returns {Promise<SummaryResult>}
+ */
+const getLoddSummary = async (period = '30d'): Promise<SummaryResult> => {
+   const { data, error } = await loddGet('/analytics', { period });
+   if (error || !data) {
+      return {
+         pageviews: 0, visitors: 0, bounceRate: 0, avgDuration: 0, pagesPerVisit: 0,
+         error: error || 'Lodd analytics returned no data.',
+      };
+   }
+   return {
+      pageviews: Number(data.total_page_views ?? 0),
+      visitors: Number(data.unique_visitors ?? 0),
+      bounceRate: Number(data.bounce_rate ?? 0),
+      avgDuration: Number(data.average_duration ?? 0),
+      pagesPerVisit: Number(data.pages_per_visit ?? 0),
+      error: null,
+   };
+};
+
+/**
+ * Map a Lodd breakdown dimension to its endpoint and the field holding the
+ * dimension name. region/city/language/screen have no Lodd endpoint.
+ */
+const LODD_BREAKDOWN: Partial<Record<BreakdownDimension, { path: string, nameField: string }>> = {
+   country: { path: '/countries', nameField: 'country' },
+   device: { path: '/devices', nameField: 'device_type' },
+   browser: { path: '/browsers', nameField: 'browser' },
+   os: { path: '/operating-systems', nameField: 'os' },
+};
+
+/**
+ * Fetch a dimensional breakdown from Lodd. For dimensions Lodd does not support
+ * (region, city, language, screen) returns { rows: [], error: 'Not supported by Lodd' }.
+ * @param {BreakdownDimension} dimension
+ * @param {string} period - Reporting window, e.g. "30d". Defaults to "30d".
+ * @param {number} limit - Max rows. Defaults to 200.
+ * @returns {Promise<BreakdownResult>}
+ */
+const getLoddBreakdown = async (
+   dimension: BreakdownDimension,
+   period = '30d',
+   limit = 200,
+): Promise<BreakdownResult> => {
+   const map = LODD_BREAKDOWN[dimension];
+   if (!map) { return { rows: [], error: 'Not supported by Lodd' }; }
+   const { data, error } = await loddGet(map.path, { period, limit });
+   if (error) { return { rows: [], error }; }
+   const rows: BreakdownRow[] = (Array.isArray(data) ? data : []).map((row: any) => ({
+      name: String(row?.[map.nameField] ?? ''),
+      page_views: Number(row?.page_views ?? 0),
+      unique_visitors: Number(row?.unique_visitors ?? 0),
+   }));
+   return { rows, error: null };
+};
+
+/**
+ * Fetch a daily time series from Lodd /timeseries. Lodd rows are
+ * { date_label, page_views, unique_visitors }.
+ * @param {string} period - Reporting window, e.g. "30d". Defaults to "30d".
+ * @param {string} unit - Bucket unit hint passed to Lodd. Defaults to "day".
+ * @returns {Promise<TimeSeriesResult>}
+ */
+const getLoddTimeSeries = async (period = '30d', unit = 'day'): Promise<TimeSeriesResult> => {
+   const { data, error } = await loddGet('/timeseries', { period, unit });
+   if (error) { return { series: [], error }; }
+   const series: TimeSeriesPoint[] = (Array.isArray(data) ? data : []).map((row: any) => ({
+      date: String(row?.date_label ?? ''),
+      pageviews: Number(row?.page_views ?? 0),
+      visitors: Number(row?.unique_visitors ?? 0),
+   }));
+   return { series, error: null };
+};
+
+/**
+ * Fetch custom events from Lodd /events. Lodd's events array is currently empty
+ * but the shape is honored when present (name + count fields).
+ * @param {string} period - Reporting window, e.g. "30d". Defaults to "30d".
+ * @returns {Promise<EventsResult>}
+ */
+const getLoddEvents = async (period = '30d'): Promise<EventsResult> => {
+   const { data, error } = await loddGet('/events', { period });
+   if (error) { return { events: [], error }; }
+   const events: EventRow[] = (Array.isArray(data) ? data : []).map((row: any) => ({
+      name: String(row?.event_name ?? row?.name ?? row?.event ?? ''),
+      count: Number(row?.count ?? row?.event_count ?? row?.page_views ?? 0),
+   }));
+   return { events, error: null };
+};
+
+/**
+ * Fetch engagement tiers from Lodd /session-scores. Lodd rows are
+ * { score_label, session_count, percentage, avg_duration, avg_pages }.
+ * @param {string} period - Reporting window, e.g. "30d". Defaults to "30d".
+ * @returns {Promise<EngagementResult>}
+ */
+const getLoddEngagement = async (period = '30d'): Promise<EngagementResult> => {
+   const { data, error } = await loddGet('/session-scores', { period });
+   if (error) { return { tiers: [], error }; }
+   const tiers: EngagementTier[] = (Array.isArray(data) ? data : []).map((row: any) => ({
+      label: String(row?.score_label ?? ''),
+      sessions: Number(row?.session_count ?? 0),
+      percentage: Number(row?.percentage ?? 0),
+      avgDuration: row?.avg_duration == null ? undefined : Number(row.avg_duration),
+      avgPages: row?.avg_pages == null ? undefined : Number(row.avg_pages),
+   }));
+   return { tiers, error: null };
+};
+
 /**
  * Lodd implementation of the AnalyticsProvider interface.
  * Wraps getLoddPages. A LoddPage already satisfies NormalizedPage (its extra
@@ -182,6 +339,31 @@ export class LoddProvider implements AnalyticsProvider {
    // eslint-disable-next-line class-methods-use-this, @typescript-eslint/no-unused-vars
    async getReferralSources(_domain: string, period = '90d'): Promise<ReferralResult> {
       return getLoddReferrals(period);
+   }
+
+   // eslint-disable-next-line class-methods-use-this, @typescript-eslint/no-unused-vars
+   async getSummary(_domain: string, period = '30d'): Promise<SummaryResult> {
+      return getLoddSummary(period);
+   }
+
+   // eslint-disable-next-line class-methods-use-this, @typescript-eslint/no-unused-vars
+   async getBreakdown(_domain: string, dimension: BreakdownDimension, period = '30d'): Promise<BreakdownResult> {
+      return getLoddBreakdown(dimension, period);
+   }
+
+   // eslint-disable-next-line class-methods-use-this, @typescript-eslint/no-unused-vars
+   async getTimeSeries(_domain: string, period = '30d', unit = 'day'): Promise<TimeSeriesResult> {
+      return getLoddTimeSeries(period, unit);
+   }
+
+   // eslint-disable-next-line class-methods-use-this, @typescript-eslint/no-unused-vars
+   async getEvents(_domain: string, period = '30d'): Promise<EventsResult> {
+      return getLoddEvents(period);
+   }
+
+   // eslint-disable-next-line class-methods-use-this, @typescript-eslint/no-unused-vars
+   async getEngagement(_domain: string, period = '30d'): Promise<EngagementResult> {
+      return getLoddEngagement(period);
    }
 }
 

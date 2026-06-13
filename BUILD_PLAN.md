@@ -37,8 +37,11 @@ A friend should get from install to seeing real data in about five minutes. This
 - [ ] Shape it as an upstream pull request to SerpBear
 
 ## Phase 2 — The MCP control layer (Day 5, the headline) — DONE
-- [x] Built an MCP server (`mcp/`) over s33k's REST API: list_domains, list_keywords (with target_page), add_keyword, refresh_keywords, get_insight. Verified returning live data over the MCP protocol.
-- [x] verifyUser whitelist extended so add_keyword/add_domain work with the Bearer API key (headless). README has the Claude Code connect command. (Ben runs `claude mcp add` to wire it in.)
+- [x] Built an MCP server (`mcp/`) over s33k's REST API. Verified returning live data over the MCP protocol.
+- [x] **MCP completeness: the whole product is now controllable from MCP with no UI (V1 surface).** 15 tools registered and verified over stdio (`tools/list` + live `tools/call`):
+  - SEO/control: list_domains, create_domain, list_keywords, add_keyword, update_keyword, delete_keyword, refresh_keywords, get_insight.
+  - Analytics (full Lodd parity + extras): page_scoreboard, ai_referrals, traffic_summary, traffic_breakdown, traffic_timeseries, top_events, engagement.
+- [x] verifyUser whitelist extended so every headless tool works with the Bearer API key (added PUT/DELETE keywords + the 5 new analytics GET routes). README has the Claude Code connect command. (Ben runs `claude mcp add` to wire it in.)
 - [ ] Stretch: shape the MCP server as the upstream pull request to SerpBear
 - [ ] Follow-up: `get_insight` needs Search Console connected (Phase 1.5), not yet wired
 
@@ -48,9 +51,17 @@ A friend should get from install to seeing real data in about five minutes. This
 - [x] A visible Scoreboard view in the UI (new "Scoreboard" tab on the domain page; UTM variants aggregated, rank 0 shown as "Not ranked", content-gap and no-traffic sections)
 - [ ] Minor: aggregate UTM URL variants by clean path (so "/" and "/?utm_medium=redirect" merge); display rank 0 as "not ranked"
 
-## Phase 4 — AEO / AI-visibility (Day 6-7, native feature)
-- [ ] Run buyer-style prompts against the LLMs via the MCP layer; record brand mention + citation vs competitors
-- [ ] Surface AI-citation rate per page, beside rank and traffic
+### Analytics parity with Lodd: DONE (zero gaps; provider + API + MCP)
+- [x] s33k now collects and exposes AT LEAST every Lodd datapoint, and beats it. Full mapping, live sample values, and the conclusion are in `PARITY.md`.
+- [x] Provider interface (`utils/analytics.ts`) extended with `getSummary`, `getBreakdown`, `getTimeSeries`, `getEvents`, `getEngagement`; implemented in both `utils/lodd.ts` and `utils/umami.ts`; graceful "not configured" provider covers all of them.
+- [x] Lodd parity (verified live, real getmasset.com): totals, per-page, referrers+utm, ai-sources, countries, devices, browsers, operating-systems, session-scores/engagement, events. **Zero GAPs.**
+- [x] Extras beyond Lodd (Umami-only): region, city, language, screen, daily time series. On the Lodd provider these correctly report "Not supported by Lodd"; on Umami they return real rows.
+- [x] New REST routes (Bearer-key reachable): /api/summary, /api/breakdown, /api/timeseries, /api/events, /api/engagement. New MCP tools: traffic_summary, traffic_breakdown, traffic_timeseries, top_events, engagement.
+
+## Phase 4: AEO = AI referral tracking from analytics (no LLM queries) — DONE
+- [x] AEO is measured from real analytics REFERRAL data, not by querying any LLM. `getReferralSources` + `classifyReferrer` (utils/ai-sources.ts) detect which AI engines (ChatGPT, Claude, Perplexity, Gemini, Copilot, etc.) actually send visitors.
+- [x] Surfaced via GET /api/ai-referrals and the MCP tool `ai_referrals`: per-engine visitors/pageviews plus totals (AI visitors, all referred visitors, AI share of referred traffic). Live: ChatGPT 2, Claude 1, 6% AI share.
+- [ ] Later: per-page AI-citation rate beside rank and traffic (would join referral landing pages into the scoreboard).
 
 ## Phase 5 — Ship V1 (Day 7)
 - [ ] Package so a friend can install: docker-compose, README, `.env` template

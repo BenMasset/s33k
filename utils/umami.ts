@@ -37,6 +37,9 @@
 
 import type {
    AnalyticsProvider, AnalyticsResult, NormalizedPage, ReferralResult, ReferralSource,
+   SummaryResult, BreakdownResult, BreakdownRow, BreakdownDimension,
+   TimeSeriesResult, TimeSeriesPoint, EventsResult, EventRow,
+   EngagementResult, EngagementTier,
 } from './analytics';
 import { cleanPath } from './lodd';
 import { classifyReferrer } from './ai-sources';
@@ -132,6 +135,42 @@ const resolveWebsiteId = async (
  * @param {string} period
  * @returns {{ startAt: number, endAt: number }}
  */
+/**
+ * Coerce an Umami stats field to a number. Umami serves stats fields either as
+ * plain numbers (v3 self-hosted, as on our instance) or as { value, prev }
+ * objects (some Cloud/version variants). This reads either shape.
+ * @param {any} field
+ * @returns {number}
+ */
+const statNum = (field: any): number => {
+   if (field == null) { return 0; }
+   if (typeof field === 'object') { return Number(field.value ?? 0); }
+   return Number(field);
+};
+
+/**
+ * Resolve the base URL, bearer token, and website id needed for any Umami call.
+ * Returns an error string when configuration, auth, or website lookup fails so
+ * callers can return their own empty-result shape without throwing.
+ * @param {string} domain - Site domain, e.g. "getmasset.com".
+ * @returns {Promise<{ base: string, token: string, websiteId: string } | { error: string }>}
+ */
+const resolveUmami = async (
+   domain: string,
+): Promise<{ base: string, token: string, websiteId: string } | { error: string }> => {
+   const rawBase = process.env.UMAMI_BASE_URL;
+   if (!rawBase) { return { error: 'Analytics provider umami is not configured' }; }
+   const base = normalizeBaseUrl(rawBase);
+
+   const { token, error: tokenError } = await getToken(base);
+   if (!token) { return { error: tokenError || 'Umami auth failed.' }; }
+
+   const { websiteId, error: idError } = await resolveWebsiteId(base, token, domain);
+   if (!websiteId) { return { error: idError || 'Umami website id not resolved.' }; }
+
+   return { base, token, websiteId };
+};
+
 const periodToRange = (period: string): { startAt: number, endAt: number } => {
    const endAt = Date.now();
    const match = /^(\d+)\s*([dhwm])$/i.exec(String(period || '').trim());
@@ -253,6 +292,197 @@ export class UmamiProvider implements AnalyticsProvider {
          const message = error instanceof Error ? error.message : String(error);
          return { sources: [], error: `Umami referrer metrics request error: ${message}` };
       }
+   }
+
+   // eslint-disable-next-line class-methods-use-this
+   async getSummary(domain: string, period = '30d'): Promise<SummaryResult> {
+      const empty: SummaryResult = {
+         pageviews: 0, visitors: 0, bounceRate: 0, avgDuration: 0, pagesPerVisit: 0, error: null,
+      };
+      const r = await resolveUmami(domain);
+      if ('error' in r) { return { ...empty, error: r.error }; }
+
+      const { startAt, endAt } = periodToRange(period);
+      const params = new URLSearchParams({ startAt: String(startAt), endAt: String(endAt) });
+      const url = `${r.base}/api/websites/${r.websiteId}/stats?${params.toString()}`;
+      try {
+         const res = await fetch(url, { headers: { Authorization: `Bearer ${r.token}` } });
+         if (!res.ok) {
+            const text = await res.text().catch(() => '');
+            return { ...empty, error: `Umami stats request failed (${res.status}): ${text || res.statusText}` };
+         }
+         const json: any = await res.json();
+         const pageviews = statNum(json?.pageviews);
+         const visitors = statNum(json?.visitors);
+         const visits = statNum(json?.visits);
+         const bounces = statNum(json?.bounces);
+         const totaltime = statNum(json?.totaltime);
+         // Derive Lodd-parity totals. visits is the denominator for engagement
+         // metrics; guard against divide-by-zero. avgDuration and totaltime are
+         // in seconds on Umami v3. bounceRate is expressed as a 0..100 percentage.
+         const bounceRate = visits > 0 ? (bounces / visits) * 100 : 0;
+         const avgDuration = visits > 0 ? totaltime / visits : 0;
+         const pagesPerVisit = visits > 0 ? pageviews / visits : 0;
+         return { pageviews, visitors, visits, bounceRate, avgDuration, pagesPerVisit, error: null };
+      } catch (error) {
+         const message = error instanceof Error ? error.message : String(error);
+         return { ...empty, error: `Umami stats request error: ${message}` };
+      }
+   }
+
+   // eslint-disable-next-line class-methods-use-this
+   async getBreakdown(domain: string, dimension: BreakdownDimension, period = '30d'): Promise<BreakdownResult> {
+      const r = await resolveUmami(domain);
+      if ('error' in r) { return { rows: [], error: r.error }; }
+
+      // Umami metrics type is the dimension name directly (country, region, city,
+      // device, browser, os, language, screen). Each row is { x: <name>, y: <count> }.
+      // Umami url-style metrics report a single count per row; we surface it as
+      // unique_visitors (the count Umami groups by for these dimensions).
+      const { startAt, endAt } = periodToRange(period);
+      const params = new URLSearchParams({
+         type: dimension,
+         startAt: String(startAt),
+         endAt: String(endAt),
+         limit: '500',
+      });
+      const url = `${r.base}/api/websites/${r.websiteId}/metrics?${params.toString()}`;
+      try {
+         const res = await fetch(url, { headers: { Authorization: `Bearer ${r.token}` } });
+         if (!res.ok) {
+            const text = await res.text().catch(() => '');
+            return { rows: [], error: `Umami ${dimension} metrics request failed (${res.status}): ${text || res.statusText}` };
+         }
+         const json: any = await res.json();
+         const data: any[] = Array.isArray(json) ? json : (Array.isArray(json?.data) ? json.data : []);
+         const rows: BreakdownRow[] = data.map((row) => ({
+            name: String(row?.x ?? ''),
+            unique_visitors: Number(row?.y ?? 0),
+         }));
+         return { rows, error: null };
+      } catch (error) {
+         const message = error instanceof Error ? error.message : String(error);
+         return { rows: [], error: `Umami ${dimension} metrics request error: ${message}` };
+      }
+   }
+
+   // eslint-disable-next-line class-methods-use-this, @typescript-eslint/no-unused-vars
+   async getTimeSeries(domain: string, period = '30d', unit = 'day'): Promise<TimeSeriesResult> {
+      const r = await resolveUmami(domain);
+      if ('error' in r) { return { series: [], error: r.error }; }
+
+      // Umami /pageviews returns { pageviews: [{x,y}], sessions: [{x,y}] } where
+      // x is a datetime bucket and y the count. We treat sessions as the visitors
+      // series and align the two arrays by their bucket label (x).
+      const { startAt, endAt } = periodToRange(period);
+      const params = new URLSearchParams({
+         startAt: String(startAt),
+         endAt: String(endAt),
+         unit,
+         timezone: 'UTC',
+      });
+      const url = `${r.base}/api/websites/${r.websiteId}/pageviews?${params.toString()}`;
+      try {
+         const res = await fetch(url, { headers: { Authorization: `Bearer ${r.token}` } });
+         if (!res.ok) {
+            const text = await res.text().catch(() => '');
+            return { series: [], error: `Umami pageviews request failed (${res.status}): ${text || res.statusText}` };
+         }
+         const json: any = await res.json();
+         const pv: any[] = Array.isArray(json?.pageviews) ? json.pageviews : [];
+         const ss: any[] = Array.isArray(json?.sessions) ? json.sessions : [];
+         const visitorsByDate = new Map<string, number>();
+         ss.forEach((row) => { visitorsByDate.set(String(row?.x ?? ''), Number(row?.y ?? 0)); });
+         const series: TimeSeriesPoint[] = pv.map((row) => {
+            const date = String(row?.x ?? '');
+            return {
+               date,
+               pageviews: Number(row?.y ?? 0),
+               visitors: visitorsByDate.get(date) ?? 0,
+            };
+         });
+         return { series, error: null };
+      } catch (error) {
+         const message = error instanceof Error ? error.message : String(error);
+         return { series: [], error: `Umami pageviews request error: ${message}` };
+      }
+   }
+
+   // eslint-disable-next-line class-methods-use-this
+   async getEvents(domain: string, period = '30d'): Promise<EventsResult> {
+      const r = await resolveUmami(domain);
+      if ('error' in r) { return { events: [], error: r.error }; }
+
+      // Umami reports custom events via metrics type=event: { x: <event name>, y: <count> }.
+      const { startAt, endAt } = periodToRange(period);
+      const params = new URLSearchParams({
+         type: 'event',
+         startAt: String(startAt),
+         endAt: String(endAt),
+         limit: '500',
+      });
+      const url = `${r.base}/api/websites/${r.websiteId}/metrics?${params.toString()}`;
+      try {
+         const res = await fetch(url, { headers: { Authorization: `Bearer ${r.token}` } });
+         if (!res.ok) {
+            const text = await res.text().catch(() => '');
+            return { events: [], error: `Umami event metrics request failed (${res.status}): ${text || res.statusText}` };
+         }
+         const json: any = await res.json();
+         const data: any[] = Array.isArray(json) ? json : (Array.isArray(json?.data) ? json.data : []);
+         const events: EventRow[] = data.map((row) => ({
+            name: String(row?.x ?? ''),
+            count: Number(row?.y ?? 0),
+         }));
+         return { events, error: null };
+      } catch (error) {
+         const message = error instanceof Error ? error.message : String(error);
+         return { events: [], error: `Umami event metrics request error: ${message}` };
+      }
+   }
+
+   async getEngagement(domain: string, period = '30d'): Promise<EngagementResult> {
+      // Umami has no native session-score buckets, so we DERIVE engagement tiers
+      // from the same totals getSummary surfaces (Umami /stats). The derivation
+      // splits all sessions into two evidence-based tiers that mirror Lodd's
+      // session-scores shape:
+      //   bounced  = single-page, near-zero-engagement sessions (Umami `bounces`).
+      //   browsed  = the remaining (non-bounced) sessions, i.e. visits - bounces,
+      //              with avgPages = pagesPerVisit and avgDuration = avgDuration
+      //              from the window totals.
+      // This is intentionally coarse: Umami's aggregate /stats does not expose a
+      // per-session score distribution, so finer tiers (e.g. "engaged" vs
+      // "converted") would require per-session aggregation over /sessions, which
+      // is out of scope here. The two-tier split is the honest, derivable bucket.
+      const summary = await this.getSummary(domain, period);
+      if (summary.error) { return { tiers: [], error: summary.error }; }
+
+      const visits = summary.visits ?? 0;
+      if (visits <= 0) { return { tiers: [], error: null }; }
+
+      // visits - browsed; bounces are not exposed on SummaryResult directly, so
+      // recompute the bounced count from the rate we derived in getSummary.
+      const bounced = Math.round((summary.bounceRate / 100) * visits);
+      const browsed = Math.max(0, visits - bounced);
+      const pct = (n: number): number => (visits > 0 ? (n / visits) * 100 : 0);
+
+      const tiers: EngagementTier[] = [
+         {
+            label: 'bounced',
+            sessions: bounced,
+            percentage: pct(bounced),
+            avgDuration: 0,
+            avgPages: 1,
+         },
+         {
+            label: 'browsed',
+            sessions: browsed,
+            percentage: pct(browsed),
+            avgDuration: summary.avgDuration,
+            avgPages: summary.pagesPerVisit,
+         },
+      ];
+      return { tiers, error: null };
    }
 }
 

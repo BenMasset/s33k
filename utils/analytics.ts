@@ -77,6 +77,98 @@ export type ReferralResult = {
    error: string | null,
 }
 
+/**
+ * Site-wide totals for a reporting window, normalized across providers.
+ *
+ *   pageviews     Total pageviews in the window.
+ *   visitors      Unique visitors in the window.
+ *   visits        Total visits/sessions (optional; not every provider exposes it).
+ *   bounceRate    Bounce rate as a percentage (0..100).
+ *   avgDuration   Average visit duration in seconds.
+ *   pagesPerVisit Average pages viewed per visit.
+ */
+export type SummaryResult = {
+   pageviews: number,
+   visitors: number,
+   visits?: number,
+   bounceRate: number,
+   avgDuration: number,
+   pagesPerVisit: number,
+   error: string | null,
+}
+
+/** A single row of a dimensional breakdown (country, device, browser, ...). */
+export type BreakdownRow = {
+   name: string,
+   page_views?: number,
+   unique_visitors: number,
+}
+
+export type BreakdownResult = {
+   rows: BreakdownRow[],
+   error: string | null,
+}
+
+/**
+ * The dimensions supported by getBreakdown. country/device/browser/os are
+ * available from both providers; region/city/language/screen are Umami extras
+ * (Lodd has no endpoint and returns a "Not supported by Lodd" error).
+ */
+export type BreakdownDimension =
+   | 'country'
+   | 'region'
+   | 'city'
+   | 'device'
+   | 'browser'
+   | 'os'
+   | 'language'
+   | 'screen';
+
+/** One point in a time series: a date label plus that day's pageviews/visitors. */
+export type TimeSeriesPoint = {
+   date: string,
+   pageviews: number,
+   visitors: number,
+}
+
+export type TimeSeriesResult = {
+   series: TimeSeriesPoint[],
+   error: string | null,
+}
+
+/** A custom/tracked event and how many times it fired in the window. */
+export type EventRow = {
+   name: string,
+   count: number,
+}
+
+export type EventsResult = {
+   events: EventRow[],
+   error: string | null,
+}
+
+/**
+ * One engagement tier (session-quality bucket) for the window.
+ *
+ *   label        The tier label (e.g. "bounced", "browsed", "engaged").
+ *   sessions     Number of sessions in this tier.
+ *   percentage   Share of total sessions in this tier (0..100).
+ *   avgDuration  Average session duration in seconds (optional).
+ *   avgPages     Average pages per session (optional).
+ */
+export type EngagementTier = {
+   label: string,
+   sessions: number,
+   percentage: number,
+   avgDuration?: number,
+   avgPages?: number,
+}
+
+export type EngagementResult = {
+   tiers: EngagementTier[],
+   error: string | null,
+}
+
 export interface AnalyticsProvider {
    /**
     * Return per-page traffic for a domain.
@@ -96,6 +188,53 @@ export interface AnalyticsProvider {
     * @returns {Promise<ReferralResult>} Never rejects; errors come back in `error`.
     */
    getReferralSources(domain: string, period?: string): Promise<ReferralResult>,
+
+   /**
+    * Return site-wide totals for the window: pageviews, visitors, visits,
+    * bounce rate, average duration, and pages per visit.
+    * @param {string} domain - The site domain, e.g. "getmasset.com".
+    * @param {string} [period] - Reporting window hint, e.g. "30d". Provider-specific.
+    * @returns {Promise<SummaryResult>} Never rejects; errors come back in `error`.
+    */
+   getSummary(domain: string, period?: string): Promise<SummaryResult>,
+
+   /**
+    * Return a dimensional breakdown (country, region, city, device, browser, os,
+    * language, screen). region/city/language/screen are Umami extras; Lodd has no
+    * endpoint for them and returns { rows: [], error: 'Not supported by Lodd' }.
+    * @param {string} domain - The site domain, e.g. "getmasset.com".
+    * @param {BreakdownDimension} dimension - Which dimension to break down by.
+    * @param {string} [period] - Reporting window hint, e.g. "30d". Provider-specific.
+    * @returns {Promise<BreakdownResult>} Never rejects; errors come back in `error`.
+    */
+   getBreakdown(domain: string, dimension: BreakdownDimension, period?: string): Promise<BreakdownResult>,
+
+   /**
+    * Return a daily (or unit-grouped) time series of pageviews and visitors.
+    * @param {string} domain - The site domain, e.g. "getmasset.com".
+    * @param {string} [period] - Reporting window hint, e.g. "30d". Provider-specific.
+    * @param {string} [unit] - Bucket unit, e.g. "day". Defaults to "day".
+    * @returns {Promise<TimeSeriesResult>} Never rejects; errors come back in `error`.
+    */
+   getTimeSeries(domain: string, period?: string, unit?: string): Promise<TimeSeriesResult>,
+
+   /**
+    * Return custom/tracked events with their fire counts for the window.
+    * @param {string} domain - The site domain, e.g. "getmasset.com".
+    * @param {string} [period] - Reporting window hint, e.g. "30d". Provider-specific.
+    * @returns {Promise<EventsResult>} Never rejects; errors come back in `error`.
+    */
+   getEvents(domain: string, period?: string): Promise<EventsResult>,
+
+   /**
+    * Return engagement tiers (session-quality buckets) for the window.
+    * Lodd serves these directly from /session-scores. Umami has no native
+    * buckets, so the provider derives tiers from /stats and /sessions.
+    * @param {string} domain - The site domain, e.g. "getmasset.com".
+    * @param {string} [period] - Reporting window hint, e.g. "30d". Provider-specific.
+    * @returns {Promise<EngagementResult>} Never rejects; errors come back in `error`.
+    */
+   getEngagement(domain: string, period?: string): Promise<EngagementResult>,
 }
 
 export type AnalyticsProviderName = 'umami' | 'lodd';
@@ -106,16 +245,20 @@ export type AnalyticsProviderName = 'umami' | 'lodd';
  * @param {string} name - The provider name to mention in the error.
  * @returns {AnalyticsProvider}
  */
-const unconfiguredProvider = (name: string): AnalyticsProvider => ({
-   getPageTraffic: async (): Promise<AnalyticsResult> => ({
-      pages: [],
-      error: `Analytics provider ${name} is not configured`,
-   }),
-   getReferralSources: async (): Promise<ReferralResult> => ({
-      sources: [],
-      error: `Analytics provider ${name} is not configured`,
-   }),
-});
+const unconfiguredProvider = (name: string): AnalyticsProvider => {
+   const notConfigured = `Analytics provider ${name} is not configured`;
+   return {
+      getPageTraffic: async (): Promise<AnalyticsResult> => ({ pages: [], error: notConfigured }),
+      getReferralSources: async (): Promise<ReferralResult> => ({ sources: [], error: notConfigured }),
+      getSummary: async (): Promise<SummaryResult> => ({
+         pageviews: 0, visitors: 0, bounceRate: 0, avgDuration: 0, pagesPerVisit: 0, error: notConfigured,
+      }),
+      getBreakdown: async (): Promise<BreakdownResult> => ({ rows: [], error: notConfigured }),
+      getTimeSeries: async (): Promise<TimeSeriesResult> => ({ series: [], error: notConfigured }),
+      getEvents: async (): Promise<EventsResult> => ({ events: [], error: notConfigured }),
+      getEngagement: async (): Promise<EngagementResult> => ({ tiers: [], error: notConfigured }),
+   };
+};
 
 /**
  * Select the active analytics provider from the environment.
