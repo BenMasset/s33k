@@ -1,0 +1,132 @@
+# s33k full owned stack.
+#
+# Brings up the entire stack you own end to end:
+#   - s33k       the SEO + AEO + analytics control plane (built from this repo's Dockerfile)
+#   - umami      self-hosted analytics engine (open source), the owned source of traffic data
+#   - umami-db   official PostgreSQL for Umami
+#
+# s33k keeps its OWN sqlite database on a named volume (s33k_data). Only Umami
+# uses Postgres in V1. (Migrating s33k's sqlite to the same Postgres is a
+# post-week item; for now the two databases stay separate.)
+#
+# Host port map (change the left-hand side if these clash on your machine):
+#   s33k  -> http://localhost:8080
+#   umami -> http://localhost:8081
+# Inside the compose network the services talk over their internal ports:
+#   s33k reaches umami at http://umami:3000 (NOT the host 8081 port).
+#
+# Secrets below are PLACEHOLDERS or clearly-marked throwaways. Before any real
+# use you MUST regenerate APIKEY and SECRET (and set strong passwords). See
+# deploy/.env.template for how to generate them and what every variable means.
+#
+# Quick start:
+#   1. cp deploy/.env.template deploy/.env   (then edit deploy/.env)
+#   2. docker compose -f deploy/docker-compose.yml up -d --build
+#   3. open http://localhost:8080  (log in, then paste your Serper key in Settings)
+
+services:
+  # ---------------------------------------------------------------------------
+  # s33k: the SEO + AEO + analytics control plane (built from this repo).
+  # ---------------------------------------------------------------------------
+  s33k:
+    build:
+      # Build context is the repo root (one level up from this deploy/ folder),
+      # which is where the Dockerfile lives.
+      context: ..
+      dockerfile: Dockerfile
+    image: s33k:latest
+    restart: unless-stopped
+    depends_on:
+      umami:
+        condition: service_healthy
+    ports:
+      # host 8080 -> container 3000
+      - "8080:3000"
+    environment:
+      # --- Auth (REGENERATE SECRET + APIKEY for real use; see .env.template) ---
+      - USER_NAME=${USER_NAME:-admin}
+      - USER=${USER_NAME:-admin}
+      - PASSWORD=${PASSWORD}
+      - SECRET=${SECRET}
+      - APIKEY=${APIKEY}
+      - SESSION_DURATION=${SESSION_DURATION:-24}
+      - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:8080}
+
+      # --- Analytics: s33k reads its OWN Umami instance over the internal net ---
+      - ANALYTICS_PROVIDER=${ANALYTICS_PROVIDER:-umami}
+      # Internal service URL. Do NOT use the host 8081 port here; this is the
+      # in-network address of the umami service below.
+      - UMAMI_BASE_URL=${UMAMI_BASE_URL:-http://umami:3000}
+      - UMAMI_USERNAME=${UMAMI_USERNAME:-admin}
+      - UMAMI_PASSWORD=${UMAMI_PASSWORD:-umami}
+      # Set this after you create a website in Umami (Umami -> Settings ->
+      # Websites -> the site's id). If left blank, s33k tries to match by domain.
+      - UMAMI_WEBSITE_ID=${UMAMI_WEBSITE_ID:-}
+      - UMAMI_METRICS_TYPE=${UMAMI_METRICS_TYPE:-url}
+
+      # --- Optional Google Search Console (level 2; safe to leave blank) -------
+      - SEARCH_CONSOLE_CLIENT_EMAIL=${SEARCH_CONSOLE_CLIENT_EMAIL:-}
+      - SEARCH_CONSOLE_PRIVATE_KEY=${SEARCH_CONSOLE_PRIVATE_KEY:-}
+
+      # --- Legacy Lodd provider (only read when ANALYTICS_PROVIDER=lodd) -------
+      - LODD_API_KEY=${LODD_API_KEY:-}
+      - LODD_SITE=${LODD_SITE:-}
+      - LODD_BASE_URL=${LODD_BASE_URL:-https://api.lodd.dev/v1}
+    volumes:
+      # s33k's own sqlite database lives here, persisted across restarts.
+      - s33k_data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # umami: the owned, self-hosted analytics engine.
+  # ---------------------------------------------------------------------------
+  umami:
+    image: ghcr.io/umami-software/umami:postgresql-latest
+    restart: unless-stopped
+    depends_on:
+      umami-db:
+        condition: service_healthy
+    ports:
+      # host 8081 -> container 3000 (Umami's UI; s33k does not use this port,
+      # it reaches Umami over the internal network at http://umami:3000)
+      - "8081:3000"
+    environment:
+      - DATABASE_URL=postgresql://${UMAMI_DB_USER:-umami}:${UMAMI_DB_PASSWORD:-umami}@umami-db:5432/${UMAMI_DB_NAME:-umami}
+      - DATABASE_TYPE=postgresql
+      # Salt used to hash Umami sessions. THROWAWAY default; replace for real use.
+      - APP_SECRET=${UMAMI_APP_SECRET:-s33k-umami-throwaway-secret-change-me}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/heartbeat || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # umami-db: official PostgreSQL 16 for Umami.
+  # ---------------------------------------------------------------------------
+  umami-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${UMAMI_DB_USER:-umami}
+      # THROWAWAY default password; set a strong one in deploy/.env for real use.
+      - POSTGRES_PASSWORD=${UMAMI_DB_PASSWORD:-umami}
+      - POSTGRES_DB=${UMAMI_DB_NAME:-umami}
+    volumes:
+      - umami_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${UMAMI_DB_USER:-umami} -d ${UMAMI_DB_NAME:-umami}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  s33k_data:
+  umami_db_data:
