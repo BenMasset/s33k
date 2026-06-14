@@ -27,6 +27,7 @@ const verifyUser = (req: NextApiRequest, res: NextApiResponse): string => {
       'POST:/api/searchconsole',
       'GET:/api/searchconsole',
       'GET:/api/insight',
+      'GET:/api/insights',
       'GET:/api/scoreboard',
       'GET:/api/ai-referrals',
       'GET:/api/summary',

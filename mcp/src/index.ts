@@ -519,6 +519,42 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// insights
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'insights',
+   {
+      title: 'Cross-pillar insights',
+      description:
+         'The "analyst, not dashboard" tool. Joins all three s33k pillars for a domain (SEO rank + analytics traffic + AI referrals + engagement) and returns RULES-BASED structured findings and recommendations for YOU (the LLM) to interpret and narrate. The s33k server does NOT call any LLM; it does the joins and surfaces signals dashboards bury. Findings include: high-traffic pages with poor or no keyword rank (SEO opportunity), keywords ranking well but on low-traffic pages (demand/click-through mismatch), pages/engines receiving AI answer-engine referral traffic (AEO proof), traffic concentrated on a single page (resilience risk), and an estimated-bot-traffic caveat (how much of the measured traffic is likely automated, so the other numbers can be read correctly). Each finding has { type, severity, message, evidence }; recommendations is a prioritized list of concrete next actions.',
+      inputSchema: {
+         domain: z.string().describe('The domain to analyze, e.g. "getmasset.com".'),
+         period: z
+            .string()
+            .optional()
+            .describe('Reporting window, e.g. "30d", "90d", "7d". Defaults to "30d".'),
+      },
+   },
+   async ({ domain, period }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         const data = await s33kFetch('/api/insights', { query });
+         return jsonResult({
+            domain: data.domain,
+            period: data.period,
+            findings: data.findings,
+            recommendations: data.recommendations,
+            notes: data.notes,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // create_domain
 // ---------------------------------------------------------------------------
 server.registerTool(
@@ -623,7 +659,7 @@ server.registerTool(
 async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
-   process.stderr.write(`s33k-mcp connected (base URL: ${BASE_URL}). 17 tools registered.\n`);
+   process.stderr.write(`s33k-mcp connected (base URL: ${BASE_URL}). 18 tools registered.\n`);
 }
 
 main().catch((err) => {
