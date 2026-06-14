@@ -94,7 +94,8 @@ server.registerTool(
    'list_domains',
    {
       title: 'List domains',
-      description: 'List all domains tracked in s33k. Returns each domain with its name and settings.',
+      description:
+         'List every domain tracked in s33k, each with its name and settings. Use this first to discover which domains exist before calling any domain-scoped tool.',
       inputSchema: {},
    },
    async () => {
@@ -115,7 +116,7 @@ server.registerTool(
    {
       title: 'List keywords',
       description:
-         'List the tracked keywords for a domain, with current Google rank, ranking URL, target page, and recent rank history (last 7 days).',
+         'List a domain\'s tracked keywords with each keyword\'s current Google rank, ranking URL, target page, and last-7-days rank history. Use this to read SEO standings, get keyword IDs for update_keyword or delete_keyword, or check whether a keyword has scraped yet.',
       inputSchema: {
          domain: z.string().describe('The domain to list keywords for, e.g. "getmasset.com".'),
       },
@@ -148,7 +149,7 @@ server.registerTool(
    {
       title: 'Add keyword',
       description:
-         'Add a new keyword to track for a domain. Queues a SERP scrape in the background, so the rank appears shortly after adding.',
+         'Add one keyword to track for a domain and queue a background Google SERP scrape, so its rank appears shortly after. Use this to start tracking a search term, ideally passing target_page so the keyword joins to a page in page_scoreboard. To add many keywords at once, call this tool once per keyword.',
       inputSchema: {
          keyword: z.string().describe('The search keyword/phrase to track.'),
          domain: z.string().describe('The domain to track this keyword for, e.g. "getmasset.com".'),
@@ -195,7 +196,7 @@ server.registerTool(
    {
       title: 'Refresh keywords',
       description:
-         'Trigger a fresh SERP scrape for keywords. Provide either a list of keyword IDs, or a domain to refresh all of its keywords. A small batch scrapes synchronously; larger batches run in the background.',
+         'Re-scrape live Google rankings for keywords that may be stale. Pass either a list of keyword IDs or a single domain to refresh all of its keywords, but not both. A small batch scrapes synchronously and returns updated ranks; a larger batch runs in the background, so re-read with list_keywords shortly after.',
       inputSchema: {
          ids: z
             .array(z.number().int())
@@ -234,7 +235,7 @@ server.registerTool(
    {
       title: 'Get Search Console insight',
       description:
-         'Get Google Search Console insight for a domain: top pages, top keywords, countries, and stats. Requires Search Console to be connected for the domain in s33k.',
+         'Read Google Search Console insight for a domain: its top pages, top keywords, top countries, and aggregate stats. Use this for real impression and click data straight from Google, beyond the keywords you explicitly track. Requires Search Console to be connected for the domain in s33k, otherwise it returns an error.',
       inputSchema: {
          domain: z.string().describe('The domain to get insight for, e.g. "getmasset.com".'),
       },
@@ -257,7 +258,7 @@ server.registerTool(
    {
       title: 'Page scoreboard',
       description:
-         'Join per-page traffic with tracked keywords for a domain. Returns a per-page scoreboard (traffic plus the keywords targeting each page, sorted by page views), pages that have traffic but no tracked keyword (a content-gap signal), and keywords whose target page matched no analytics page. Each page row also carries aiReferralVisitors (AI-engine-referred visitors that landed on that page) when the analytics provider exposes per-landing-page referral detail; when it does not, aiReferralVisitors is 0 and aiReferralNote explains it. Per-page bounce_rate and avg_duration may be null when the provider (e.g. Umami) cannot report them at page grain; metricsNote explains the null.',
+         'Join per-page traffic with tracked keywords for a domain, the core SEO-plus-analytics view. Use this to see which pages earn traffic, what each ranks for, and where the gaps are. Returns a per-page scoreboard (traffic plus the keywords targeting each page, sorted by page views), pages that have traffic but no tracked keyword (a content-gap signal), and keywords whose target page matched no analytics page. Each page row also carries aiReferralVisitors (AI-engine-referred visitors that landed on that page) when the analytics provider exposes per-landing-page referral detail; when it does not, aiReferralVisitors is 0 and aiReferralNote explains it. Per-page bounce_rate and avg_duration may be null when the provider (e.g. Umami) cannot report them at page grain; metricsNote explains the null.',
       inputSchema: {
          domain: z.string().describe('The domain to build the scoreboard for, e.g. "getmasset.com".'),
          period: z
@@ -286,7 +287,7 @@ server.registerTool(
    {
       title: 'AI referrals',
       description:
-         'Report which AI engines (ChatGPT, Perplexity, Gemini, Claude, Copilot, etc.) are sending real visitors to a domain, measured from analytics REFERRAL data (not by querying any LLM). Returns a per-engine breakdown (visitors and page views, sorted desc) plus totals: AI visitors, all referred visitors, and the AI share of referred traffic.',
+         'Report which AI engines (ChatGPT, Perplexity, Gemini, Claude, Copilot, and more) are sending real visitors to a domain. Use this to measure AEO outcomes: actual traffic that AI answer engines drove. It reads analytics REFERRAL data and never queries an LLM. Returns a per-engine breakdown (visitors and page views, sorted by visitors) plus totals: AI visitors, all referred visitors, and the AI share of referred traffic.',
       inputSchema: {
          domain: z.string().describe('The domain to report AI referrals for, e.g. "getmasset.com".'),
          period: z
@@ -315,7 +316,7 @@ server.registerTool(
    {
       title: 'AI crawlers',
       description:
-         'Report which AI answer-engine and search crawlers (GPTBot, OAI-SearchBot, ClaudeBot, PerplexityBot, Google-Extended, Bingbot, etc.) are crawling a domain. This is the leading indicator of AEO: AI bots crawl a site before any AI engine starts citing it or sending visitors. Measured from recorded crawler hits (server-log / user-agent ingest), not by querying any LLM. Returns a per-bot breakdown (bot, owner, isAiEngine, hits, lastSeen, sorted by hits desc), totals (aiEngineHits, allCrawlerHits), and a recent sample of hits.',
+         'Report which AI answer-engine and search crawlers (GPTBot, OAI-SearchBot, ClaudeBot, PerplexityBot, Google-Extended, Bingbot, and more) are crawling a domain. Use this as the leading indicator of AEO: AI bots crawl a site before any AI engine starts citing it or sending visitors, so this shows up before ai_referrals does. It reads recorded crawler hits (server-log or user-agent ingest) and never queries an LLM. Returns a per-bot breakdown (bot, owner, isAiEngine, hits, lastSeen, sorted by hits), totals (aiEngineHits, allCrawlerHits), and a recent sample of hits.',
       inputSchema: {
          domain: z.string().describe('The domain to report AI crawler activity for, e.g. "getmasset.com".'),
          period: z
@@ -344,7 +345,7 @@ server.registerTool(
    {
       title: 'Traffic summary',
       description:
-         'Site-wide traffic totals for a domain over a window: pageviews, unique visitors, visits, bounce rate (percent), average visit duration (seconds), and pages per visit.',
+         'Get site-wide traffic totals for a domain over a window: pageviews, unique visitors, visits, bounce rate (percent), average visit duration (seconds), and pages per visit. Use this for the one-line health check of a site before drilling into traffic_breakdown, traffic_timeseries, or page_scoreboard.',
       inputSchema: {
          domain: z.string().describe('The domain to summarize, e.g. "getmasset.com".'),
          period: z
@@ -373,7 +374,7 @@ server.registerTool(
    {
       title: 'Human vs bot traffic estimate',
       description:
-         'Estimate how much of a domain\'s traffic is likely humans vs likely bots. Most analytics (including Lodd) overcount automated traffic: JavaScript-executing scrapers run the tracking script and get counted as real visitors (e.g. heavy Hong Kong / Singapore / China datacenter traffic at ~99-100% bounce with near-zero time on page). This applies a behavior heuristic (bounce >= 99% AND avg duration < 15s over page rows) with a known-human referrer floor (search / social / AI / email visitors are never flagged as bots). Returns { estVisitors, estHumanVisitors, estBotVisitors, botSharePct, method }. This is an ESTIMATE, not an exact count: it separates likely humans from likely bots by aggregate behavior, not per-session.',
+         'Estimate how much of a domain\'s traffic is likely humans versus likely bots. Use this to sanity-check the other traffic numbers, because most analytics (including Lodd) overcount automated traffic: JavaScript-executing scrapers run the tracking script and get counted as real visitors (for example heavy Hong Kong, Singapore, and China datacenter traffic at roughly 99 to 100 percent bounce with near-zero time on page). It applies a behavior heuristic (bounce at or above 99 percent AND average duration under 15 seconds across page rows) with a known-human referrer floor (search, social, AI, and email visitors are never flagged as bots). Returns estVisitors, estHumanVisitors, estBotVisitors, botSharePct, and method. This is an ESTIMATE, not an exact count: it separates likely humans from likely bots by aggregate behavior, not per session.',
       inputSchema: {
          domain: z.string().describe('The domain to estimate human vs bot traffic for, e.g. "getmasset.com".'),
          period: z
@@ -402,7 +403,7 @@ server.registerTool(
    {
       title: 'Traffic breakdown',
       description:
-         'Break traffic down by a single dimension for a domain. country/device/browser/os work on every provider; region/city/language/screen are Umami-only extras (Lodd returns a "Not supported by Lodd" error for them). Each row has a name, page views, and unique visitors.',
+         'Break a domain\'s traffic down by a single dimension. Use this to answer where visitors come from or what they use. The country, device, browser, and os dimensions work on every provider; region, city, language, and screen are Umami-only extras (Lodd returns a "Not supported by Lodd" error for them). Each row has a name, page views, and unique visitors.',
       inputSchema: {
          domain: z.string().describe('The domain to break down, e.g. "getmasset.com".'),
          dimension: z
@@ -434,7 +435,7 @@ server.registerTool(
    {
       title: 'Traffic time series',
       description:
-         'Daily (or unit-grouped) time series of pageviews and visitors for a domain over a window. Each point has a date label, pageviews, and visitors.',
+         'Get a daily (or unit-grouped) time series of pageviews and visitors for a domain over a window. Use this to spot trends, spikes, and drops over time, or to compare two periods. Each point has a date label, pageviews, and visitors.',
       inputSchema: {
          domain: z.string().describe('The domain to chart, e.g. "getmasset.com".'),
          period: z
@@ -468,7 +469,7 @@ server.registerTool(
    {
       title: 'Top events',
       description:
-         'Custom/tracked events for a domain over a window, with their fire counts. Each row has an event name and a count.',
+         'List a domain\'s custom or tracked events over a window with their fire counts. Use this to see which tracked actions (signups, clicks, downloads, and the like) fired most. Each row has an event name and a count; the list is empty when the site records no custom events.',
       inputSchema: {
          domain: z.string().describe('The domain to list events for, e.g. "getmasset.com".'),
          period: z
@@ -497,7 +498,7 @@ server.registerTool(
    {
       title: 'Engagement tiers',
       description:
-         'Session-quality engagement tiers (e.g. bounced / browsed / engaged) for a domain over a window. Each tier has a label, session count, percentage of all sessions, and (where available) average duration and average pages per session. Lodd serves these directly; Umami derives them from stats.',
+         'Break a domain\'s sessions into engagement tiers (such as bounced, browsed, and engaged) over a window. Use this to judge traffic quality, not just volume: a high bounced share signals low-quality or bot traffic. Each tier has a label, session count, percentage of all sessions, and (where available) average duration and average pages per session. Lodd serves these directly; Umami derives them from stats.',
       inputSchema: {
          domain: z.string().describe('The domain to measure engagement for, e.g. "getmasset.com".'),
          period: z
@@ -526,7 +527,7 @@ server.registerTool(
    {
       title: 'Cross-pillar insights',
       description:
-         'The "analyst, not dashboard" tool. Joins all three s33k pillars for a domain (SEO rank + analytics traffic + AI referrals + engagement) and returns RULES-BASED structured findings and recommendations for YOU (the LLM) to interpret and narrate. The s33k server does NOT call any LLM; it does the joins and surfaces signals dashboards bury. Findings include: high-traffic pages with poor or no keyword rank (SEO opportunity), keywords ranking well but on low-traffic pages (demand/click-through mismatch), pages/engines receiving AI answer-engine referral traffic (AEO proof), traffic concentrated on a single page (resilience risk), and an estimated-bot-traffic caveat (how much of the measured traffic is likely automated, so the other numbers can be read correctly). Each finding has { type, severity, message, evidence }; recommendations is a prioritized list of concrete next actions.',
+         'Get a ready-made cross-pillar analysis for a domain in one call. Use this when you want the highest-leverage findings without running each tool yourself. It joins all three s33k pillars (SEO rank, analytics traffic, AI referrals, and engagement) and returns RULES-BASED structured findings and recommendations for YOU (the LLM) to interpret and narrate. The s33k server does NOT call any LLM; it does the joins and surfaces signals dashboards bury. Findings include high-traffic pages with poor or no keyword rank (an SEO opportunity), keywords ranking well but on low-traffic pages (a demand or click-through mismatch), pages and engines receiving AI answer-engine referral traffic (AEO proof), traffic concentrated on a single page (a resilience risk), and an estimated-bot-traffic caveat (how much measured traffic is likely automated, so the other numbers can be read correctly). Each finding has a type, severity, message, and evidence; recommendations is a prioritized list of concrete next actions.',
       inputSchema: {
          domain: z.string().describe('The domain to analyze, e.g. "getmasset.com".'),
          period: z
@@ -562,7 +563,7 @@ server.registerTool(
    {
       title: 'Create domain',
       description:
-         'Add one or more domains to track in s33k. Pass bare domain names (e.g. "getmasset.com"), not full URLs.',
+         'Add one or more domains to track in s33k. Use this once per site before adding its keywords or reading its analytics. Pass bare domain names (for example "getmasset.com"), not full URLs.',
       inputSchema: {
          domains: z
             .array(z.string())
@@ -588,7 +589,7 @@ server.registerTool(
    {
       title: 'Update keyword',
       description:
-         'Update one or more tracked keywords by ID. Set the target_page (the page that should rank for the keyword) and/or toggle sticky. Exactly one of target_page or sticky is applied per call (target_page takes precedence if both are given).',
+         'Update one or more tracked keywords by ID. Use this to set a keyword\'s target_page (the page that should rank for it) so it joins correctly in page_scoreboard, or to toggle its sticky pin. Get the IDs from list_keywords first. Exactly one of target_page or sticky is applied per call, and target_page takes precedence if both are given.',
       inputSchema: {
          ids: z
             .array(z.number().int())
@@ -635,7 +636,7 @@ server.registerTool(
    {
       title: 'Delete keyword',
       description:
-         'Permanently delete one or more tracked keywords by ID. Returns how many keywords were removed.',
+         'Permanently delete one or more tracked keywords by ID. Use this to stop tracking terms you no longer care about. Get the IDs from list_keywords first. This cannot be undone, so confirm the IDs before calling. Returns how many keywords were removed.',
       inputSchema: {
          ids: z
             .array(z.number().int())
@@ -664,7 +665,7 @@ server.registerTool(
    {
       title: 'Discover pages',
       description:
-         'Use this to read a domain\'s pages, then propose 1-2 target keywords per important page and add them with add_keyword. Given a domain, s33k crawls it (sitemap.xml first, then homepage links) and returns a compact summary for each important page: url, path, title, meta description, h1/h2 headings, and a short text excerpt. No server-side LLM is used and no API key is needed: YOU (the connected LLM) read these page summaries, infer what each page is about, propose target keywords, and call add_keyword for each (passing the page path as target_page). Capped at 25 pages. Never throws; per-page or top-level failures are returned as an "error" field.',
+         'Crawl a domain and return a compact summary of each important page, the fastest way to onboard a new site. Use this at the start so you can map keywords to real pages instead of guessing. s33k crawls the domain (sitemap.xml first, then homepage links) and returns url, path, title, meta description, h1 and h2 headings, and a short text excerpt per page. No server-side LLM is used and no API key is needed: YOU (the connected LLM) read these summaries, infer what each page is about, propose 1 to 2 target keywords per important page, and call add_keyword for each (passing the page path as target_page). Capped at 25 pages. Never throws; per-page or top-level failures come back as an "error" field.',
       inputSchema: {
          domain: z.string().describe('The domain to read pages from, e.g. "getmasset.com".'),
       },

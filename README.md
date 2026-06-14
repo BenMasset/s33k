@@ -20,12 +20,13 @@ The product is the unified MCP control plane that joins all three. The per-page 
 
 ## MCP tools
 
-s33k is fully controllable from an LLM over MCP. The server exposes 18 tools (authoritative list from `mcp/src/index.ts`):
+s33k is fully controllable from an LLM over MCP. The server exposes 19 tools (authoritative list from `mcp/src/index.ts`):
 
 | Tool | What it does |
 |---|---|
 | `list_domains` | List all domains tracked in s33k. |
 | `create_domain` | Add one or more domains to track (bare hostnames, no protocol). |
+| `discover_pages` | Crawl a domain (sitemap first, then homepage links) and return a compact summary of up to 25 pages so the LLM can map keywords to real target pages in one shot. The onboarding fast path. |
 | `list_keywords` | List a domain's keywords with current Google rank, ranking URL, target page, and last 7 days of rank history. |
 | `add_keyword` | Add a keyword to track for a domain. Queues a background SERP scrape. |
 | `update_keyword` | Update keywords by ID: set the target page and/or toggle sticky. |
