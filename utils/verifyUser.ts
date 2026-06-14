@@ -21,6 +21,7 @@ const verifyUser = (req: NextApiRequest, res: NextApiResponse): string => {
       'GET:/api/domains',
       'POST:/api/keywords',
       'POST:/api/domains',
+      'DELETE:/api/domains',
       'POST:/api/refresh',
       'POST:/api/cron',
       'POST:/api/notify',
