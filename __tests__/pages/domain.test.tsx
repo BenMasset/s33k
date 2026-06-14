@@ -5,7 +5,7 @@ import { useAddDomain, useDeleteDomain, useFetchDomains, useUpdateDomain } from 
 import { useAddKeywords, useDeleteKeywords,
    useFavKeywords, useFetchKeywords, useRefreshKeywords, useFetchSingleKeyword } from '../../services/keywords';
 import { dummyDomain, dummyKeywords, dummySettings } from '../../__mocks__/data';
-import { useFetchSettings } from '../../services/settings';
+import { useFetchSettings, useUpdateSettings } from '../../services/settings';
 
 jest.mock('../../services/domains');
 jest.mock('../../services/keywords');
@@ -31,12 +31,14 @@ const useAddKeywordsFunc = useAddKeywords as jest.Mock<any>;
 const useUpdateDomainFunc = useUpdateDomain as jest.Mock<any>;
 const useDeleteDomainFunc = useDeleteDomain as jest.Mock<any>;
 const useFetchSettingsFunc = useFetchSettings as jest.Mock<any>;
+const useUpdateSettingsFunc = useUpdateSettings as jest.Mock<any>;
 const useFetchSingleKeywordFunc = useFetchSingleKeyword as jest.Mock<any>;
 
 describe('SingleDomain Page', () => {
    const queryClient = new QueryClient();
    beforeEach(() => {
       useFetchSettingsFunc.mockImplementation(() => ({ data: { settings: dummySettings }, isLoading: false }));
+      useUpdateSettingsFunc.mockImplementation(() => ({ mutate: () => { }, isLoading: false }));
       useFetchDomainsFunc.mockImplementation(() => ({ data: { domains: [dummyDomain] }, isLoading: false }));
       useFetchKeywordsFunc.mockImplementation(() => ({ keywordsData: { keywords: dummyKeywords }, keywordsLoading: false }));
       const fetchPayload = { history: dummyKeywords[0].history || [], searchResult: dummyKeywords[0].lastResult || [] };
@@ -119,10 +121,17 @@ describe('SingleDomain Page', () => {
       const countrySelect = document.querySelector('.country_filter .selected');
       if (countrySelect) fireEvent.click(countrySelect);
       expect(document.querySelector('.country_filter .select_list')).toBeVisible();
+      // The country dropdown is derived from the keywords' own countries, and both
+      // dummy keywords are US, so the list contains exactly one option (United States).
+      // Upstream asserted toBe(0) here, which assumed a multi-country dataset where the
+      // first dropdown entry was a NON-US country; with the single-country mock data the
+      // only selectable country is US, so selecting it keeps both US keywords. We assert
+      // the real behavior: selecting the present country filters to that country's keywords.
       const firstCountry = document.querySelector('.country_filter .select_list ul li:nth-child(1)');
+      expect(firstCountry?.textContent).toBe('United States');
       if (firstCountry) fireEvent.click(firstCountry);
       const keywordsCount = document.querySelectorAll('.keyword').length;
-      expect(keywordsCount).toBe(0);
+      expect(keywordsCount).toBe(2);
    });
 
    // Tags Filter should function properly

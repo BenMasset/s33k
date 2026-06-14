@@ -22,5 +22,34 @@ window.matchMedia = (query) => ({
 
 global.ResizeObserver = require('resize-observer-polyfill');
 
+// jsdom (Node 20) does not provide TextEncoder/TextDecoder globally, which MSW
+// (pulled in by __mocks__/utils.tsx) requires at import time. Polyfill from Node's util.
+if (typeof global.TextEncoder === 'undefined' || typeof global.TextDecoder === 'undefined') {
+   // eslint-disable-next-line global-require
+   const { TextEncoder, TextDecoder } = require('util');
+   global.TextEncoder = global.TextEncoder || TextEncoder;
+   global.TextDecoder = global.TextDecoder || TextDecoder;
+}
+
+// jsdom also lacks BroadcastChannel, which MSW references at import time. Node 20
+// provides it via worker_threads.
+if (typeof global.BroadcastChannel === 'undefined') {
+   // eslint-disable-next-line global-require
+   const { BroadcastChannel } = require('worker_threads');
+   global.BroadcastChannel = BroadcastChannel;
+}
+
+// jsdom does not expose the WHATWG stream globals that MSW's SSE/fetch interceptors
+// reference at import time. Node 20 provides them via stream/web.
+if (typeof global.ReadableStream === 'undefined'
+   || typeof global.WritableStream === 'undefined'
+   || typeof global.TransformStream === 'undefined') {
+   // eslint-disable-next-line global-require
+   const { ReadableStream, WritableStream, TransformStream } = require('stream/web');
+   global.ReadableStream = global.ReadableStream || ReadableStream;
+   global.WritableStream = global.WritableStream || WritableStream;
+   global.TransformStream = global.TransformStream || TransformStream;
+}
+
 // Enable Fetch Mocking
 enableFetchMocks();
