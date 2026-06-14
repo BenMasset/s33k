@@ -117,7 +117,12 @@ export const getAppSettings = async () : Promise<SettingsType> => {
    let decryptedSettings = settings;
    try {
       const cryptr = new Cryptr(process.env.SECRET as string);
-      const scaping_api = settings.scaping_api ? cryptr.decrypt(settings.scaping_api) : '';
+      // Env fallback: a hosted instance can supply the SERP scraper key via env
+      // (SERPER_API_KEY or SCAPING_API) so it never has to be entered in the UI.
+      // The DB-stored value always wins, so existing UI-configured deployments are unchanged.
+      const scaping_api = settings.scaping_api
+         ? cryptr.decrypt(settings.scaping_api)
+         : (process.env.SERPER_API_KEY || process.env.SCAPING_API || '');
       const smtp_password = settings.smtp_password ? cryptr.decrypt(settings.smtp_password) : '';
       const search_console_client_email = settings.search_console_client_email ? cryptr.decrypt(settings.search_console_client_email) : '';
       const search_console_private_key = settings.search_console_private_key ? cryptr.decrypt(settings.search_console_private_key) : '';
@@ -128,6 +133,12 @@ export const getAppSettings = async () : Promise<SettingsType> => {
 
       decryptedSettings = {
          ...settings,
+         // Env fallback for the scraper backend: a hosted instance can set
+         // SCRAPER_TYPE (e.g. "serper") so scraping works without the UI step.
+         // A DB-stored scraper_type (anything other than the default 'none') wins.
+         scraper_type: (settings.scraper_type && settings.scraper_type !== 'none')
+            ? settings.scraper_type
+            : (process.env.SCRAPER_TYPE || settings.scraper_type),
          scaping_api,
          smtp_password,
          search_console_client_email,

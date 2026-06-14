@@ -35,7 +35,7 @@ const getAppSettings = async () => {
          try {
             settings = settingsRaw ? JSON.parse(settingsRaw) : {};
          } catch (parseError) {
-            // File exists but JSON is corrupt — back it up instead of overwriting
+            // File exists but JSON is corrupt: back it up instead of overwriting
             const backupPath = `${process.cwd()}/data/settings.json.${Date.now()}.corrupt`;
             console.log(`[WARN] Corrupt settings.json detected. Backing up to ${backupPath}`);
             await promises.rename(`${process.cwd()}/data/settings.json`, backupPath).catch(() => {});
@@ -45,9 +45,16 @@ const getAppSettings = async () => {
 
          try {
             const cryptr = new Cryptr(process.env.SECRET);
-            const scaping_api = settings.scaping_api ? cryptr.decrypt(settings.scaping_api) : '';
+            // Env fallback so the cron process resolves the same SERP key as the
+            // API. DB-stored value always wins; env only fills an empty key.
+            const scaping_api = settings.scaping_api
+               ? cryptr.decrypt(settings.scaping_api)
+               : (process.env.SERPER_API_KEY || process.env.SCAPING_API || '');
+            const scraper_type = (settings.scraper_type && settings.scraper_type !== 'none')
+               ? settings.scraper_type
+               : (process.env.SCRAPER_TYPE || settings.scraper_type);
             const smtp_password = settings.smtp_password ? cryptr.decrypt(settings.smtp_password) : '';
-            decryptedSettings = { ...settings, scaping_api, smtp_password };
+            decryptedSettings = { ...settings, scraper_type, scaping_api, smtp_password };
          } catch (error) {
             console.log('Error Decrypting Settings API Keys!');
          }
