@@ -38,8 +38,9 @@ A friend should get from install to seeing real data in about five minutes. This
 
 ## Phase 2: The MCP control layer (Day 5, the headline). DONE
 - [x] Built an MCP server (`mcp/`) over s33k's REST API. Verified returning live data over the MCP protocol.
-- [x] **MCP completeness: the whole product is now controllable from MCP with no UI (V1 surface).** 18 tools registered and verified over stdio (`tools/list` + live `tools/call`):
+- [x] **MCP completeness: the whole product is now controllable from MCP with no UI (V1 surface).** 19 tools registered and verified over stdio (`tools/list` + live `tools/call`):
   - SEO/control: list_domains, create_domain, list_keywords, add_keyword, update_keyword, delete_keyword, refresh_keywords, get_insight.
+  - Onboarding: discover_pages (crawl a domain, return the live page list so keywords map to real pages in one shot).
   - Analytics (full Lodd parity + extras): page_scoreboard, ai_referrals, traffic_summary, traffic_breakdown, traffic_timeseries, top_events, engagement.
   - 10x signals (beyond commodity analytics): ai_crawlers (answer-engine bot detection), human_traffic (bot-vs-human filtering), insights (cross-pillar SEO + analytics + AEO findings).
 - [x] verifyUser whitelist extended so every headless tool works with the Bearer API key (added PUT/DELETE keywords + the 5 new analytics GET routes). README has the Claude Code connect command. (Ben runs `claude mcp add` to wire it in.)
@@ -62,7 +63,14 @@ A friend should get from install to seeing real data in about five minutes. This
 ## Phase 4: AEO = AI referral tracking from analytics (no LLM queries). DONE
 - [x] AEO is measured from real analytics REFERRAL data, not by querying any LLM. `getReferralSources` + `classifyReferrer` (utils/ai-sources.ts) detect which AI engines (ChatGPT, Claude, Perplexity, Gemini, Copilot, etc.) actually send visitors.
 - [x] Surfaced via GET /api/ai-referrals and the MCP tool `ai_referrals`: per-engine visitors/pageviews plus totals (AI visitors, all referred visitors, AI share of referred traffic). Live: ChatGPT 2, Claude 1, 6% AI share.
-- [ ] Later: per-page AI-citation rate beside rank and traffic (would join referral landing pages into the scoreboard).
+- [x] Per-page AI-referral attribution joined into the scoreboard: the scoreboard now attributes AI-referral visitors to their landing pages (with graceful `referralError` / `aiReferralVisitors: 0` degradation if the referral fetch fails, never a 500).
+
+## Phase 6: Auto-discovery onboarding. DONE
+The 5-minute-to-value bar applied to setup: a new user should not have to hand-type their page list. The `discover_pages` MCP tool (and `GET /api/discover`) crawls a supplied domain, follows same-origin links, and returns the live page list so the LLM can map keywords to real target pages in one shot.
+- [x] `utils/site-crawl.ts`: same-origin BFS crawler that returns the discovered page set. Hardened against SSRF (see below).
+- [x] `GET /api/discover?domain=...`: Bearer-key reachable (whitelisted in `utils/verifyUser.ts`), GET-only, validates `domain`, strips query strings.
+- [x] MCP tool `discover_pages`: surfaces the crawl to the LLM so onboarding is "point at your domain, I will find your pages" instead of manual entry. Live verified: getmasset.com returns 25 pages.
+- [x] **SSRF hardening** (the hosted-product requirement): `isPublicHostname()` rejects non-http(s) schemes plus loopback / RFC1918 / link-local / CGNAT / IPv6-private literals and `localhost`/`.local` names before any network call. This matters because s33k is becoming a multi-tenant hosted product where untrusted tenants hold API keys, and the `169.254.169.254` cloud-metadata endpoint is the classic credential-theft vector. Live verified: getmasset.com returns 25 pages; `localhost`, `127.0.0.1:3005`, and `169.254.169.254` return 0 pages with a graceful error and leak no internal content. Residual: `redirect: 'follow'` could 302 to an internal host; documented in-code as a network-egress-layer concern (closing it fully would risk breaking legitimate apex->www redirects).
 
 ## Phase 5: Ship V1 (Day 7). DONE (install package)
 - [x] Package so a friend can install: `deploy/docker-compose.yml` (s33k + Umami + Postgres in one stack) and `deploy/.env.template` (placeholders and throwaways only, with openssl regenerate instructions; zero real secrets). README rewritten with the three-pillar story, install steps, and the full 18-tool MCP table.
@@ -76,12 +84,27 @@ The differentiator over Lodd/Plausible is being the AI-native analyst across the
 - [x] **Cross-pillar insights** (`pages/api/insights.ts`, MCP `insights`). Joins SEO + analytics + AEO into plain-language findings and recommendations (e.g. high-traffic pages with no target keyword, keywords ranking with no traffic, AI-referral signal). Aggregates page rows by clean path first to avoid the UTM "last variant wins" trap.
 
 ## Test suite. DONE
-- [x] Jest suites for the new utils: `__tests__/utils/ai-crawlers.test.ts`, `bot-filter.test.ts`, `bot-filter-aggregation.test.ts`, plus the existing `ai-sources.test.ts` and `lodd.test.ts`. All util suites pass (40/40 across the 5 suites). The 2 pre-existing UI/hook suites (`__tests__/hooks/domains.test.tsx`, `__tests__/pages/domain.test.tsx`) fail on unrelated msw/TextEncoder and mock-setup issues that predate this work and touch none of the new code.
+- [x] Jest suites for the new utils: `__tests__/utils/ai-crawlers.test.ts`, `bot-filter.test.ts`, `bot-filter-aggregation.test.ts`, `ai-sources.test.ts`, `lodd.test.ts`, plus the new `site-crawl.test.ts` (10/10, includes a 6-target SSRF test), `lodd-domain-scope.test.ts`, `scope.test.ts`, and `resolveAccount.test.ts`. **17 suites pass (108 tests).** The 2 pre-existing UI/hook suites (`__tests__/hooks/domains.test.tsx`, `__tests__/pages/domain.test.tsx`) fail at suite load on the unrelated msw/`TextEncoder` jsdom-env issue that predates this work and touches none of the new code.
 
 ## Analytics ownership: replace Lodd with self-hosted Umami (the standalone/sellable requirement)
 - [x] Integration code: analytics layer is now provider-pluggable (utils/analytics.ts). Umami provider written (utils/umami.ts); Lodd demoted to legacy/dev. Default provider is umami. Lodd no longer load-bearing.
-- [ ] Host the instance: run Umami + the official Postgres image via docker-compose (Postgres is the chosen DB: free, commercially unrestricted PostgreSQL License, flexible). This same compose doubles as the product installer.
-- [ ] Point s33k at the live Umami (UMAMI_BASE_URL / website id / auth) and add the Umami tracking script to getmasset.com so owned data starts flowing.
+- [x] Host the instance: self-hosted Umami now runs publicly on Railway (Umami + Postgres). This is the owned analytics stack.
+- [ ] Point s33k at the live Umami in production and add the Umami tracking script to getmasset.com so owned data starts flowing. (s33k/.env already points UMAMI_* at the Railway instance; ANALYTICS_PROVIDER stays 'lodd' for live verification until the tracking script is live, a separate human-approved step.)
+
+### Closed gaps (this pass)
+- [x] **Lodd per-domain scoping.** The Lodd provider read a fixed `LODD_SITE` regardless of the requested domain, so per-domain calls returned getmasset.com data for every domain. Added a domain-scoping guard: a request for a domain that does not match the configured Lodd site now returns zeros plus an explanatory `loddError`, instead of silently mislabeling getmasset.com data as another domain's. Test: `__tests__/utils/lodd-domain-scope.test.ts`. Live verified: `competitor.com` returns zeros + error.
+- [x] **Umami per-page grain.** The Umami provider exposed aggregate counts but not per-page bounce_rate / avg_duration / parsed-UTM at that grain; extended so per-page rows carry the finer metrics the scoreboard and bot-filter need.
+- [ ] `get_insight` still needs Google Search Console connected (Phase 1.5). Out of scope for this pass.
+
+## Multi-tenant foundation (non-breaking). DONE (schema + scope helpers, shipped dark)
+The standalone hosted-product step. Shipped as a non-breaking foundation behind a `MULTI_TENANT` flag (unset by default), so single-admin deployments are byte-for-byte unchanged. Full design in `MULTI_TENANT.md`.
+- [x] Schema: new `account` and `api_key` tables (models + migrations), plus nullable `owner_id` on `domain` and `keyword`. All four migrations idempotent (the repo's `resolveQueryInterface` + `describeTable` dual-convention). `account` seeds exactly one row (the existing admin); all existing domain/keyword rows get `owner_id: null`, untouched.
+- [x] Scope helpers: `utils/scope.ts` (`scopeWhere` / `ownerIdFor`) and `utils/resolveAccount.ts` short-circuit to today's behavior when `MULTI_TENANT` is off. Imported only by their own tests and the two model registrations; no production route adopts them yet.
+- [x] Verified non-breaking live: every existing endpoint returns 200 with unchanged data (the only row delta is the additive `owner_id: null`).
+- [ ] Next (the real hosted-product step, with Ben present): take the foundation from non-breaking schema to actually scoped (wire `scopeWhere` into the routes behind the flag, per-tenant API keys).
+
+## Upstream PR plan. DONE (plan documented)
+Full plan in `UPSTREAM_PR.md`: which changes are clean upstream contributions to `towfiqi/serpbear` (the MCP server, the one-click GSC OAuth, target-page mapping) versus which stay s33k-specific (analytics provider layer, AEO, multi-tenant). Sequencing and PR boundaries documented.
 
 ## Post-week (beyond Fork Week)
 - [ ] Migrate s33k's own DB from SQLite to the same Postgres (one owned stack)
