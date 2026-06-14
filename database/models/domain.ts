@@ -53,6 +53,12 @@ class Domain extends Model {
 
    @Column({ type: DataType.STRING, allowNull: true, defaultValue: '' })
    subdomain_matching!: string;
+
+   // Multi-tenant ownership. NULL == the legacy single-tenant admin account.
+   // Nullable with no default so existing rows keep working unchanged and queries
+   // stay byte-for-byte identical while MULTI_TENANT is off.
+   @Column({ type: DataType.INTEGER, allowNull: true })
+   owner_id!: number;
 }
 
 export default Domain;

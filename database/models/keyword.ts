@@ -73,6 +73,12 @@ class Keyword extends Model {
 
    @Column({ type: DataType.STRING, allowNull: true })
    settings!: string;
+
+   // Multi-tenant ownership, denormalized onto keyword to match the fork's existing
+   // "join by domain string, no real FK" pattern, so keyword queries can scope
+   // without a join. NULL == the legacy single-tenant admin account.
+   @Column({ type: DataType.INTEGER, allowNull: true })
+   owner_id!: number;
 }
 
 export default Keyword;
