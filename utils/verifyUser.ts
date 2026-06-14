@@ -30,6 +30,7 @@ const verifyUser = (req: NextApiRequest, res: NextApiResponse): string => {
       'GET:/api/scoreboard',
       'GET:/api/ai-referrals',
       'GET:/api/summary',
+      'GET:/api/human-traffic',
       'GET:/api/breakdown',
       'GET:/api/timeseries',
       'GET:/api/events',

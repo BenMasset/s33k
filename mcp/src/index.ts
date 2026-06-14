@@ -366,6 +366,35 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// human_traffic
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'human_traffic',
+   {
+      title: 'Human vs bot traffic estimate',
+      description:
+         'Estimate how much of a domain\'s traffic is likely humans vs likely bots. Most analytics (including Lodd) overcount automated traffic: JavaScript-executing scrapers run the tracking script and get counted as real visitors (e.g. heavy Hong Kong / Singapore / China datacenter traffic at ~99-100% bounce with near-zero time on page). This applies a behavior heuristic (bounce >= 99% AND avg duration < 15s over page rows) with a known-human referrer floor (search / social / AI / email visitors are never flagged as bots). Returns { estVisitors, estHumanVisitors, estBotVisitors, botSharePct, method }. This is an ESTIMATE, not an exact count: it separates likely humans from likely bots by aggregate behavior, not per-session.',
+      inputSchema: {
+         domain: z.string().describe('The domain to estimate human vs bot traffic for, e.g. "getmasset.com".'),
+         period: z
+            .string()
+            .optional()
+            .describe('Reporting window, e.g. "30d", "7d". Defaults to "30d".'),
+      },
+   },
+   async ({ domain, period }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         const data = await s33kFetch('/api/human-traffic', { query });
+         return jsonResult({ estimate: data.estimate, error: data.error });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // traffic_breakdown
 // ---------------------------------------------------------------------------
 server.registerTool(
@@ -594,7 +623,7 @@ server.registerTool(
 async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
-   process.stderr.write(`s33k-mcp connected (base URL: ${BASE_URL}). 16 tools registered.\n`);
+   process.stderr.write(`s33k-mcp connected (base URL: ${BASE_URL}). 17 tools registered.\n`);
 }
 
 main().catch((err) => {
