@@ -147,22 +147,22 @@ safe minimum.
 
 **New files (the MCP package, all under `mcp/`):**
 
-- `mcp/src/index.ts` — the server. **Must be trimmed to the 8 native-API tools**
+- `mcp/src/index.ts`: the server. **Must be trimmed to the 8 native-API tools**
   (see section 4 for exactly what to remove).
-- `mcp/package.json` — rename `name` from `s33k-mcp` to `serpbear-mcp`; update
+- `mcp/package.json`: rename `name` from `s33k-mcp` to `serpbear-mcp`; update
   `description` and the `bin` key. No s33k references.
-- `mcp/tsconfig.json` — unchanged, already generic.
-- `mcp/README.md` — rewrite to remove every s33k/Masset/Lodd/Umami reference and
+- `mcp/tsconfig.json`: unchanged, already generic.
+- `mcp/README.md`: rewrite to remove every s33k/Masset/Lodd/Umami reference and
   every hardcoded `/Users/ben/...` path and port `3005`; document only the 8
   native tools and the generic env var names.
-- `mcp/.gitignore` — add one: `node_modules/` and `dist/`. (Currently the s33k
+- `mcp/.gitignore`: add one: `node_modules/` and `dist/`. (Currently the s33k
   repo ignores these at the root; the upstream PR should carry its own so the
   `mcp/` package is self-contained. Do NOT commit `mcp/dist/` or
   `mcp/node_modules/`.)
 
 **Modified upstream file (one, four added lines):**
 
-- `utils/verifyUser.ts` — add the four whitelist entries listed in section 2.
+- `utils/verifyUser.ts`: add the four whitelist entries listed in section 2.
 
 **Explicitly NOT in the PR** (these are s33k product scope; do not include):
 `pages/api/{ai-crawlers,ai-referrals,breakdown,crawler-hit,discover,engagement,events,human-traffic,insights,scoreboard,summary,timeseries}.ts`,
@@ -251,9 +251,9 @@ carry over the s33k analytics/AEO routes):
 
 The MCP source and README already avoid em dashes. Keep it that way in any
 rewrite. (Note: four unrelated upstream files in the s33k tree contain em dashes
-— `utils/scraper.ts`, `pages/api/settings.ts`,
+- `utils/scraper.ts`, `pages/api/settings.ts`,
 `components/settings/ScraperSettings.tsx`, `components/domains/DomainSettings.tsx`
-— those are pre-existing upstream content and are NOT part of this PR.)
+- those are pre-existing upstream content and are NOT part of this PR.)
 
 ---
 
