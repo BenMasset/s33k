@@ -120,6 +120,35 @@ S33K_API_KEY=... S33K_BASE_URL=http://localhost:3000 node dist/index.js
 
 A clean boot prints `s33k-mcp connected (base URL: ...). 20 tools registered.` to stderr. Press Ctrl-C to stop.
 
+## End-to-end smoke test
+
+`smoke-test.mjs` spawns the BUILT server (`dist/index.js`) as a stdio child, drives it with the official MCP client SDK (real `initialize` handshake), and exercises all 20 tools against a live s33k instance. It asserts that exactly 20 tools are registered and that every tool returns a successful, non-empty result.
+
+What it covers:
+
+- **Read tools** run against a real domain (default `getmasset.com`), read-only.
+- **Mutating tools** (`create_domain`, `add_keyword`, `update_keyword`, `delete_keyword`) run ONLY against a throwaway domain `s33k-smoke-test.example`, never the real data.
+- It is **idempotent and re-runnable**: it deletes the throwaway domain before and after the mutation block via an authenticated `DELETE /api/domains` call (whitelisted for the API key in `utils/verifyUser.ts`), so a second run does not fail on a duplicate-domain error.
+- `get_insight` is treated as PASS when Google Search Console is not connected (the tool responded correctly); to exercise its success path, connect GSC for the domain first.
+
+Configuration is read from the runner's environment and never hardcoded:
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `APIKEY` | yes | none | The s33k global API key. Export it from the root `.env` before running. |
+| `S33K_BASE_URL` | no | `http://localhost:3005` | The live s33k API base URL the spawned server should target. |
+
+Build first, then run (Node 20 via nvm). The runner exports the key from the root `.env`:
+
+```bash
+export NVM_DIR="$HOME/.nvm"; source "$NVM_DIR/nvm.sh"; nvm use 20
+npm run build
+set -a; . ../.env; set +a    # exports APIKEY (and any S33K_BASE_URL override)
+npm run smoke                # or: node smoke-test.mjs
+```
+
+Exit code is 0 when every assertion passes, non-zero otherwise. A clean run prints `Summary: 22/22 assertions passed.`
+
 ## Notes
 
 - All protocol traffic is on stdout. Diagnostic lines (startup, fatal errors) are written to stderr so they do not corrupt the MCP stream.
