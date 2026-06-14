@@ -11,7 +11,7 @@
  * Configuration comes from two environment variables:
  *   S33K_API_KEY   the value of APIKEY in the s33k .env file (required)
  *   S33K_BASE_URL  the base URL of the running s33k instance
- *                  (optional, defaults to http://localhost:3005)
+ *                  (optional, defaults to http://localhost:3000)
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -19,7 +19,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 
 const API_KEY = process.env.S33K_API_KEY;
-const BASE_URL = (process.env.S33K_BASE_URL || 'http://localhost:3005').replace(/\/$/, '');
+const BASE_URL = (process.env.S33K_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
 
 if (!API_KEY) {
    // Write to stderr (stdout is reserved for the MCP protocol) and exit.

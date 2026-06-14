@@ -20,29 +20,52 @@ The product is the unified MCP control plane that joins all three. The per-page 
 
 ## MCP tools
 
-s33k is fully controllable from an LLM over MCP. The server exposes 19 tools (authoritative list from `mcp/src/index.ts`):
+s33k is fully controllable from an LLM over MCP. The server exposes 20 tools (authoritative list from `mcp/src/index.ts`), grouped below by pillar with one example prompt each. The example prompts are what you would type into Claude or Cursor; the LLM picks the tool.
 
-| Tool | What it does |
-|---|---|
-| `list_domains` | List all domains tracked in s33k. |
-| `create_domain` | Add one or more domains to track (bare hostnames, no protocol). |
-| `discover_pages` | Crawl a domain (sitemap first, then homepage links) and return a compact summary of up to 25 pages so the LLM can map keywords to real target pages in one shot. The onboarding fast path. |
-| `list_keywords` | List a domain's keywords with current Google rank, ranking URL, target page, and last 7 days of rank history. |
-| `add_keyword` | Add a keyword to track for a domain. Queues a background SERP scrape. |
-| `update_keyword` | Update keywords by ID: set the target page and/or toggle sticky. |
-| `delete_keyword` | Permanently delete one or more keywords by ID. |
-| `refresh_keywords` | Trigger a fresh SERP scrape for specific keyword IDs or for a whole domain. |
-| `get_insight` | Read Google Search Console insight for a domain (top pages, keywords, countries, stats). Requires GSC connected. |
-| `page_scoreboard` | Join per-page traffic with tracked keywords and rank. Surfaces content-gap pages and keywords whose target page got no traffic. |
-| `ai_referrals` | Report which AI engines are sending real visitors (per-engine visitors and page views, plus the AI share of referred traffic). |
-| `ai_crawlers` | Report which AI answer-engine and search crawlers (GPTBot, ClaudeBot, PerplexityBot, Google-Extended, Bingbot, etc.) are crawling a domain. The leading indicator of AEO: AI bots crawl a site before they cite it. Per-bot hits and owners, AI-engine totals, and a recent sample. |
-| `traffic_summary` | Site-wide totals: pageviews, visitors, visits, bounce rate, average duration, pages per visit. |
-| `traffic_breakdown` | Break traffic down by a dimension: country, device, browser, os (every provider) or region, city, language, screen (Umami extras). |
-| `traffic_timeseries` | Daily (or unit-grouped) time series of pageviews and visitors. |
-| `top_events` | Custom/tracked events with their fire counts. |
-| `engagement` | Session-quality engagement tiers (bounced / browsed / engaged) with session counts, percentages, and averages. |
-| `human_traffic` | Estimate how much of a domain's traffic is likely humans vs likely bots, using a bounce/duration behavior heuristic with a known-human referrer floor. Returns estimated human, bot, and total visitors plus the bot share. An estimate, not an exact per-session count. |
-| `insights` | The cross-pillar analyst. Joins SEO rank, analytics traffic, AI referrals, and the bot estimate into rules-based findings and prioritized recommendations for your LLM to narrate. Surfaces content gaps, rank/traffic mismatches, AEO proof, traffic concentration, and a bot-share caveat. |
+### Start here (cross-pillar)
+
+| Tool | What it does | Example prompt |
+|---|---|---|
+| `briefing` | One proactive daily standup for a domain: what changed across every pillar and the top three things to do about it. The best first call of the day. | "Give me the s33k briefing for getmasset.com." |
+| `insights` | The cross-pillar analyst. Joins SEO rank, traffic, AI referrals, and the bot estimate into rules-based findings and prioritized recommendations. | "What does s33k recommend I work on for getmasset.com?" |
+| `page_scoreboard` | Joins per-page traffic with tracked keywords and rank. Surfaces content-gap pages and keywords whose target page got no traffic. | "Show me the per-page scoreboard for getmasset.com." |
+
+### SEO (rank tracking)
+
+| Tool | What it does | Example prompt |
+|---|---|---|
+| `discover_pages` | Crawls a domain (sitemap first, then homepage links) and returns up to 25 pages so the LLM can map keywords to real target pages in one shot. The onboarding fast path. | "Discover the main pages on getmasset.com so we can map keywords." |
+| `list_keywords` | Lists a domain's keywords with current Google rank, ranking URL, target page, and the last seven days of rank history. | "List the keywords I'm tracking for getmasset.com and their ranks." |
+| `add_keyword` | Adds a keyword to track for a domain and queues a background SERP scrape. | "Track 'AI-ready DAM' for getmasset.com, mapped to the /software page." |
+| `update_keyword` | Updates keywords by ID: sets the target page and/or toggles sticky. | "Set the target page for keyword 14 to /software." |
+| `delete_keyword` | Permanently deletes one or more keywords by ID. | "Delete keywords 14 and 15." |
+| `refresh_keywords` | Triggers a fresh SERP scrape for specific keyword IDs or a whole domain. | "Refresh all rankings for getmasset.com." |
+| `get_insight` | Reads Google Search Console insight (top pages, keywords, countries, stats). Requires GSC connected. | "What does Search Console show for getmasset.com this month?" |
+
+### AEO (AI visibility)
+
+| Tool | What it does | Example prompt |
+|---|---|---|
+| `ai_referrals` | Reports which AI engines are sending real visitors (per-engine visitors and page views, plus the AI share of referred traffic). | "Which AI engines are sending traffic to getmasset.com?" |
+| `ai_crawlers` | Reports which AI and search crawlers (GPTBot, ClaudeBot, PerplexityBot, Google-Extended, Bingbot, etc.) are crawling a domain. The leading indicator of AEO: AI bots crawl a site before they cite it. | "Are any AI crawlers hitting getmasset.com yet?" |
+
+### Analytics (owned traffic)
+
+| Tool | What it does | Example prompt |
+|---|---|---|
+| `traffic_summary` | Site-wide totals: pageviews, visitors, visits, bounce rate, average duration, pages per visit. | "How was traffic to getmasset.com over the last 30 days?" |
+| `traffic_breakdown` | Breaks traffic down by a dimension: country, device, browser, os (every provider) or region, city, language, screen (Umami extras). | "Break getmasset.com traffic down by country." |
+| `traffic_timeseries` | Daily (or unit-grouped) time series of pageviews and visitors. | "Show me daily pageviews for getmasset.com this month." |
+| `top_events` | Custom/tracked events with their fire counts. | "What are the top tracked events on getmasset.com?" |
+| `engagement` | Session-quality engagement tiers (bounced / browsed / engaged) with session counts, percentages, and averages. | "How engaged are visitors to getmasset.com?" |
+| `human_traffic` | Estimates how much of a domain's traffic is likely human vs likely bot, using a bounce/duration heuristic with a known-human referrer floor. An estimate, not an exact per-session count. | "How much of getmasset.com traffic is real humans vs bots?" |
+
+### Domains
+
+| Tool | What it does | Example prompt |
+|---|---|---|
+| `list_domains` | Lists all domains tracked in s33k. | "What domains am I tracking in s33k?" |
+| `create_domain` | Adds one or more domains to track (bare hostnames, no protocol). | "Start tracking getmasset.com in s33k." |
 
 ## AI crawler detection (the flagship AEO signal)
 
@@ -61,6 +84,58 @@ The engine above is fully self-contained; it just needs to be fed real crawler h
 - **Log shipper (batch):** a small cron/worker that tails the web server or CDN access logs and POSTs one hit per request line.
 
 Either way the classifier runs s33k-side, so the shipper stays dumb (it forwards every UA and lets `/api/crawler-hit` decide what to keep). This change lives in the production site repo and was intentionally left out of this branch.
+
+## What V1 is and is not
+
+V1 is honest about its scope. It is a working, installable product, not a finished SaaS.
+
+- There is **no web dashboard for the s33k features in V1**. You drive everything from your LLM over MCP. The forked SerpBear web UI still exists for logging in and pasting your scraper key, but the SEO, AEO, and analytics features are MCP-first by design.
+- s33k stores its own data in **sqlite**. The analytics data lives in whatever provider you point it at (your own Umami, or Lodd as a legacy option).
+- **AI-referral (AEO) detection reads real referral and crawler data.** It does not call any LLM to guess at citations, and it cannot show AI visibility until your site actually starts getting AI referrals or crawler hits.
+- The **AI-crawler feed needs a small shipper on your production site** to POST crawler hits to s33k. The detection engine is built and shipped here; wiring it into a live site is a follow-up that lives in your site's repo, not this one. See the AI crawler detection section above.
+- Single admin account. The experimental multi-tenant mode (`MULTI_TENANT`) is documented in `MULTI_TENANT.md` but is not the default path.
+
+## Quickstart (local, from source)
+
+This is the fastest way for a friend to clone s33k and run it on their own machine. It runs the s33k app and the MCP server against a local sqlite database. For analytics you can point at an existing Umami or Lodd instance, or run the full owned stack with docker-compose (next section).
+
+```bash
+# 1. Clone and enter the repo.
+git clone https://github.com/BenMasset/s33k.git
+cd s33k
+
+# 2. Use Node 20 (the repo pins it via .nvmrc).
+nvm use 20   # or: nvm install 20 && nvm use 20
+
+# 3. Install dependencies.
+npm ci
+
+# 4. Create your env file and fill it in.
+cp .env.example .env
+#    Then edit .env:
+#    - set USER_NAME and PASSWORD
+#    - regenerate SECRET:  openssl rand -hex 34
+#    - regenerate APIKEY:  openssl rand -hex 24
+#    - paste your Serper key into SERPER_API_KEY (get one at https://serper.dev)
+#    - set the UMAMI_* or LODD_* analytics block (or leave analytics for later)
+
+# 5. Run the app.
+npm run dev
+```
+
+s33k is now at http://localhost:3000 (set `NEXT_PUBLIC_APP_URL` and the `PORT` to match if you run it on a different port). Log in with the `USER_NAME` and `PASSWORD` from your `.env`. The scraper key can also be set in the UI (Settings, choose Serper), where it is stored encrypted in the database.
+
+Then build and register the MCP server so your LLM can drive s33k (see the "Connect the MCP server" section below for the full block):
+
+```bash
+cd mcp && npm ci && npm run build && cd ..
+claude mcp add s33k \
+  -e S33K_API_KEY="$(grep '^APIKEY=' .env | cut -d= -f2)" \
+  -e S33K_BASE_URL=http://localhost:3000 \
+  -- node "$(pwd)/mcp/dist/index.js"
+```
+
+Restart your LLM client, then try: "Give me the s33k briefing for example.com."
 
 ## Run it with docker-compose
 
@@ -107,16 +182,37 @@ npm install
 npm run build
 ```
 
-Register it with `claude mcp add`, pointing `S33K_API_KEY` at the `APIKEY` from your `.env` and `S33K_BASE_URL` at your running instance:
+Register it with `claude mcp add`, pointing `S33K_API_KEY` at the `APIKEY` from your `.env` and `S33K_BASE_URL` at your running instance. Set the base URL to match how you run s33k: `http://localhost:3000` for the local Quickstart, or `http://localhost:8080` for the docker-compose stack.
 
 ```bash
 claude mcp add s33k \
   -e S33K_API_KEY=YOUR_S33K_API_KEY \
-  -e S33K_BASE_URL=http://localhost:8080 \
-  -- node /Users/ben/Projects/s33k/mcp/dist/index.js
+  -e S33K_BASE_URL=http://localhost:3000 \
+  -- node "$(pwd)/mcp/dist/index.js"
 ```
 
-After registering, restart Claude Code (or reload MCP servers) and the s33k tools become available. Confirm with `claude mcp list`. Full MCP details are in [`mcp/README.md`](mcp/README.md).
+To connect a different client (Cursor, or Claude Code via a JSON config), add this block to your client's MCP config under `mcpServers`. Use the absolute path to the built entry point and your real key:
+
+```json
+{
+  "mcpServers": {
+    "s33k": {
+      "command": "node",
+      "args": ["/absolute/path/to/s33k/mcp/dist/index.js"],
+      "env": {
+        "S33K_API_KEY": "YOUR_S33K_API_KEY",
+        "S33K_BASE_URL": "http://localhost:3000"
+      }
+    }
+  }
+}
+```
+
+After registering, restart your LLM client (or reload MCP servers) and the s33k tools become available. Confirm with `claude mcp list`. Full MCP details are in [`mcp/README.md`](mcp/README.md).
+
+## Hosting
+
+For deploying s33k somewhere your LLM and your team can reach it (a server or VPS), with the full owned analytics stack, see [`DEPLOY.md`](DEPLOY.md).
 
 ## Analytics parity with Lodd
 
