@@ -39,6 +39,7 @@ const verifyUser = (req: NextApiRequest, res: NextApiResponse): string => {
       'POST:/api/crawler-hit',
       'GET:/api/ai-crawlers',
       'GET:/api/discover',
+      'GET:/api/briefing',
    ];
    const verifiedAPI = req.headers.authorization ? req.headers.authorization.substring('Bearer '.length) === process.env.APIKEY : false;
    const accessingAllowedRoute = req.url && req.method && allowedApiRoutes.includes(`${req.method}:${req.url.replace(/\?(.*)/, '')}`);

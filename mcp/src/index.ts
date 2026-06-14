@@ -556,6 +556,41 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// briefing
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'briefing',
+   {
+      title: 'Daily briefing',
+      description:
+         'Get a single proactive, cross-pillar "daily standup" for a domain: what changed and, more importantly, what to DO about it. Use this as your FIRST call each day or whenever the user asks "how is my site doing?" or "what should I work on?" It composes every s33k pillar (traffic, human-vs-bot reality, SEO rank and opportunity pages, AI visibility from referrals + crawlers, and engagement) into one ready-to-narrate structure: a headline, sections (each a titled list of plain-English points covering traffic/human-vs-bot, search rank and opportunity pages, AI visibility, and engagement), and the top 3 recommended actions in priority order. The s33k server does NOT call any LLM; it does the joins and the prioritization with transparent rules. YOU (the connected LLM) read this and narrate it as a morning standup, leading with the headline and the recommendations. It never fails on a missing signal: a dead provider or empty data degrades one section instead of the whole briefing.',
+      inputSchema: {
+         domain: z.string().describe('The domain to brief on, e.g. "getmasset.com".'),
+         period: z
+            .string()
+            .optional()
+            .describe('Reporting window, e.g. "30d", "7d", "90d". Defaults to "30d".'),
+      },
+   },
+   async ({ domain, period }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         const data = await s33kFetch('/api/briefing', { query });
+         return jsonResult({
+            headline: data.headline,
+            sections: data.sections,
+            recommendations: data.recommendations,
+            generatedFor: data.generatedFor,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // create_domain
 // ---------------------------------------------------------------------------
 server.registerTool(
@@ -683,7 +718,7 @@ server.registerTool(
 async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
-   process.stderr.write(`s33k-mcp connected (base URL: ${BASE_URL}). 19 tools registered.\n`);
+   process.stderr.write(`s33k-mcp connected (base URL: ${BASE_URL}). 20 tools registered.\n`);
 }
 
 main().catch((err) => {
