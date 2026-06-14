@@ -308,6 +308,35 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// ai_crawlers
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'ai_crawlers',
+   {
+      title: 'AI crawlers',
+      description:
+         'Report which AI answer-engine and search crawlers (GPTBot, OAI-SearchBot, ClaudeBot, PerplexityBot, Google-Extended, Bingbot, etc.) are crawling a domain. This is the leading indicator of AEO: AI bots crawl a site before any AI engine starts citing it or sending visitors. Measured from recorded crawler hits (server-log / user-agent ingest), not by querying any LLM. Returns a per-bot breakdown (bot, owner, isAiEngine, hits, lastSeen, sorted by hits desc), totals (aiEngineHits, allCrawlerHits), and a recent sample of hits.',
+      inputSchema: {
+         domain: z.string().describe('The domain to report AI crawler activity for, e.g. "getmasset.com".'),
+         period: z
+            .string()
+            .optional()
+            .describe('Reporting window, e.g. "30d", "7d". Defaults to "30d".'),
+      },
+   },
+   async ({ domain, period }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         const data = await s33kFetch('/api/ai-crawlers', { query });
+         return jsonResult({ byBot: data.byBot, totals: data.totals, recent: data.recent, error: data.error });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // traffic_summary
 // ---------------------------------------------------------------------------
 server.registerTool(
@@ -565,7 +594,7 @@ server.registerTool(
 async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
-   process.stderr.write(`s33k-mcp connected (base URL: ${BASE_URL}). 15 tools registered.\n`);
+   process.stderr.write(`s33k-mcp connected (base URL: ${BASE_URL}). 16 tools registered.\n`);
 }
 
 main().catch((err) => {
