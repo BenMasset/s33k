@@ -257,7 +257,7 @@ server.registerTool(
    {
       title: 'Page scoreboard',
       description:
-         'Join per-page traffic (from Lodd analytics) with tracked keywords for a domain. Returns a per-page scoreboard (traffic plus the keywords targeting each page, sorted by page views), pages that have traffic but no tracked keyword (a content-gap signal), and keywords whose target page matched no analytics page.',
+         'Join per-page traffic with tracked keywords for a domain. Returns a per-page scoreboard (traffic plus the keywords targeting each page, sorted by page views), pages that have traffic but no tracked keyword (a content-gap signal), and keywords whose target page matched no analytics page. Each page row also carries aiReferralVisitors (AI-engine-referred visitors that landed on that page) when the analytics provider exposes per-landing-page referral detail; when it does not, aiReferralVisitors is 0 and aiReferralNote explains it. Per-page bounce_rate and avg_duration may be null when the provider (e.g. Umami) cannot report them at page grain; metricsNote explains the null.',
       inputSchema: {
          domain: z.string().describe('The domain to build the scoreboard for, e.g. "getmasset.com".'),
          period: z
@@ -656,10 +656,33 @@ server.registerTool(
    },
 );
 
+// ---------------------------------------------------------------------------
+// discover_pages
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'discover_pages',
+   {
+      title: 'Discover pages',
+      description:
+         'Use this to read a domain\'s pages, then propose 1-2 target keywords per important page and add them with add_keyword. Given a domain, s33k crawls it (sitemap.xml first, then homepage links) and returns a compact summary for each important page: url, path, title, meta description, h1/h2 headings, and a short text excerpt. No server-side LLM is used and no API key is needed: YOU (the connected LLM) read these page summaries, infer what each page is about, propose target keywords, and call add_keyword for each (passing the page path as target_page). Capped at 25 pages. Never throws; per-page or top-level failures are returned as an "error" field.',
+      inputSchema: {
+         domain: z.string().describe('The domain to read pages from, e.g. "getmasset.com".'),
+      },
+   },
+   async ({ domain }) => {
+      try {
+         const data = await s33kFetch('/api/discover', { query: { domain } });
+         return jsonResult(data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
 async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
-   process.stderr.write(`s33k-mcp connected (base URL: ${BASE_URL}). 18 tools registered.\n`);
+   process.stderr.write(`s33k-mcp connected (base URL: ${BASE_URL}). 19 tools registered.\n`);
 }
 
 main().catch((err) => {
