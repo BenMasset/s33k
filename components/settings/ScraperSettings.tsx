@@ -37,7 +37,7 @@ const ScraperSettings = ({ settings, settingsError, updateSettings }:ScraperSett
       { label: '30 Minutes', value: '1800000' },
    ];
    const strategyOptions: SelectionOption[] = [
-      { label: 'Basic (First page only — 10 results)', value: 'basic' },
+      { label: 'Basic (First page only, 10 results)', value: 'basic' },
       { label: 'Custom (Set number of pages)', value: 'custom' },
       { label: 'Smart (Based on last known position)', value: 'smart' },
    ];

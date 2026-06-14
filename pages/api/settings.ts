@@ -78,7 +78,7 @@ const safeReadJSON = async (filePath: string, fallback: any): Promise<any> => {
    } catch (error: any) {
       const fileExists = await stat(filePath).then(() => true).catch(() => false);
       if (fileExists) {
-         // File exists but is corrupt — back it up instead of silently overwriting
+         // File exists but is corrupt: back it up instead of silently overwriting
          const backupPath = `${filePath}.${Date.now()}.corrupt`;
          console.log(`[WARN] Corrupt JSON detected in ${filePath}. Backing up to ${backupPath}`);
          await rename(filePath, backupPath).catch(() => {});

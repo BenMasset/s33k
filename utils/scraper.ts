@@ -162,7 +162,7 @@ const resolveStrategy = (
       };
    }
 
-   // Domain override is active — use domain values, fall back to global for unset fields.
+   // Domain override is active. Use domain values, fall back to global for unset fields.
    const strategy: ScrapeStrategy = domainStrategy as ScrapeStrategy;
    const paginationLimit: number = domainSettings?.scrape_pagination_limit || settings.scrape_pagination_limit || 5;
    const smartFullFallback: boolean = domainSettings?.scrape_smart_full_fallback || settings.scrape_smart_full_fallback || false;
@@ -209,7 +209,7 @@ export const scrapeKeywordWithStrategy = async (
    } else if (strategy === 'smart') {
       const lastPos = keyword.position;
       if (lastPos === 0) {
-         // No prior position data — scrape only page 1; smartFullFallback will walk remaining pages if needed
+         // No prior position data: scrape only page 1; smartFullFallback will walk remaining pages if needed
          pagesToScrape = [1];
       } else {
          const lastPage = Math.ceil(lastPos / PAGE_SIZE);
@@ -267,9 +267,9 @@ export const scrapeKeywordWithStrategy = async (
    const finalSerp = getSerp(keyword.domain, allScrapedResults, subdomainMatching);
 
    // If domain not found and more than half of the scraped pages had errors,
-   // the scraper was unreliable — treat as error to avoid false position=0.
+   // the scraper was unreliable: treat as error to avoid false position=0.
    if (finalSerp.position === 0 && pageErrors > totalPagesAttempted / 2) {
-      const errorMsg = `${pageErrors}/${totalPagesAttempted} pages failed — scraper too unreliable to determine position`;
+      const errorMsg = `${pageErrors}/${totalPagesAttempted} pages failed: scraper too unreliable to determine position`;
       return { ...errorResult, error: errorMsg };
    }
 
@@ -378,7 +378,7 @@ export const extractScrapedResult = (content: string, device: string): SearchRes
       }
    }
 
-   // Desktop fallback: #rso with [role="heading"] (newer Google layout — no h3, no #search)
+   // Desktop fallback: #rso with [role="heading"] (newer Google layout, no h3, no #search)
    if (extractedResult.length === 0) {
       const rsoHeadings = $('body').find('#rso [role="heading"]');
       for (let i = 0; i < rsoHeadings.length; i += 1) {

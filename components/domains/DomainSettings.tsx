@@ -68,7 +68,7 @@ const DomainSettings = ({ domain, closeModal }: DomainSettingsProps) => {
                      text-gray-600 border border-b-0 relative top-[1px] rounded-b-none`;
    const strategyOptions: SelectionOption[] = [
       { label: 'Use Global Setting', value: '' },
-      { label: 'Basic (First page only — 10 results)', value: 'basic' },
+      { label: 'Basic (First page only, 10 results)', value: 'basic' },
       { label: 'Custom (Set number of pages)', value: 'custom' },
       { label: 'Smart (Based on last known position)', value: 'smart' },
    ];

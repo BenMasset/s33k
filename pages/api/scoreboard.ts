@@ -4,7 +4,7 @@ import Keyword from '../../database/models/keyword';
 import verifyUser from '../../utils/verifyUser';
 import parseKeywords from '../../utils/parseKeywords';
 import { cleanPath } from '../../utils/lodd';
-import { getAnalyticsProvider, NormalizedPage } from '../../utils/analytics';
+import { getAnalyticsProvider, NormalizedPage, ReferralSource } from '../../utils/analytics';
 
 type ScoreboardKeyword = {
    keyword: string,
@@ -19,8 +19,10 @@ type ScoreboardPage = {
    page_title?: string,
    page_views: number,
    unique_visitors?: number,
-   bounce_rate?: number,
-   avg_duration?: number,
+   bounce_rate?: number | null,
+   avg_duration?: number | null,
+   metricsNote?: string,
+   aiReferralVisitors: number,
    keywords: ScoreboardKeyword[],
 }
 
@@ -30,8 +32,10 @@ type ContentGapPage = {
    page_title?: string,
    page_views: number,
    unique_visitors?: number,
-   bounce_rate?: number,
-   avg_duration?: number,
+   bounce_rate?: number | null,
+   avg_duration?: number | null,
+   metricsNote?: string,
+   aiReferralVisitors: number,
 }
 
 type UnmatchedKeyword = ScoreboardKeyword & { target_page: string }
@@ -43,6 +47,8 @@ type ScoreboardResponse = {
    pagesWithTrafficNoKeywords?: ContentGapPage[],
    keywordsWithNoMatchingPage?: UnmatchedKeyword[],
    analyticsError?: string | null,
+   referralError?: string | null,
+   aiReferralNote?: string | null,
    loddError?: string | null,
    error?: string | null,
 }
@@ -72,7 +78,37 @@ const getScoreboard = async (req: NextApiRequest, res: NextApiResponse<Scoreboar
       const keywords: KeywordType[] = parseKeywords(allKeywords.map((e) => e.get({ plain: true })));
 
       // 2. Fetch per-page traffic from the configured analytics provider.
-      const { pages: trafficPages, error: analyticsError } = await getAnalyticsProvider().getPageTraffic(domain, period);
+      const provider = getAnalyticsProvider();
+      const { pages: trafficPages, error: analyticsError } = await provider.getPageTraffic(domain, period);
+
+      // 2b. Fetch AI-referral sources so we can attribute AI-referred visitors to
+      // a landing page when the provider exposes a per-landing-page detail. Most
+      // providers report referrals only site-wide (no landing_path), in which
+      // case per-page AI attribution is unavailable and we surface 0 with a note
+      // rather than guessing. Never let a referral failure break the scoreboard.
+      let aiVisitorsByLanding = new Map<string, number>();
+      let referralError: string | null = null;
+      let aiReferralLandingAvailable = false;
+      try {
+         const { sources, error: refError } = await provider.getReferralSources(domain, period);
+         referralError = refError;
+         const aiSources = (sources || []).filter((s: ReferralSource) => s.isAI);
+         aiSources.forEach((s) => {
+            if (s.landing_path) {
+               aiReferralLandingAvailable = true;
+               const key = cleanPath(s.landing_path);
+               const visitors = Number(s.unique_visitors ?? 0);
+               aiVisitorsByLanding.set(key, (aiVisitorsByLanding.get(key) || 0) + visitors);
+            }
+         });
+      } catch (refErr) {
+         referralError = refErr instanceof Error ? refErr.message : String(refErr);
+         aiVisitorsByLanding = new Map<string, number>();
+      }
+      const aiReferralNote = aiReferralLandingAvailable
+         ? null
+         : 'AI-referral data has no per-landing-page detail from this provider, so aiReferralVisitors '
+            + 'is 0 (n/a) on every page. Use the ai_referrals tool for site-wide AI-engine totals.';
 
       // 3. Build a lookup of traffic pages by clean path.
       const pageByPath = new Map<string, NormalizedPage>();
@@ -108,6 +144,7 @@ const getScoreboard = async (req: NextApiRequest, res: NextApiResponse<Scoreboar
 
       trafficPages.forEach((page) => {
          const matched = keywordsByPath.get(page.pathClean) || [];
+         const aiReferralVisitors = aiVisitorsByLanding.get(page.pathClean) || 0;
          if (matched.length > 0) {
             scoreboard.push({
                url: page.url,
@@ -117,6 +154,8 @@ const getScoreboard = async (req: NextApiRequest, res: NextApiResponse<Scoreboar
                unique_visitors: page.unique_visitors,
                bounce_rate: page.bounce_rate,
                avg_duration: page.avg_duration,
+               metricsNote: page.metricsNote,
+               aiReferralVisitors,
                keywords: matched,
             });
          } else {
@@ -129,6 +168,8 @@ const getScoreboard = async (req: NextApiRequest, res: NextApiResponse<Scoreboar
                unique_visitors: page.unique_visitors,
                bounce_rate: page.bounce_rate,
                avg_duration: page.avg_duration,
+               metricsNote: page.metricsNote,
+               aiReferralVisitors,
             });
          }
       });
@@ -144,6 +185,8 @@ const getScoreboard = async (req: NextApiRequest, res: NextApiResponse<Scoreboar
          pagesWithTrafficNoKeywords,
          keywordsWithNoMatchingPage,
          analyticsError,
+         referralError,
+         aiReferralNote,
          // Back-compat alias: existing UI/MCP consumers may still read loddError.
          loddError: analyticsError,
       });

@@ -23,6 +23,7 @@ type DomainType = {
    scrape_pagination_limit?: number,
    scrape_smart_full_fallback?: boolean,
    subdomain_matching?: string,
+   owner_id?: number | null,
 }
 
 type KeywordHistory = {
@@ -50,6 +51,28 @@ type KeywordType = {
    uid?: string
    city?: string
    target_page?: string
+   owner_id?: number | null
+}
+
+type AccountType = {
+   ID: number,
+   name?: string,
+   plan?: string,
+   status?: string,
+   createdAt?: string,
+   updatedAt?: string,
+}
+
+type ApiKeyType = {
+   ID: number,
+   account_id: number,
+   name?: string,
+   key_prefix: string,
+   key_hash: string,
+   last_used_at?: string | null,
+   revoked_at?: string | null,
+   createdAt?: string,
+   updatedAt?: string,
 }
 
 type KeywordLastResult = {

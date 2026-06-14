@@ -29,6 +29,12 @@
  *
  * Optional, because not every provider reports them:
  *   page_title, unique_visitors, bounce_rate, avg_duration.
+ *
+ * bounce_rate / avg_duration may be `null` (not just absent) when a provider can
+ * report the page but genuinely cannot compute that metric at page grain. `null`
+ * means "known to be unavailable" and is distinct from `undefined` ("not set").
+ * When a metric is null, `metricsNote` explains why so the value is not mistaken
+ * for zero.
  */
 export type NormalizedPage = {
    url: string,
@@ -36,8 +42,9 @@ export type NormalizedPage = {
    page_views: number,
    page_title?: string,
    unique_visitors?: number,
-   bounce_rate?: number,
-   avg_duration?: number,
+   bounce_rate?: number | null,
+   avg_duration?: number | null,
+   metricsNote?: string,
 }
 
 export type AnalyticsResult = {
@@ -58,7 +65,12 @@ export type AnalyticsResult = {
  *   unique_visitors  Visitor count for the source.
  *
  * Optional, because not every provider reports them:
- *   page_views, utm_source, utm_medium, utm_campaign.
+ *   page_views, utm_source, utm_medium, utm_campaign, landing_path.
+ *
+ * landing_path is the page a referred visitor first landed on, normalized like
+ * NormalizedPage.pathClean. Most providers report referrals only site-wide and
+ * leave it undefined; when present it lets the scoreboard attribute AI-referred
+ * visitors to a specific page.
  */
 export type ReferralSource = {
    name: string,
@@ -70,6 +82,7 @@ export type ReferralSource = {
    utm_source?: string,
    utm_medium?: string,
    utm_campaign?: string,
+   landing_path?: string,
 }
 
 export type ReferralResult = {

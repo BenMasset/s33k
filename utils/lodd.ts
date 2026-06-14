@@ -9,9 +9,21 @@
  * (see utils/umami.ts). Provider selection lives in utils/analytics.ts.
  *
  * Configuration comes from environment variables:
- *   LODD_API_KEY   Bearer token for the Lodd API (required)
- *   LODD_SITE      The Lodd site UUID to read traffic for (required)
- *   LODD_BASE_URL  Base URL of the Lodd API (optional, defaults to https://api.lodd.dev/v1)
+ *   LODD_API_KEY      Bearer token for the Lodd API (required)
+ *   LODD_SITE         The Lodd site UUID to read traffic for (required)
+ *   LODD_BASE_URL     Base URL of the Lodd API (optional, defaults to https://api.lodd.dev/v1)
+ *   LODD_SITE_DOMAIN  The domain that LODD_SITE belongs to (optional). When set,
+ *                     it is used to scope per-domain calls without an API lookup.
+ *                     When unset, the domain is resolved once from GET /sites and
+ *                     cached. See "domain scoping" below.
+ *
+ * Domain scoping (single-site honesty):
+ *   Lodd is keyed by a single LODD_SITE UUID, not by domain. A naive provider
+ *   would return that one site's data for ANY requested domain, silently
+ *   mislabeling (for example) competitor.com traffic as getmasset.com data.
+ *   To stay honest, every method first checks the requested domain against the
+ *   configured site's domain. On a mismatch it returns an empty, non-crashing
+ *   result with a clear explanatory error instead of the wrong site's numbers.
  */
 
 import type {
@@ -177,6 +189,106 @@ const loddConfig = (): { apiKey?: string, site?: string, baseUrl: string } => ({
 });
 
 /**
+ * Normalize a domain for comparison: lowercase, trimmed, scheme/path stripped,
+ * leading "www." removed.
+ * @param {string} input - A domain or URL.
+ * @returns {string} A bare, comparable hostname, e.g. "getmasset.com".
+ */
+const normalizeDomainForMatch = (input: string): string => String(input || '')
+   .trim()
+   .toLowerCase()
+   .replace(/^https?:\/\//, '')
+   .replace(/^www\./, '')
+   .replace(/\/.*$/, '');
+
+/**
+ * Cache of the configured LODD_SITE's domain, resolved once from GET /sites and
+ * reused for the process lifetime. `null` means "not resolved yet"; a resolved
+ * value of `''` means "the API returned a site but with no domain".
+ */
+let cachedSiteDomain: string | null = null;
+let cachedSiteDomainKey = '';
+
+/**
+ * Resolve the domain that the configured LODD_SITE belongs to.
+ * Order of resolution:
+ *   1. LODD_SITE_DOMAIN env var, if set (no API call).
+ *   2. A cached value from a prior GET /sites lookup.
+ *   3. A fresh GET /sites lookup, matching the row whose id === LODD_SITE.
+ * Never throws: on any failure it returns { domain: null, error }.
+ * @returns {Promise<{ domain: string | null, error: string | null }>}
+ */
+const resolveLoddSiteDomain = async (): Promise<{ domain: string | null, error: string | null }> => {
+   const { apiKey, site, baseUrl } = loddConfig();
+   if (!apiKey || !site) {
+      const missing = [!apiKey ? 'LODD_API_KEY' : '', !site ? 'LODD_SITE' : ''].filter(Boolean).join(', ');
+      return { domain: null, error: `Lodd analytics not configured. Missing env: ${missing}.` };
+   }
+
+   const fromEnv = process.env.LODD_SITE_DOMAIN;
+   if (fromEnv) { return { domain: normalizeDomainForMatch(fromEnv), error: null }; }
+
+   // Invalidate the cache if the configured site changed (e.g. in tests).
+   if (cachedSiteDomain !== null && cachedSiteDomainKey === site) {
+      return { domain: cachedSiteDomain, error: null };
+   }
+
+   try {
+      const res = await fetch(`${baseUrl}/sites`, { headers: { Authorization: `Bearer ${apiKey}` } });
+      if (!res.ok) {
+         const text = await res.text().catch(() => '');
+         return { domain: null, error: `Lodd sites lookup failed (${res.status}): ${text || res.statusText}` };
+      }
+      const json: any = await res.json();
+      const rows: any[] = Array.isArray(json?.data) ? json.data : (Array.isArray(json) ? json : []);
+      const match = rows.find((row) => String(row?.id ?? '') === site);
+      if (!match) {
+         return { domain: null, error: `Lodd site ${site} not found in this account's site list.` };
+      }
+      const domain = normalizeDomainForMatch(String(match?.domain ?? ''));
+      cachedSiteDomain = domain;
+      cachedSiteDomainKey = site;
+      return { domain, error: null };
+   } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { domain: null, error: `Lodd sites lookup error: ${message}` };
+   }
+};
+
+/**
+ * Guard a per-domain Lodd request against the single configured site.
+ * Returns { ok: true } when the requested domain matches the configured site's
+ * domain (or when the configured site's domain cannot be determined, in which
+ * case we fail open rather than block the only configured site). Returns
+ * { ok: false, error } with a clear message when the requested domain provably
+ * does not match the configured site, so callers can return an empty result
+ * instead of the wrong site's data.
+ * @param {string} requestedDomain - The domain the caller asked about.
+ * @returns {Promise<{ ok: boolean, error: string | null, siteDomain: string | null }>}
+ */
+const ensureDomainMatchesSite = async (
+   requestedDomain: string,
+): Promise<{ ok: boolean, error: string | null, siteDomain: string | null }> => {
+   const { domain: siteDomain, error } = await resolveLoddSiteDomain();
+   // If we genuinely cannot determine the site's domain, do not block: Lodd is
+   // configured for exactly one site, so serving it is the least-wrong behavior.
+   // The lookup error is surfaced so the caller can still report it.
+   if (!siteDomain) { return { ok: true, error, siteDomain: null }; }
+
+   const wanted = normalizeDomainForMatch(requestedDomain);
+   if (!wanted) { return { ok: true, error: null, siteDomain }; }
+   if (wanted === siteDomain) { return { ok: true, error: null, siteDomain }; }
+
+   return {
+      ok: false,
+      siteDomain,
+      error: `Lodd is configured for a single site ("${siteDomain}") and cannot report on "${wanted}". `
+         + 'Lodd is keyed by LODD_SITE, not by domain, so it can only serve its one configured site. '
+         + 'Point LODD_SITE at this domain, set LODD_SITE_DOMAIN, or use the Umami provider for multi-domain analytics.',
+   };
+};
+
+/**
  * GET a Lodd endpoint and return its `data` payload (the array or object Lodd
  * wraps under `data`). Never throws: on a config, network, or HTTP problem it
  * returns { data: null, error: <message> }.
@@ -325,44 +437,67 @@ const getLoddEngagement = async (period = '30d'): Promise<EngagementResult> => {
 
 /**
  * Lodd implementation of the AnalyticsProvider interface.
- * Wraps getLoddPages. A LoddPage already satisfies NormalizedPage (its extra
- * fields are the optional ones), so the page list passes straight through.
- * The `domain` argument is unused: Lodd is keyed by LODD_SITE, not by domain.
+ *
+ * Lodd is keyed by a single LODD_SITE UUID, not by domain. Every method first
+ * checks the requested domain against the configured site's domain (see
+ * ensureDomainMatchesSite). On a provable mismatch it returns an empty,
+ * non-crashing result with a clear explanatory error rather than the wrong
+ * site's data. A matched (or undeterminable) domain passes through to the
+ * underlying single-site fetchers. A LoddPage already satisfies NormalizedPage
+ * (its extra fields are the optional ones), so the page list passes through.
  */
 export class LoddProvider implements AnalyticsProvider {
-   // eslint-disable-next-line class-methods-use-this, @typescript-eslint/no-unused-vars
-   async getPageTraffic(_domain: string, period = '30d'): Promise<AnalyticsResult> {
+   // eslint-disable-next-line class-methods-use-this
+   async getPageTraffic(domain: string, period = '30d'): Promise<AnalyticsResult> {
+      const guard = await ensureDomainMatchesSite(domain);
+      if (!guard.ok) { return { pages: [], error: guard.error }; }
       const { pages, error } = await getLoddPages(period);
       return { pages: pages as NormalizedPage[], error };
    }
 
-   // eslint-disable-next-line class-methods-use-this, @typescript-eslint/no-unused-vars
-   async getReferralSources(_domain: string, period = '90d'): Promise<ReferralResult> {
+   // eslint-disable-next-line class-methods-use-this
+   async getReferralSources(domain: string, period = '90d'): Promise<ReferralResult> {
+      const guard = await ensureDomainMatchesSite(domain);
+      if (!guard.ok) { return { sources: [], error: guard.error }; }
       return getLoddReferrals(period);
    }
 
-   // eslint-disable-next-line class-methods-use-this, @typescript-eslint/no-unused-vars
-   async getSummary(_domain: string, period = '30d'): Promise<SummaryResult> {
+   // eslint-disable-next-line class-methods-use-this
+   async getSummary(domain: string, period = '30d'): Promise<SummaryResult> {
+      const guard = await ensureDomainMatchesSite(domain);
+      if (!guard.ok) {
+         return {
+            pageviews: 0, visitors: 0, bounceRate: 0, avgDuration: 0, pagesPerVisit: 0, error: guard.error,
+         };
+      }
       return getLoddSummary(period);
    }
 
-   // eslint-disable-next-line class-methods-use-this, @typescript-eslint/no-unused-vars
-   async getBreakdown(_domain: string, dimension: BreakdownDimension, period = '30d'): Promise<BreakdownResult> {
+   // eslint-disable-next-line class-methods-use-this
+   async getBreakdown(domain: string, dimension: BreakdownDimension, period = '30d'): Promise<BreakdownResult> {
+      const guard = await ensureDomainMatchesSite(domain);
+      if (!guard.ok) { return { rows: [], error: guard.error }; }
       return getLoddBreakdown(dimension, period);
    }
 
-   // eslint-disable-next-line class-methods-use-this, @typescript-eslint/no-unused-vars
-   async getTimeSeries(_domain: string, period = '30d', unit = 'day'): Promise<TimeSeriesResult> {
+   // eslint-disable-next-line class-methods-use-this
+   async getTimeSeries(domain: string, period = '30d', unit = 'day'): Promise<TimeSeriesResult> {
+      const guard = await ensureDomainMatchesSite(domain);
+      if (!guard.ok) { return { series: [], error: guard.error }; }
       return getLoddTimeSeries(period, unit);
    }
 
-   // eslint-disable-next-line class-methods-use-this, @typescript-eslint/no-unused-vars
-   async getEvents(_domain: string, period = '30d'): Promise<EventsResult> {
+   // eslint-disable-next-line class-methods-use-this
+   async getEvents(domain: string, period = '30d'): Promise<EventsResult> {
+      const guard = await ensureDomainMatchesSite(domain);
+      if (!guard.ok) { return { events: [], error: guard.error }; }
       return getLoddEvents(period);
    }
 
-   // eslint-disable-next-line class-methods-use-this, @typescript-eslint/no-unused-vars
-   async getEngagement(_domain: string, period = '30d'): Promise<EngagementResult> {
+   // eslint-disable-next-line class-methods-use-this
+   async getEngagement(domain: string, period = '30d'): Promise<EngagementResult> {
+      const guard = await ensureDomainMatchesSite(domain);
+      if (!guard.ok) { return { tiers: [], error: guard.error }; }
       return getLoddEngagement(period);
    }
 }

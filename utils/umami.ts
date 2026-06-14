@@ -190,9 +190,22 @@ const periodToRange = (period: string): { startAt: number, endAt: number } => {
 /**
  * Self-hosted Umami v2 implementation of the AnalyticsProvider interface.
  * Maps each metrics row (x = url/path, y = count) into a NormalizedPage with
- * page_views set. unique_visitors / bounce_rate / avg_duration are not provided
- * by the url-type metrics endpoint and are left undefined.
+ * page_views set.
+ *
+ * Per-page grain caveat: Umami's metrics endpoint groups by a single dimension
+ * and returns one count per row (pageviews for type=path/url). It does not break
+ * unique visitors, bounce rate, or average duration down per page. So per page:
+ *   - page_views      is the real grouped count.
+ *   - unique_visitors is left undefined (Umami does not expose it at page grain).
+ *   - bounce_rate     is returned as null (known-unavailable at page grain).
+ *   - avg_duration    is returned as null (known-unavailable at page grain).
+ *   - metricsNote     explains the null so it is not read as zero.
+ * Site-wide bounce rate and average duration ARE available and are surfaced by
+ * getSummary; only the per-page split is unavailable from Umami's aggregate API.
  */
+const UMAMI_PAGE_GRAIN_NOTE = 'Umami does not expose unique_visitors, bounce_rate, or avg_duration at '
+   + 'page grain; bounce_rate and avg_duration are null (not zero). Use traffic_summary for site-wide '
+   + 'bounce rate and average duration.';
 export class UmamiProvider implements AnalyticsProvider {
    // eslint-disable-next-line class-methods-use-this
    async getPageTraffic(domain: string, period = '30d'): Promise<AnalyticsResult> {
@@ -229,10 +242,21 @@ export class UmamiProvider implements AnalyticsProvider {
          const rows: any[] = Array.isArray(json) ? json : (Array.isArray(json?.data) ? json.data : []);
          const pages: NormalizedPage[] = rows.map((row) => {
             const rawUrl = String(row?.x ?? '');
+            // Umami v3 metrics rows can carry a visitors count alongside the
+            // grouped pageview count (`y`) under `visitors` on some deployments.
+            // Honor it when present; otherwise leave unique_visitors undefined
+            // rather than copying pageviews into it.
+            const visitorsRaw = row?.visitors ?? row?.v;
+            const uniqueVisitors = visitorsRaw == null ? undefined : Number(visitorsRaw);
             return {
                url: rawUrl,
                pathClean: cleanPath(rawUrl),
                page_views: Number(row?.y ?? 0),
+               unique_visitors: uniqueVisitors,
+               // Known-unavailable at page grain: null (not zero), with a note.
+               bounce_rate: null,
+               avg_duration: null,
+               metricsNote: UMAMI_PAGE_GRAIN_NOTE,
             };
          });
          return { pages, error: null };
