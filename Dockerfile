@@ -17,13 +17,9 @@ FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
-# su-exec lets the entrypoint start as root (to fix the mounted volume's
-# ownership) and then drop to the unprivileged app user before running the app.
-RUN apk add --no-cache su-exec
-
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs && \
-    mkdir -p /app/data && chown nextjs:nodejs /app/data
+    mkdir -p /app/data
 
 # Copy Next.js standalone output (includes traced node_modules)
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
@@ -57,9 +53,9 @@ RUN chmod +x /app/entrypoint.sh && \
     npm cache clean --force && \
     rm -rf /tmp/* /root/.npm
 
-# NOTE: we intentionally do NOT set `USER nextjs` here. The entrypoint starts as
-# root so it can chown the runtime-mounted data volume (Railway mounts it
-# root-owned), then drops to the nextjs user via su-exec before starting the app.
+# NOTE: we intentionally do NOT set `USER nextjs`. Railway mounts the data volume
+# at /app/data root-owned at runtime, so the container runs as root to read and
+# write the SQLite database there with no permission mismatch.
 
 EXPOSE 3000
 
