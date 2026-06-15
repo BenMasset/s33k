@@ -17,6 +17,10 @@ FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
+# su-exec lets the entrypoint start as root (to fix the mounted volume's
+# ownership) and then drop to the unprivileged app user before running the app.
+RUN apk add --no-cache su-exec
+
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs && \
     mkdir -p /app/data && chown nextjs:nodejs /app/data
@@ -53,7 +57,9 @@ RUN chmod +x /app/entrypoint.sh && \
     npm cache clean --force && \
     rm -rf /tmp/* /root/.npm
 
-USER nextjs
+# NOTE: we intentionally do NOT set `USER nextjs` here. The entrypoint starts as
+# root so it can chown the runtime-mounted data volume (Railway mounts it
+# root-owned), then drops to the nextjs user via su-exec before starting the app.
 
 EXPOSE 3000
 

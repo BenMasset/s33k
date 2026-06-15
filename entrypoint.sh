@@ -31,5 +31,12 @@ if [ "$NODE_ENV" = "production" ]; then
   fi
 fi
 
-npx sequelize-cli db:migrate --env production
-exec "$@"
+# The data volume is mounted at runtime (on Railway it arrives root-owned), which
+# overrides the build-time chown. We start as root, so fix ownership here and then
+# drop to the unprivileged nextjs user for the migration and the app itself, so the
+# app can open the SQLite database at /app/data without running as root.
+mkdir -p /app/data
+chown -R nextjs:nodejs /app/data
+
+su-exec nextjs:nodejs npx sequelize-cli db:migrate --env production
+exec su-exec nextjs:nodejs "$@"
