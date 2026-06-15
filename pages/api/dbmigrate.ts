@@ -26,7 +26,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 }
 
 const getMigrationStatus = async (req: NextApiRequest, res: NextApiResponse<MigrationGetResponse>) => {
-   const sequelize = new Sequelize({ dialect: 'sqlite', storage: './data/database.sqlite', logging: false });
+   const sequelize = new Sequelize({ dialect: 'sqlite', storage: process.env.DATABASE_PATH || './data/database.sqlite', logging: false });
    const umzug = new Umzug({
       migrations: { glob: 'database/migrations/*.js' },
       context: sequelize.getQueryInterface(),
@@ -39,7 +39,7 @@ const getMigrationStatus = async (req: NextApiRequest, res: NextApiResponse<Migr
 };
 
 const migrateDatabase = async (req: NextApiRequest, res: NextApiResponse<MigrationPostResponse>) => {
-   const sequelize = new Sequelize({ dialect: 'sqlite', storage: './data/database.sqlite', logging: false });
+   const sequelize = new Sequelize({ dialect: 'sqlite', storage: process.env.DATABASE_PATH || './data/database.sqlite', logging: false });
    const umzug = new Umzug({
       migrations: { glob: 'database/migrations/*.js' },
       context: sequelize.getQueryInterface(),

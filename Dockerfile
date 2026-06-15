@@ -16,6 +16,9 @@ RUN npm run build
 FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+# Absolute DB path so the SQLite file always resolves to the mounted volume,
+# regardless of the runtime working directory (Next.js standalone is not /app-cwd safe).
+ENV DATABASE_PATH=/app/data/database.sqlite
 
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs && \

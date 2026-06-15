@@ -35,5 +35,15 @@ fi
 # The container runs as root, so it can create and open the SQLite database there
 # directly, with no ownership dance.
 mkdir -p /app/data
+
+# Boot diagnostics: prove where we are and whether the DB path is writable.
+echo "[DIAG] pwd=$(pwd) uid=$(id -u) DATABASE_PATH=${DATABASE_PATH:-unset}"
+echo "[DIAG] ls -ld /app/data:"; ls -ld /app/data 2>&1
+if touch /app/data/_writetest 2>/dev/null; then
+  echo "[DIAG] /app/data is WRITABLE"; rm -f /app/data/_writetest
+else
+  echo "[DIAG] /app/data is NOT writable"
+fi
+
 npx sequelize-cli db:migrate --env production
 exec "$@"

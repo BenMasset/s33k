@@ -20,7 +20,7 @@ const connection = new Sequelize({
    },
    logging: false,
    models: [Domain, Keyword, CrawlerHit, Account, ApiKey],
-   storage: './data/database.sqlite',
+   storage: process.env.DATABASE_PATH || './data/database.sqlite',
 });
 
 export default connection;
