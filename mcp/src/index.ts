@@ -1163,10 +1163,208 @@ server.registerTool(
    },
 );
 
+// ---------------------------------------------------------------------------
+// help
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'help',
+   {
+      title: 'Ask s33k anything',
+      description:
+         'Ask me ANY question about s33k and I answer from s33k\'s single authoritative product-knowledge layer. Call this '
+         + 'WHENEVER you are unsure: what a capability does, when to use it, how to set up or install tracking, how to onboard '
+         + 'a domain, why s33k made a design decision (MCP-first, Serper, cookieless analytics, the caps/invite model, '
+         + 'no-model-training), how to troubleshoot a problem (rankings showing 0, an empty AI funnel, zero analytics, a '
+         + 'read-only-member rejection, Search Console not connected), whether s33k is safe/private, or pricing, limits, and '
+         + 'privacy. This is the first thing to call to confirm whether a capability exists before telling the user it does '
+         + 'NOT, and the right tool to answer support-style questions instead of guessing. Returns a structured knowledge '
+         + 'slice: matching capabilities (each with what it does, when to use it, and an example prompt) plus any relevant '
+         + 'setup, reasoning, troubleshooting, trust, and pricing context. It reads no account data and never queries an LLM.',
+      inputSchema: {
+         q: z
+            .string()
+            .describe(
+               'Your question in natural language, e.g. "how do I add tracking?", "what does ai_visibility do?", '
+               + '"is this safe?", "why is my AI funnel empty?".',
+            ),
+         topic: z
+            .string()
+            .optional()
+            .describe(
+               'Optional scope. A pillar ("seo", "aeo", "analytics", "cross-pillar", "onboarding", "account", '
+               + '"security") or a section ("setup", "reasoning", "troubleshooting", "trust", "pricing"). '
+               + 'Omit to search everything.',
+            ),
+      },
+   },
+   async ({ q, topic }) => {
+      try {
+         const query: Record<string, string> = { q };
+         if (topic) { query.topic = topic; }
+         const data = await s33kFetch('/api/help', { query });
+         return jsonResult(data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// request_feature
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'request_feature',
+   {
+      title: 'Request a feature s33k does not have',
+      description:
+         'Submit a request for a NEW s33k capability, for review by the team. HARD REQUIREMENT: before you call this, you '
+         + 'MUST confirm via the `help` tool (or the knowledge resources) that s33k does NOT already do what the user wants. '
+         + 'NEVER offer or call request_feature for something s33k already supports: if a capability exists, point the user '
+         + 'at that capability instead. Only reach for this once help has shown you the need is genuinely unmet. As a safety '
+         + 'net, the server independently cross-checks your request text against the capability index, and if it strongly '
+         + 'matches an existing capability it will REFUSE to store it and return { matched: true, capability, message } telling '
+         + 'you which capability to use, so do not rely on that net, do the help check yourself first. When the request is '
+         + 'genuinely new the server stores it (returns { stored: true, request_id }) and optionally notifies the team. Pass '
+         + 'the user\'s ask in their own words, plus any context about why they want it.',
+      inputSchema: {
+         request: z
+            .string()
+            .describe('The capability the user wants, in their own words, e.g. "export keyword rank history as a CSV file".'),
+         context: z
+            .string()
+            .optional()
+            .describe('Optional context: why they want it, what they tried, the workflow it unblocks.'),
+      },
+   },
+   async ({ request, context }) => {
+      try {
+         const body: Record<string, unknown> = { request };
+         if (context) { body.context = context; }
+         const data = await s33kFetch('/api/feature-request', { method: 'POST', body });
+         return jsonResult(data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// list_feature_requests
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'list_feature_requests',
+   {
+      title: 'List submitted feature requests (admin only)',
+      description:
+         'List the feature requests users have submitted through request_feature, so you (the team) can review what people '
+         + 'are asking for. Optionally filter by status. Returns { requests } where each row has ID, account_id, request, '
+         + 'context, status ("open", "reviewed", "planned", "declined", or "shipped"), matched_capability, and created. This '
+         + 'is restricted to the root admin account: a non-admin or read-only member key is rejected with an admin-required '
+         + 'error.',
+      inputSchema: {
+         status: z
+            .enum(['open', 'reviewed', 'planned', 'declined', 'shipped'])
+            .optional()
+            .describe('Optional status filter. Omit to list every request.'),
+      },
+   },
+   async ({ status }) => {
+      try {
+         const query: Record<string, string> = {};
+         if (status) { query.status = status; }
+         const data = await s33kFetch('/api/feature-request', { query });
+         return jsonResult(data.requests ?? data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// MCP resources: listable/readable knowledge docs.
+//
+// These expose the SAME single product-knowledge source the `help` tool reads, so a client can
+// discover them with resources/list and pull a whole doc into context with resources/read,
+// rather than asking a question. Each resource fetches a topic-scoped slice of GET /api/help
+// (the knowledge layer is the one source; the MCP build cannot import the server's utils/, so
+// it reads them over the same REST path every tool uses). Static, read-only, no account data.
+// ---------------------------------------------------------------------------
+/** Fetch a topic-scoped knowledge slice from the help endpoint and wrap it as a resource read result. */
+async function readKnowledgeResource(uri: string, topic: string) {
+   const data = await s33kFetch('/api/help', { query: { q: '', topic } });
+   return {
+      contents: [
+         {
+            uri,
+            mimeType: 'application/json',
+            text: JSON.stringify(data, null, 2),
+         },
+      ],
+   };
+}
+
+const KNOWLEDGE_RESOURCES: { uri: string; topic: string; name: string; description: string }[] = [
+   {
+      uri: 'knowledge://capabilities',
+      topic: '',
+      name: 'All s33k capabilities',
+      description: 'Every s33k MCP tool with what it does, when to use it, and an example prompt, grouped by pillar '
+         + '(SEO, AEO, analytics, cross-pillar, onboarding, account, security).',
+   },
+   {
+      uri: 'knowledge://setup',
+      topic: 'setup',
+      name: 'Setup and installation',
+      description: 'How to install s33k, reach value in five minutes, add the tracking code per platform, and connect '
+         + 'Google Search Console.',
+   },
+   {
+      uri: 'knowledge://reasoning',
+      topic: 'reasoning',
+      name: 'Design reasoning',
+      description: 'Why s33k is built the way it is: MCP-first control, Serper for rankings, cookieless Umami analytics, '
+         + 'the caps/invite model, no-model-training, open source.',
+   },
+   {
+      uri: 'knowledge://troubleshooting',
+      topic: 'troubleshooting',
+      name: 'Troubleshooting',
+      description: 'Fixes for common issues: rankings showing 0, an empty AI funnel, zero analytics, read-only-member '
+         + 'rejections, and Search Console not connected.',
+   },
+   {
+      uri: 'knowledge://trust',
+      topic: 'trust',
+      name: 'Trust and security',
+      description: 's33k\'s complete, source-cited trust facts: no model training, tenant isolation, encryption at rest, '
+         + 'data ownership, open-source/self-hostable, cookieless/no-PII tracking.',
+   },
+];
+
+for (const resource of KNOWLEDGE_RESOURCES) {
+   server.registerResource(
+      resource.name,
+      resource.uri,
+      { title: resource.name, description: resource.description, mimeType: 'application/json' },
+      async (uri) => {
+         try {
+            return await readKnowledgeResource(uri.href, resource.topic);
+         } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return {
+               contents: [{ uri: uri.href, mimeType: 'text/plain', text: `Failed to load ${resource.uri}: ${message}` }],
+            };
+         }
+      },
+   );
+}
+
 async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
-   process.stderr.write(`s33k-mcp connected (base URL: ${BASE_URL}). 34 tools registered.\n`);
+   process.stderr.write(
+      `s33k-mcp connected (base URL: ${BASE_URL}). 37 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
+   );
 }
 
 main().catch((err) => {

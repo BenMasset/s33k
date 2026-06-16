@@ -49,9 +49,12 @@ export const allowedApiRoutes = [
    'GET:/api/export',
    'DELETE:/api/account-data',
    'GET:/api/security',
+   'GET:/api/help',
    'POST:/api/invite',
    'GET:/api/invite',
    'GET:/api/waitlist',
+   'POST:/api/feature-request',
+   'GET:/api/feature-request',
 ];
 
 export const isAllowedApiRoute = (req: NextApiRequest): boolean => Boolean(
