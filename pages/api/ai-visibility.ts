@@ -10,6 +10,20 @@ import { getAnalyticsProvider, ReferralSource } from '../../utils/analytics';
 import { cleanPath } from '../../utils/lodd';
 import { auditCitability, CitabilityAudit } from '../../utils/citability-audit';
 
+/*
+ * ============================================================================
+ * s33k TRUST MARKER: NO MODEL TRAINING. NO LLM CALL.
+ * ============================================================================
+ * s33k NEVER sends customer data to a model trainer and has NO model-training
+ * pipeline anywhere in the codebase. This route measures AI visibility from
+ * first-party, un-gameable behavior s33k already records (AI crawler hits and
+ * AI referral traffic) plus a deterministic on-page citability audit. It NEVER
+ * queries an LLM and never transmits account data to any external model. Any
+ * interpretation happens in the USER's own LLM over MCP. Full trust
+ * documentation: SECURITY.md (and the security_facts MCP tool).
+ * ============================================================================
+ */
+
 /**
  * The AI Visibility Funnel.
  *

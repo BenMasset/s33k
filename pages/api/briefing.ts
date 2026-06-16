@@ -18,6 +18,25 @@ import {
 } from '../../utils/analytics';
 import { estimateHumanTraffic } from '../../utils/bot-filter';
 
+/*
+ * ============================================================================
+ * s33k TRUST MARKER: NO MODEL TRAINING. ANALYSIS RUNS IN THE USER'S OWN LLM.
+ * ============================================================================
+ * s33k NEVER sends customer data to a model trainer and has NO model-training
+ * pipeline anywhere in the codebase. This route does NOT call any LLM, does NOT
+ * embed, fine-tune, or transmit account data to any external model. It runs
+ * transparent, commented rules server-side over the caller's OWN tenant-scoped
+ * data and returns a structured, narration-ready bundle. The interpretation
+ * ("tell me what this means") happens in the USER's own LLM over MCP: s33k only
+ * hands that LLM structured data. The only credentials s33k stores (Search
+ * Console / Google Ads keys, scraper key) are encrypted at rest with cryptr +
+ * the app SECRET (see utils/searchConsole.ts, utils/adwords.ts, pages/api/
+ * settings.ts). Full trust documentation: SECURITY.md (and the security_facts
+ * MCP tool that answers "is this safe / do you train on my data / who can see
+ * it").
+ * ============================================================================
+ */
+
 /**
  * Daily briefing: the proactive-analyst, "tell me what to DO, not just what
  * happened" capability.

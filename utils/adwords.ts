@@ -1,6 +1,11 @@
 import { readFile, writeFile } from 'fs/promises';
 import Cryptr from 'cryptr';
 import TTLCache from '@isaacs/ttlcache';
+
+// s33k ENCRYPTION-AT-REST MARKER: Google Ads credentials are stored encrypted
+// with cryptr + the app SECRET and decrypted here only in memory to call
+// Google. They are never logged, never exported, and never sent to any model.
+// See SECURITY.md.
 import { setTimeout as sleep } from 'timers/promises';
 import Keyword from '../database/models/keyword';
 import parseKeywords from './parseKeywords';

@@ -3,6 +3,11 @@ import Cryptr from 'cryptr';
 import { readFile, writeFile, unlink } from 'fs/promises';
 import { getCountryCodeFromAlphaThree } from './countries';
 
+// s33k ENCRYPTION-AT-REST MARKER: Search Console credentials (client_email,
+// private_key) are stored encrypted with cryptr + the app SECRET and decrypted
+// here only in memory to call Google. They are never logged, never returned by
+// the data-export endpoint, and never sent to any model. See SECURITY.md.
+
 export type SCDomainFetchError = {
    error: boolean,
    errorMsg: string,

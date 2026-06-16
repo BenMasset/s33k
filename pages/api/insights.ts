@@ -15,6 +15,21 @@ import {
 } from '../../utils/analytics';
 import { estimateHumanTraffic } from '../../utils/bot-filter';
 
+/*
+ * ============================================================================
+ * s33k TRUST MARKER: NO MODEL TRAINING. ANALYSIS RUNS IN THE USER'S OWN LLM.
+ * ============================================================================
+ * s33k NEVER sends customer data to a model trainer and has NO model-training
+ * pipeline anywhere in the codebase. This route does NOT call any LLM, does NOT
+ * embed, fine-tune, or transmit account data to any external model. It joins
+ * the caller's OWN tenant-scoped pillars with transparent, commented rules and
+ * returns structured findings; the narration happens in the USER's own LLM over
+ * MCP, which s33k only hands structured data. Stored credentials are encrypted
+ * at rest with cryptr + the app SECRET. Full trust documentation: SECURITY.md
+ * (and the security_facts MCP tool).
+ * ============================================================================
+ */
+
 /**
  * Cross-pillar insights: the "analyst, not dashboard" capability.
  *
