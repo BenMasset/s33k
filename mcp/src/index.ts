@@ -1072,10 +1072,101 @@ server.registerTool(
    },
 );
 
+// ---------------------------------------------------------------------------
+// export_data
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'export_data',
+   {
+      title: 'Export all your account data',
+      description:
+         'Download EVERYTHING s33k holds about your account as one JSON bundle: your domains, your keywords (with full '
+         + 'Google rank history), your AI/SEO crawler hits, your autocapture analytics events, and your account + API-key '
+         + 'metadata. Use this whenever you want to take your data with you, back it up, or verify exactly what s33k stores. '
+         + 'Your data is yours: this is the export side of that promise. The bundle is tenant-scoped, so it only ever '
+         + 'contains YOUR own data and never another account\'s. It NEVER includes any secret: Search Console / Google Ads '
+         + 'credentials are reported only as configured-or-not, and API keys are returned as non-sensitive metadata only '
+         + '(prefix, name, role, timestamps), never the key hash and never the key itself. Returns the full bundle with a '
+         + 'counts summary.',
+      inputSchema: {},
+   },
+   async () => {
+      try {
+         const data = await s33kFetch('/api/export');
+         return jsonResult(data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// delete_account_data
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'delete_account_data',
+   {
+      title: 'Permanently delete all your account data (IRREVERSIBLE)',
+      description:
+         'PERMANENTLY and IRREVERSIBLY delete your ENTIRE account and ALL of its data: every domain, every keyword and its '
+         + 'rank history, every crawler hit, every autocapture analytics event, your API keys, your account itself, and '
+         + 'your per-domain analytics websites. There is NO undo and NO recovery: once this runs, the data is gone. This '
+         + 'is the delete side of "your data is yours." To run it you MUST pass the exact confirmation string confirm = '
+         + '"DELETE"; without it the call is refused and nothing is deleted. It is tenant-scoped, so it can only ever '
+         + 'delete YOUR OWN account\'s data, never anyone else\'s, and the root admin account can never be deleted this '
+         + 'way. Only call this when the user has clearly and explicitly asked to erase their account; confirm with them '
+         + 'first, because it cannot be undone.',
+      inputSchema: {
+         confirm: z
+            .string()
+            .describe('Must be exactly "DELETE" to proceed. Any other value (or omission) refuses the deletion and changes nothing.'),
+      },
+   },
+   async ({ confirm }) => {
+      try {
+         const data = await s33kFetch('/api/account-data', { method: 'DELETE', body: { confirm } });
+         return jsonResult(data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// security_facts
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'security_facts',
+   {
+      title: 'Is s33k safe? Get the trust facts',
+      description:
+         'Answer "is this safe? do you train on my data? who else can see my data?" with s33k\'s '
+         + 'complete, verifiable trust facts. Returns structured, source-cited answers covering: NO '
+         + 'model training (s33k has no model-training pipeline at all; the AI analysis runs in YOUR '
+         + 'own LLM and s33k only hands it structured data), tenant isolation (one account can never '
+         + 'see another\'s, proven by adversarial isolation tests), encryption at rest (connected '
+         + 'credentials are cryptr-encrypted), data ownership (export and irreversible hard-delete '
+         + 'tools), open-source + self-hostable ("verify us, don\'t trust us"), cookieless / no-PII '
+         + 'tracking, and the sub-processors used. Each fact lists the exact files or tests that '
+         + 'prove it, so the answer is verifiable, not just asserted. Use this whenever a user asks '
+         + 'whether s33k is safe, private, or trustworthy, or whether it trains on or shares their '
+         + 'data.',
+      inputSchema: {},
+   },
+   async () => {
+      try {
+         const data = await s33kFetch('/api/security');
+         return jsonResult(data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
 async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
-   process.stderr.write(`s33k-mcp connected (base URL: ${BASE_URL}). 31 tools registered.\n`);
+   process.stderr.write(`s33k-mcp connected (base URL: ${BASE_URL}). 34 tools registered.\n`);
 }
 
 main().catch((err) => {
