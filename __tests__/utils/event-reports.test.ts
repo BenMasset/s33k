@@ -10,6 +10,7 @@ import {
    buildFormSubmissions,
    buildScrollDepth,
    buildPageEngagement,
+   buildConversionsBySource,
    EventRow,
 } from '../../utils/eventReports';
 
@@ -20,6 +21,7 @@ const row = (over: Partial<EventRow>): EventRow => ({
    selector: '',
    value: null,
    session: 's1',
+   source: 'direct',
    created: new Date().toJSON(),
    ...over,
 });
@@ -123,5 +125,68 @@ describe('buildPageEngagement', () => {
       const { pages, siteAvgEngagementSeconds } = buildPageEngagement([row({ type: 'click' })]);
       expect(pages).toHaveLength(0);
       expect(siteAvgEngagementSeconds).toBe(0);
+   });
+});
+
+describe('buildConversionsBySource', () => {
+   it('attributes form_submit conversions to source with counts, share, and top source', () => {
+      const rows = [
+         row({ type: 'form_submit', source: 'ai', session: 's1' }),
+         row({ type: 'form_submit', source: 'ai', session: 's2' }),
+         row({ type: 'form_submit', source: 'organic-search', session: 's3' }),
+         row({ type: 'form_submit', source: 'direct', session: 's4' }),
+         // a non-conversion event must not be counted as a conversion
+         row({ type: 'click', source: 'ai', session: 's1' }),
+      ];
+      const out = buildConversionsBySource(rows);
+      expect(out.event).toBe('form_submit');
+      expect(out.totalConversions).toBe(4);
+      expect(out.topSource).toEqual({ source: 'ai', count: 2 });
+      const ai = out.conversions.find((c) => c.source === 'ai');
+      expect(ai?.count).toBe(2);
+      expect(ai?.share).toBe(50); // 2 of 4
+      // sorted by count desc, so the top source leads
+      expect(out.conversions[0].source).toBe('ai');
+   });
+
+   it('defaults a missing/empty source to direct so a legacy row is never lost', () => {
+      const out = buildConversionsBySource([
+         row({ type: 'form_submit', source: null, session: 's1' }),
+         row({ type: 'form_submit', source: '', session: 's2' }),
+      ]);
+      expect(out.totalConversions).toBe(2);
+      expect(out.conversions).toHaveLength(1);
+      expect(out.conversions[0]).toMatchObject({ source: 'direct', count: 2, share: 100 });
+   });
+
+   it('computes an approximate conversion rate from the per-source session base and notes it', () => {
+      const rows = [
+         // ai: 1 conversion across 2 distinct event-bearing sessions -> 50%
+         row({ type: 'form_submit', source: 'ai', session: 's1' }),
+         row({ type: 'click', source: 'ai', session: 's2' }),
+      ];
+      const out = buildConversionsBySource(rows);
+      const ai = out.conversions.find((c) => c.source === 'ai');
+      expect(ai?.conversionRate).toBe(50);
+      expect(out.conversionRateNote).toMatch(/[Aa]pproximate/);
+   });
+
+   it('attributes any chosen event type, not just form_submit', () => {
+      const rows = [
+         row({ type: 'outbound', source: 'referral', session: 's1' }),
+         row({ type: 'form_submit', source: 'ai', session: 's2' }),
+      ];
+      const out = buildConversionsBySource(rows, 'outbound');
+      expect(out.event).toBe('outbound');
+      expect(out.totalConversions).toBe(1);
+      expect(out.topSource).toEqual({ source: 'referral', count: 1 });
+   });
+
+   it('returns an empty, non-throwing shape when there are no conversions', () => {
+      const out = buildConversionsBySource([row({ type: 'click', source: 'ai' })]);
+      expect(out.totalConversions).toBe(0);
+      expect(out.conversions).toHaveLength(0);
+      expect(out.topSource).toBeNull();
+      expect(out.conversionRateNote).toBeNull();
    });
 });

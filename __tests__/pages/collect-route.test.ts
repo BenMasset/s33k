@@ -137,6 +137,47 @@ describe('POST /api/collect: rejection paths', () => {
    });
 });
 
+describe('POST /api/collect: source attribution (privacy-safe)', () => {
+   it('stamps a classified session source on every stored event', async () => {
+      mockDomain.findOne.mockResolvedValue({ domain: 'acme.io', owner_id: 7 });
+      const req = makeReq({ body: { domain: 'acme.io', source: 'ai', events: [
+         { type: 'form_submit', page: '/signup', label: 'signup' },
+         { type: 'click', page: '/signup', label: 'Go' },
+      ] } });
+      const res = makeRes();
+
+      await collectHandler(req, res);
+
+      expect(res.statusCode).toBe(200);
+      expect(mockEvent.create.mock.calls[0][0].source).toBe('ai');
+      expect(mockEvent.create.mock.calls[1][0].source).toBe('ai');
+   });
+
+   it('downgrades a URL-like source to direct (never stores a full referrer URL)', async () => {
+      mockDomain.findOne.mockResolvedValue({ domain: 'acme.io', owner_id: 7 });
+      const req = makeReq({ body: { domain: 'acme.io', source: 'https://x.com/p?email=a@b.com', events: [
+         { type: 'click', page: '/', label: 'Go' },
+      ] } });
+      const res = makeRes();
+
+      await collectHandler(req, res);
+
+      expect(res.statusCode).toBe(200);
+      expect(mockEvent.create.mock.calls[0][0].source).toBe('direct');
+   });
+
+   it('defaults a missing source to direct', async () => {
+      mockDomain.findOne.mockResolvedValue({ domain: 'acme.io', owner_id: 7 });
+      const req = makeReq({ body: { domain: 'acme.io', events: [{ type: 'click', page: '/', label: 'Go' }] } });
+      const res = makeRes();
+
+      await collectHandler(req, res);
+
+      expect(res.statusCode).toBe(200);
+      expect(mockEvent.create.mock.calls[0][0].source).toBe('direct');
+   });
+});
+
 describe('POST /api/collect: PII defense + resilience', () => {
    it('drops PII events but stores the clean ones in the same batch', async () => {
       mockDomain.findOne.mockResolvedValue({ domain: 'acme.io', owner_id: 7 });

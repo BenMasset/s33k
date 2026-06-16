@@ -10,6 +10,7 @@ import {
    sanitizeBatch,
    sanitizeText,
    sanitizeSession,
+   sanitizeSource,
    looksLikePII,
    cleanEventPath,
    MAX_LABEL_LEN,
@@ -18,7 +19,9 @@ import {
 describe('sanitizeEvent: valid events', () => {
    it('keeps a clean click with label + selector', () => {
       const out = sanitizeEvent({ type: 'click', page: '/pricing', label: 'Start free trial', selector: 'a.cta' });
-      expect(out).toEqual({ type: 'click', page: '/pricing', label: 'Start free trial', selector: 'a.cta', value: null });
+      expect(out).toEqual({
+         type: 'click', page: '/pricing', label: 'Start free trial', selector: 'a.cta', value: null, source: 'direct',
+      });
    });
 
    it('clamps scroll value to 0..100 and keeps it only for scroll', () => {
@@ -84,6 +87,51 @@ describe('sanitizeText / helpers', () => {
    it('sanitizeSession keeps only safe token chars', () => {
       expect(sanitizeSession('abc-123_XYZ')).toBe('abc-123_XYZ');
       expect(sanitizeSession('drop these spaces!@#')).toBe('dropthesespaces');
+   });
+});
+
+describe('sanitizeSource: the source-privacy proof', () => {
+   it('keeps each of the four allowed class labels', () => {
+      expect(sanitizeSource('direct')).toBe('direct');
+      expect(sanitizeSource('referral')).toBe('referral');
+      expect(sanitizeSource('organic-search')).toBe('organic-search');
+      expect(sanitizeSource('ai')).toBe('ai');
+      expect(sanitizeSource('AI')).toBe('ai'); // case-insensitive
+   });
+
+   it('keeps a bare referrer host (no path/query)', () => {
+      expect(sanitizeSource('news.ycombinator.com')).toBe('news.ycombinator.com');
+      expect(sanitizeSource('t.co')).toBe('t.co');
+   });
+
+   it('DROPS anything URL-like to direct (never stores a full referrer URL or query)', () => {
+      // A full URL with a path/query could carry PII like ?email=...; it must never be stored.
+      expect(sanitizeSource('https://news.ycombinator.com/item?id=1&email=a@b.com')).toBe('direct');
+      expect(sanitizeSource('news.ycombinator.com/item?id=1')).toBe('direct');
+      expect(sanitizeSource('http://evil.com/?token=secret')).toBe('direct');
+      expect(sanitizeSource('user@example.com')).toBe('direct');
+      expect(sanitizeSource('not a host with spaces')).toBe('direct');
+   });
+
+   it('defaults missing/blank/garbage to direct', () => {
+      expect(sanitizeSource(undefined)).toBe('direct');
+      expect(sanitizeSource('')).toBe('direct');
+      expect(sanitizeSource(123 as never)).toBe('direct');
+      expect(sanitizeSource('   ')).toBe('direct');
+   });
+
+   it('stamps the session source on every clean event in a batch', () => {
+      const out = sanitizeBatch(
+         [{ type: 'form_submit', page: '/signup', label: 'signup' }, { type: 'click', page: '/', label: 'Go' }],
+         50,
+         'organic-search',
+      );
+      expect(out.every((e) => e.source === 'organic-search')).toBe(true);
+   });
+
+   it('downgrades a URL-like batch source to direct on every event', () => {
+      const out = sanitizeBatch([{ type: 'click', page: '/', label: 'Go' }], 50, 'https://x.com/a?q=pii');
+      expect(out[0].source).toBe('direct');
    });
 });
 
