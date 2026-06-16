@@ -7,8 +7,8 @@ import { Table, Model, Column, DataType, PrimaryKey } from 'sequelize-typescript
 
 class CrawlerHit extends Model {
    @PrimaryKey
-   @Column({ type: DataType.INTEGER, allowNull: false, primaryKey: true, autoIncrement: true })
-   id!: number;
+   @Column({ type: DataType.INTEGER, allowNull: false, primaryKey: true, autoIncrement: true, field: 'id' })
+   ID!: number;
 
    @Column({ type: DataType.STRING, allowNull: false })
    domain!: string;

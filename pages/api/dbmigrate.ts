@@ -1,8 +1,14 @@
 import { Sequelize } from 'sequelize';
 import { Umzug, SequelizeStorage } from 'umzug';
 import type { NextApiRequest, NextApiResponse } from 'next';
+import pg from 'pg';
 import db from '../../database/database';
 import verifyUser from '../../utils/verifyUser';
+
+// Build a Sequelize instance for migrations: Postgres when DATABASE_URL is set, else SQLite.
+const makeSequelize = () => (process.env.DATABASE_URL
+   ? new Sequelize(process.env.DATABASE_URL, { dialect: 'postgres', dialectModule: pg, logging: false })
+   : new Sequelize({ dialect: 'sqlite', storage: process.env.DATABASE_PATH || './data/database.sqlite', logging: false }));
 
 type MigrationGetResponse = {
    hasMigrations: boolean,
@@ -26,7 +32,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 }
 
 const getMigrationStatus = async (req: NextApiRequest, res: NextApiResponse<MigrationGetResponse>) => {
-   const sequelize = new Sequelize({ dialect: 'sqlite', storage: process.env.DATABASE_PATH || './data/database.sqlite', logging: false });
+   const sequelize = makeSequelize();
    const umzug = new Umzug({
       migrations: { glob: 'database/migrations/*.js' },
       context: sequelize.getQueryInterface(),
@@ -39,7 +45,7 @@ const getMigrationStatus = async (req: NextApiRequest, res: NextApiResponse<Migr
 };
 
 const migrateDatabase = async (req: NextApiRequest, res: NextApiResponse<MigrationPostResponse>) => {
-   const sequelize = new Sequelize({ dialect: 'sqlite', storage: process.env.DATABASE_PATH || './data/database.sqlite', logging: false });
+   const sequelize = makeSequelize();
    const umzug = new Umzug({
       migrations: { glob: 'database/migrations/*.js' },
       context: sequelize.getQueryInterface(),

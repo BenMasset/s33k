@@ -1,14 +1,20 @@
-module.exports = {
-  production: {
-    username: process.env.USER_NAME ? process.env.USER_NAME : process.env.USER,
-    password: process.env.PASSWORD,
+// Use Postgres when DATABASE_URL is set (hosted deploy), otherwise SQLite (local dev).
+const config = process.env.DATABASE_URL
+  ? {
+    url: process.env.DATABASE_URL,
+    dialect: 'postgres',
+    dialectOptions: {},
+  }
+  : {
     database: 'sequelize',
-    host: 'database',
-    port: 3306,
     dialect: 'sqlite',
     storage: process.env.DATABASE_PATH || './data/database.sqlite',
     dialectOptions: {
       bigNumberStrings: true,
     },
-  },
+  };
+
+module.exports = {
+  development: config,
+  production: config,
 };

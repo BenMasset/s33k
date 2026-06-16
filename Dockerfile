@@ -52,6 +52,8 @@ RUN chmod +x /app/entrypoint.sh && \
       @googleapis/searchconsole@1.0.5 \
       sequelize-cli@6.6.5 \
       concurrently@7.6.0 \
+      pg@8.13.1 \
+      pg-hstore@2.3.4 \
       @isaacs/ttlcache@1.4.1 && \
     npm cache clean --force && \
     rm -rf /tmp/* /root/.npm

@@ -48,3 +48,6 @@ data/
 .github/*.md
 mcp/node_modules
 mcp/dist
+
+#deploy resume doc (contains production API key)
+RESUME_DEPLOY.md
