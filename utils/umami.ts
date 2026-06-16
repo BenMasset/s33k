@@ -708,4 +708,7 @@ export class UmamiProvider implements AnalyticsProvider {
    }
 }
 
-export default UmamiProvider;
+// NOTE: do NOT add `export default UmamiProvider`. Exporting the class as the default
+// clobbers the named export in the Next standalone bundle, so getAnalyticsProvider's
+// `require('./umami').UmamiProvider` comes back undefined ("UmamiProvider is not a
+// constructor"). It broke all analytics reads on prod once. Keep the named export only.

@@ -369,6 +369,9 @@ export const getAnalyticsProvider = (): AnalyticsProvider => {
       return unconfiguredProvider('umami');
    }
    // eslint-disable-next-line global-require
-   const { UmamiProvider } = require('./umami');
+   const umamiModule = require('./umami');
+   // Tolerate both the named and (legacy) default export shapes so a bundler interop
+   // quirk cannot silently break analytics again (it did once on prod).
+   const UmamiProvider = umamiModule.UmamiProvider || umamiModule.default;
    return new UmamiProvider();
 };
