@@ -27,6 +27,13 @@ class Account extends Model {
 
    @Column({ type: DataType.STRING, allowNull: true, defaultValue: 'active' })
    status!: string;
+
+   // How many EXTERNAL invites this account may send (each external invite brings a new
+   // admin + account into s33k). The viral lever, bounded so one account cannot flood the
+   // system. Internal invites (read-only members on this account) are unlimited and not
+   // counted against this. Only meaningful with MULTI_TENANT on.
+   @Column({ type: DataType.INTEGER, allowNull: true, defaultValue: 5 })
+   external_invite_quota!: number;
 }
 
 export default Account;

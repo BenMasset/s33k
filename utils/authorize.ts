@@ -12,6 +12,14 @@ const authorize = async (req: NextApiRequest, res: NextApiResponse): Promise<Res
    const resolved = await resolveAccount(req, res);
    if (!resolved.authorized) { return resolved; }
 
+   // Read-only member keys may only read. Any non-GET (write) request from a member key is
+   // rejected before it reaches the route. Admin and legacy keys (role 'admin') are
+   // unaffected; members only ever exist with MULTI_TENANT on, so the flag-off path never
+   // hits this. GET is the only safe-method we expose to keys, so we gate strictly to it.
+   if (resolved.role === 'member' && req.method !== 'GET') {
+      return { authorized: false, account: null, error: 'Read-only member' };
+   }
+
    // Cookie/UI callers are unrestricted. Anyone presenting a Bearer key must be hitting a
    // whitelisted route, matching the original verifyUser behavior.
    const usedBearer = Boolean(req.headers.authorization);

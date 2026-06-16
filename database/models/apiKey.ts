@@ -37,6 +37,13 @@ class ApiKey extends Model {
 
    @Column({ type: DataType.DATE, allowNull: true })
    revoked_at!: Date;
+
+   // 'admin' (full access, the account owner / legacy keys) or 'member' (read-only seat,
+   // created by an internal invite). A member key may only make GET requests; writes are
+   // rejected by authorize(). Defaults to 'admin' so every existing key keeps full access.
+   // Only meaningful with MULTI_TENANT on (members only exist there).
+   @Column({ type: DataType.STRING, allowNull: true, defaultValue: 'admin' })
+   role!: string;
 }
 
 export default ApiKey;

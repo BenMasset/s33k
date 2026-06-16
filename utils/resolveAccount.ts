@@ -23,6 +23,11 @@ import { ADMIN_ACCOUNT_ID, isMultiTenantEnabled } from './scope';
 export type ResolvedAccount = {
    authorized: boolean,
    account: Account | null,
+   // The role of the api_key that authorized this request, when known. 'admin' for the
+   // legacy global key, cookie sessions, and per-account admin keys; 'member' for a
+   // read-only member key (internal-invite seat). Undefined when no key resolved. authorize()
+   // reads this to reject writes from member keys. Only members exist with MULTI_TENANT on.
+   role?: 'admin' | 'member',
    error?: string,
 };
 
@@ -54,6 +59,20 @@ export const generateApiKey = (length = 40): string => {
    return `s33k_${body}`;
 };
 
+// Mint an unguessable invite code. Same cryptographically-secure base62 body as an API key
+// (>200 bits at the default length) but with no `s33k_` prefix, since the code is a one-time
+// credential the public accept endpoint trades for a real key, not a key itself. It is stored
+// in clear (single-use, short-lived) and looked up by exact, indexed match, so an invalid code
+// is rejected fast without leaking whether any account or email exists.
+export const generateInviteCode = (length = 40): string => {
+   const bytes = crypto.randomBytes(length);
+   let body = '';
+   for (let i = 0; i < length; i += 1) {
+      body += BASE62[bytes[i] % BASE62.length];
+   }
+   return body;
+};
+
 const resolveAccount = async (req: NextApiRequest, res: NextApiResponse): Promise<ResolvedAccount> => {
    const cookies = new Cookies(req, res);
    const token = cookies && cookies.get('token');
@@ -62,7 +81,7 @@ const resolveAccount = async (req: NextApiRequest, res: NextApiResponse): Promis
    if (token && process.env.SECRET) {
       let valid = false;
       jwt.verify(token, process.env.SECRET, (err) => { valid = !err; });
-      if (valid) { return { authorized: true, account: adminAccount() }; }
+      if (valid) { return { authorized: true, account: adminAccount(), role: 'admin' }; }
    }
 
    const authHeader = req.headers.authorization;
@@ -70,7 +89,7 @@ const resolveAccount = async (req: NextApiRequest, res: NextApiResponse): Promis
 
    // Legacy global key always resolves to admin, regardless of the flag.
    if (bearer && bearer === process.env.APIKEY) {
-      return { authorized: true, account: adminAccount() };
+      return { authorized: true, account: adminAccount(), role: 'admin' };
    }
 
    // With multi-tenancy off, no other key path exists: behave exactly like today.
@@ -93,7 +112,10 @@ const resolveAccount = async (req: NextApiRequest, res: NextApiResponse): Promis
             } catch (saveError) {
                // ignore
             }
-            return { authorized: true, account };
+            // Surface the key's role so authorize() can hold a member key to GET-only.
+            // Legacy keys (and keys minted before the role column existed) default to admin.
+            const role: 'admin' | 'member' = candidate.role === 'member' ? 'member' : 'admin';
+            return { authorized: true, account, role };
          }
       }
       return { authorized: false, account: null, error: 'Invalid API Key Provided.' };
