@@ -85,7 +85,7 @@ export type KnowledgeBase = {
 };
 
 // ---------------------------------------------------------------------------
-// Capabilities: one entry per registered MCP tool (38 total).
+// Capabilities: one entry per registered MCP tool (39 total).
 // Keep these in lockstep with mcp/src/index.ts; the coverage test fails the build
 // if any registered tool lacks an entry here.
 // ---------------------------------------------------------------------------
@@ -370,6 +370,21 @@ const capabilities: CapabilityEntry[] = [
          + 'order. Rules-based, never calls an LLM.',
       whenToUse: 'Use as the FIRST call each day or whenever the user asks "how is my site doing?" or "what should I work on?"',
       examplePrompt: 'Give me the daily briefing for getmasset.com.',
+   },
+   {
+      id: 'alerts',
+      toolName: 'alerts',
+      category: 'cross-pillar',
+      title: 'Proactive alerts: what changed and what to do',
+      description: 'Your "what changed and what to do" standup across SEO, AI search, and analytics. Compares the current period to the prior '
+         + 'one and surfaces notable shifts as a prioritized list of plain-English alerts: keyword rank moves of 5+ positions or crossing page one, '
+         + 'traffic swings of 25%+, any NEW AI referral engine or AI crawler (a leading AEO signal), and form-submission/conversion shifts of 30%+. '
+         + 'Each alert carries a severity, the headline shift, a detail, and a concrete recommendation; the response also returns the single most '
+         + 'important thing to act on right now. Rules-based: it never calls an LLM, and it stays silent on a signal it cannot honestly measure '
+         + 'rather than inventing a movement.',
+      whenToUse: 'Use as your period-over-period standup to see what moved since the prior window and get a concrete next action. Where briefing '
+         + 'answers "how is my site right now?", this answers "what moved and what should I do about it?"',
+      examplePrompt: 'What moved on my site since the prior period, and what should I do about it?',
    },
    // --- Onboarding ---
    {

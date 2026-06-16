@@ -42,6 +42,7 @@ export const allowedApiRoutes = [
    'POST:/api/onboard',
    'GET:/api/install-instructions',
    'GET:/api/briefing',
+   'GET:/api/alerts',
    'POST:/api/account',
    'GET:/api/account',
    'POST:/api/account-key',

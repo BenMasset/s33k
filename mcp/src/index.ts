@@ -830,6 +830,55 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// alerts
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'alerts',
+   {
+      title: 'Proactive alerts: what changed and what to do',
+      description:
+         'Your weekly "what changed and what to do" standup across SEO, AI search, and analytics. Where briefing answers '
+         + '"how is my site right now?", alerts answers the harder, more useful question: "what CHANGED since last period, '
+         + 'and what should I do about it?" It compares the current period to the immediately-prior period of the same '
+         + 'length and surfaces the notable shifts as a PRIORITIZED list of plain-English alerts: keyword rank moves of 5+ '
+         + 'positions or crossing page one (the highest-signal SEO move), traffic swings of 25%+ (pageviews and visitors), '
+         + 'any brand-NEW AI referral engine or AI crawler (a leading AEO signal: a new engine citing or crawling you), and '
+         + 'form-submission/conversion changes of 30%+. Each alert carries a severity (high/medium/low), the pillar, a '
+         + 'headline stating exactly what changed, a detail with the numbers, and a concrete recommendation. The response '
+         + 'also returns topPriority: the single most important thing to do this week, and a per-pillar dataAvailability note '
+         + 'so you can tell the user honestly when a signal had no baseline to compare. RULES-BASED: the s33k server does NOT '
+         + 'call any LLM; it computes the deltas with transparent rules and stays silent on any signal it cannot honestly '
+         + 'measure (e.g. no prior traffic baseline) rather than inventing a swing from zero. YOU (the connected LLM) narrate '
+         + 'the alerts, leading with topPriority. It never fails on a missing signal: each pillar degrades independently.',
+      inputSchema: {
+         domain: z.string().describe('The domain to analyze for changes, e.g. "getmasset.com".'),
+         period: z
+            .string()
+            .optional()
+            .describe('The window to compare against its immediately-prior equivalent, e.g. "7d" (this week vs last week) or '
+               + '"30d" (this month vs last month). Defaults to "7d".'),
+      },
+   },
+   async ({ domain, period }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         const data = await s33kFetch('/api/alerts', { query });
+         return jsonResult({
+            alerts: data.alerts,
+            topPriority: data.topPriority,
+            period: data.period,
+            comparedTo: data.comparedTo,
+            dataAvailability: data.dataAvailability,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // create_domain
 // ---------------------------------------------------------------------------
 server.registerTool(
@@ -1403,7 +1452,7 @@ async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
    process.stderr.write(
-      `s33k-mcp connected (base URL: ${BASE_URL}). 38 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
+      `s33k-mcp connected (base URL: ${BASE_URL}). 39 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
    );
 }
 
