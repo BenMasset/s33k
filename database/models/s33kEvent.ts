@@ -58,6 +58,14 @@ class S33kEvent extends Model {
    @Column({ type: DataType.STRING, allowNull: true, defaultValue: '' })
    session!: string;
 
+   // The session's first-touch source: a CLASSIFICATION ('direct' | 'referral' |
+   // 'organic-search' | 'ai') or at most the bare referrer HOST. NEVER a full referrer URL
+   // with a path or query (those can carry PII), enforced by sanitizeSource at ingest. The
+   // client reads document.referrer once per session, classifies it, and carries one value on
+   // the batch; it is applied to every event so conversions can be attributed by source.
+   @Column({ type: DataType.STRING, allowNull: true, defaultValue: null })
+   source!: string | null;
+
    @Column({ type: DataType.STRING, allowNull: false })
    created!: string;
 }

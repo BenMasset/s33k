@@ -92,6 +92,58 @@
       }
       var session = getSession();
 
+      // ===================== First-touch SOURCE (PII-safe, computed once) ===================
+      // Read document.referrer ONCE at session start and reduce it to a single first-touch
+      // class: 'direct' | 'organic-search' | 'ai' | 'referral'. This is carried at the top
+      // level of every batch so conversions can be attributed by source server-side.
+      //
+      // PRIVACY (non-negotiable): we send a CLASSIFICATION only, never a full referrer URL and
+      // never any query string (a query can carry PII like ?email=...). We never send a path.
+      // The most identifying thing this can ever produce is a bare host, and only as the value
+      // the server can keep for a 'referral'; the classes themselves leak nothing.
+      //
+      // The host substrings below mirror the server's notions (utils/ai-sources.ts) but are
+      // kept inline and small on purpose: the client cannot import server modules.
+      var AI_HOSTS = [
+         'chatgpt', 'chat.openai.com', 'openai.com', 'perplexity', 'gemini.google.com',
+         'bard.google.com', 'claude.ai', 'anthropic', 'copilot.microsoft.com', 'you.com',
+         'poe.com', 'phind', 'meta.ai', 'deepseek', 'x.ai',
+      ];
+      var SEARCH_HOSTS = [
+         'google.', 'bing.', 'duckduckgo', 'yahoo.', 'yandex.', 'baidu.', 'ecosia.',
+         'brave.com/search', 'search.brave', 'startpage', 'qwant', 'ask.com', 'aol.',
+         'naver.', 'seznam.',
+      ];
+      function classifySource() {
+         try {
+            var ref = document.referrer || '';
+            if (!ref) { return 'direct'; }
+            var refHost = '';
+            var refHostPath = '';
+            try {
+               var u = new URL(ref);
+               // Same-origin referral is an in-site navigation, not an external source.
+               if (u.host === window.location.host) { return 'direct'; }
+               refHost = (u.host || '').toLowerCase();
+               // Host + path only (NO query, NO hash) so a path-specific pattern can match
+               // without ever carrying query-string PII.
+               refHostPath = (refHost + (u.pathname || '')).toLowerCase();
+            } catch (e) { return 'direct'; }
+            if (!refHost) { return 'direct'; }
+            function hit(list) {
+               for (var i = 0; i < list.length; i++) {
+                  if (refHostPath.indexOf(list[i]) !== -1) { return true; }
+               }
+               return false;
+            }
+            if (hit(AI_HOSTS)) { return 'ai'; }
+            if (hit(SEARCH_HOSTS)) { return 'organic-search'; }
+            // External, unknown source: send the bare HOST only (never the path or query).
+            return refHost;
+         } catch (e) { return 'direct'; }
+      }
+      var sessionSource = classifySource();
+
       // ===================== Text + selector helpers (PII-safe) ============================
       function clean(text, max) {
          if (text == null) { return ''; }
@@ -174,7 +226,9 @@
          if (queue.length >= BATCH_MAX) { flush(false); }
       }
       function payload(events) {
-         return JSON.stringify({ domain: domain, session: session, events: events });
+         // source is a top-level, session-level classification (or bare host). The server
+         // re-sanitizes it and stamps it on every stored event.
+         return JSON.stringify({ domain: domain, session: session, source: sessionSource, events: events });
       }
       function flush(useBeacon) {
          try {

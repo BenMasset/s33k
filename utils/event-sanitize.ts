@@ -102,6 +102,9 @@ export type CleanEvent = {
    label: string,
    selector: string,
    value: number | null,
+   // The session's first-touch source class (or bare host). Applied at batch level from the
+   // single session-level source the client computed once; never per-event PII.
+   source: SourceValue,
 };
 
 /**
@@ -117,9 +120,11 @@ export type CleanEvent = {
  *   - page is reduced to a path with query/hash removed.
  *
  * @param {RawEvent} raw - One untrusted event from the batch.
+ * @param {SourceValue} [source] - The session's already-sanitized first-touch source to stamp
+ *                                 on the event. Defaults to 'direct'.
  * @returns {CleanEvent | null}
  */
-export const sanitizeEvent = (raw: RawEvent): CleanEvent | null => {
+export const sanitizeEvent = (raw: RawEvent, source: SourceValue = 'direct'): CleanEvent | null => {
    if (!raw || typeof raw !== 'object') { return null; }
 
    const type = asString(raw.type).toLowerCase();
@@ -144,7 +149,8 @@ export const sanitizeEvent = (raw: RawEvent): CleanEvent | null => {
       }
    }
 
-   return { type: type as EventType, page, label, selector, value };
+   // The source is re-sanitized here so a caller that passes a raw value still gets a safe one.
+   return { type: type as EventType, page, label, selector, value, source: sanitizeSource(source) };
 };
 
 /**
@@ -152,13 +158,16 @@ export const sanitizeEvent = (raw: RawEvent): CleanEvent | null => {
  * so a single POST cannot dump unbounded rows. Never throws.
  * @param {unknown} events - The raw events array from the request body.
  * @param {number} [maxBatch] - Max events processed from one POST.
+ * @param {unknown} [source] - The session-level first-touch source, stamped on every event in
+ *                             the batch after being sanitized to a class label or bare host.
  * @returns {CleanEvent[]}
  */
-export const sanitizeBatch = (events: unknown, maxBatch = 50): CleanEvent[] => {
+export const sanitizeBatch = (events: unknown, maxBatch = 50, source?: unknown): CleanEvent[] => {
    if (!Array.isArray(events)) { return []; }
+   const sessionSource = sanitizeSource(source);
    const clean: CleanEvent[] = [];
    for (const raw of events.slice(0, maxBatch)) {
-      const ok = sanitizeEvent(raw as RawEvent);
+      const ok = sanitizeEvent(raw as RawEvent, sessionSource);
       if (ok) { clean.push(ok); }
    }
    return clean;
@@ -168,4 +177,51 @@ export const sanitizeBatch = (events: unknown, maxBatch = 50): CleanEvent[] => {
 export const sanitizeSession = (value: unknown): string => {
    const s = asString(value).replace(/[^a-zA-Z0-9_-]/g, '');
    return s.slice(0, MAX_SESSION_LEN);
+};
+
+/**
+ * The four allowed first-touch source CLASSES. These are classifications, never URLs. The
+ * client computes one of these once per session from document.referrer and carries it on
+ * the batch; the value attributed to each event is one of these or, for an external referral,
+ * the bare referrer host (e.g. "news.ycombinator.com"). Note: 'organic-search' is the stored
+ * class label for traditional search engines (the AI-referral classifier elsewhere uses the
+ * shorter 'search'; this column keeps the user-facing 'organic-search' label).
+ */
+export const SOURCE_CLASSES = ['direct', 'referral', 'organic-search', 'ai'] as const;
+export type SourceValue = typeof SOURCE_CLASSES[number] | string;
+
+/** Max stored length of a source value. A bare host is short; anything longer is a smell. */
+export const MAX_SOURCE_LEN = 120;
+
+/**
+ * Is this string a bare hostname (e.g. "news.ycombinator.com")? Used to allow a referral
+ * host while rejecting anything URL-shaped. Deliberately strict: it must contain a dot, only
+ * host-legal characters (letters, digits, dot, hyphen, optional :port), and NO path, query,
+ * scheme, '@', or whitespace. Anything with a '/', '?', '#', '://', or '@' is rejected as a
+ * potential PII carrier, never stored.
+ */
+const isBareHost = (value: string): boolean => {
+   if (!value || value.length > MAX_SOURCE_LEN) { return false; }
+   // Reject anything that is not purely host-and-optional-port shaped.
+   if (!/^[a-z0-9.-]+(?::\d{1,5})?$/.test(value)) { return false; }
+   // Must look like a real host: at least one dot with a 2+ char TLD-ish tail.
+   return /\.[a-z]{2,}$/.test(value.split(':')[0]);
+};
+
+/**
+ * Validate and normalize the session entry SOURCE for storage. This is the privacy gate for
+ * the source column: it returns ONLY one of the four allowed class labels or a bare host, and
+ * defaults to 'direct' for anything missing, URL-like, or otherwise unparseable. A full
+ * referrer URL with a path or query (which could carry PII like ?email=...) is NEVER stored;
+ * it is downgraded to 'direct'. Never throws.
+ * @param {unknown} value - The untrusted source from the batch.
+ * @returns {SourceValue} One of the four classes, or a bare host, never a URL.
+ */
+export const sanitizeSource = (value: unknown): SourceValue => {
+   const raw = asString(value).toLowerCase();
+   if (!raw) { return 'direct'; }
+   if ((SOURCE_CLASSES as readonly string[]).includes(raw)) { return raw; }
+   // Anything URL-shaped or carrying a path/query/credential is dropped to 'direct'.
+   if (isBareHost(raw) && !looksLikePII(raw)) { return raw; }
+   return 'direct';
 };

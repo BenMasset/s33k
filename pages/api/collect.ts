@@ -69,7 +69,10 @@ const collect = async (req: NextApiRequest, res: NextApiResponse<CollectResponse
       }
 
       // 4a. Sanitize + PII-strip the batch BEFORE any DB work. Invalid/PII events are dropped.
-      const clean = sanitizeBatch(Array.isArray(body.events) ? body.events : []);
+      // The session-level `source` (a classification or bare host) is sanitized and stamped on
+      // every event. sanitizeSource downgrades anything URL-like to 'direct', so a full
+      // referrer URL with PII in its query can never reach a row. Absent source -> 'direct'.
+      const clean = sanitizeBatch(Array.isArray(body.events) ? body.events : [], undefined, body.source);
       const submitted = Array.isArray(body.events) ? body.events.length : 0;
       if (clean.length === 0) {
          // Nothing valid to store. Not an error from the client's point of view.
@@ -106,6 +109,7 @@ const collect = async (req: NextApiRequest, res: NextApiResponse<CollectResponse
                selector: ev.selector,
                value: ev.value,
                session,
+               source: ev.source,
                created,
             });
             recorded += 1;
