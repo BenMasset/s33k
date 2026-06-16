@@ -806,10 +806,122 @@ server.registerTool(
    },
 );
 
+// ---------------------------------------------------------------------------
+// invite_external
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'invite_external',
+   {
+      title: 'Invite an external user (new account)',
+      description:
+         'Send an EXTERNAL invite that brings a brand-new admin and their own account into s33k, the viral growth lever. '
+         + 'Use this to invite someone OUTSIDE your organization to start using s33k for their own domain. The person who '
+         + 'accepts becomes the admin of a NEW account and gets their own admin API key. External invites are LIMITED: each '
+         + 'account has a quota (default 5), so this can fail with "External invite quota exhausted." once you have used '
+         + 'yours. An email is required so the invite can be delivered (sent automatically when email is configured on the '
+         + 'server, otherwise share the returned link yourself). Returns { code, link, type, emailSent }: give the link or '
+         + 'code to the recipient so they can activate. Requires an admin API key; a read-only member key is rejected.',
+      inputSchema: {
+         email: z.string().describe('The email address of the person to invite, e.g. "jane@company.com". Required.'),
+      },
+   },
+   async ({ email }) => {
+      try {
+         const data = await s33kFetch('/api/invite', { method: 'POST', body: { type: 'external', email } });
+         return jsonResult(data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// invite_internal
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'invite_internal',
+   {
+      title: 'Invite an internal teammate (read-only seat)',
+      description:
+         'Send an INTERNAL invite that adds a read-only MEMBER seat to YOUR OWN account, for a teammate who should see your '
+         + 'domains, rankings, analytics, and AI visibility but not change anything. Use this to bring a colleague onto your '
+         + 'existing account. The person who accepts gets a read-only member API key scoped to your account (member keys can '
+         + 'only read, never write). Internal invites are UNLIMITED (they do not consume your external quota). An email is '
+         + 'optional: pass one to have the invite delivered automatically (when email is configured on the server), or omit '
+         + 'it and share the returned link yourself. Returns { code, link, type, emailSent }. Requires an admin API key; a '
+         + 'read-only member key is rejected.',
+      inputSchema: {
+         email: z
+            .string()
+            .optional()
+            .describe('Optional email of the teammate to invite, e.g. "team@company.com". If given, the invite is emailed.'),
+      },
+   },
+   async ({ email }) => {
+      try {
+         const body: Record<string, unknown> = { type: 'internal' };
+         if (email) { body.email = email; }
+         const data = await s33kFetch('/api/invite', { method: 'POST', body });
+         return jsonResult(data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// list_invites
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'list_invites',
+   {
+      title: 'List invites you have sent',
+      description:
+         'List every invite your account has created, both external and internal, the way Gmail shows your sent invites. '
+         + 'Use this to see who you have invited, which invites are still pending, which have been accepted, and how many '
+         + 'external invites you have used against your quota. Returns { invites } where each invite has ID, code, type '
+         + '("external" or "internal"), email, status ("pending", "accepted", "expired", or "revoked"), target_account_id, '
+         + 'created, and accepted_at. Requires an admin API key; a read-only member key is rejected.',
+      inputSchema: {},
+   },
+   async () => {
+      try {
+         const data = await s33kFetch('/api/invite');
+         return jsonResult(data.invites ?? data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// list_waitlist
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'list_waitlist',
+   {
+      title: 'List waitlist signups (admin only)',
+      description:
+         'List everyone who has signed up for the s33k waitlist, so you can decide who to send external invites to. Use '
+         + 'this to review pending demand before inviting people in. Returns { waitlist } where each row has ID, email, '
+         + 'domain, note, status ("waiting" or "invited"), and created. This is restricted to the root admin account: a '
+         + 'non-admin or read-only member key is rejected with an admin-required error.',
+      inputSchema: {},
+   },
+   async () => {
+      try {
+         const data = await s33kFetch('/api/waitlist');
+         return jsonResult(data.waitlist ?? data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
 async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
-   process.stderr.write(`s33k-mcp connected (base URL: ${BASE_URL}). 23 tools registered.\n`);
+   process.stderr.write(`s33k-mcp connected (base URL: ${BASE_URL}). 27 tools registered.\n`);
 }
 
 main().catch((err) => {
