@@ -565,6 +565,160 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// top_clicks
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'top_clicks',
+   {
+      title: 'Top clicks',
+      description:
+         'List the most-clicked elements on a domain from s33k autocapture, the GA4-killer feature: one script tag on the '
+         + 'site captures every button and link click with ZERO per-element setup (no tag manager, no instrumentation). Use '
+         + 'this to see which CTAs, nav links, and buttons actually get clicked. Each row has the element\'s visible text '
+         + '(label), a stable CSS selector, the total clickCount, and a per-page breakdown (byPage) of where it was clicked, '
+         + 'sorted by clickCount. Privacy: this reports THAT an element was clicked and its visible text/selector, NEVER any '
+         + 'value typed into an input. Cookieless, no PII. Reads the first-party event store; never queries an LLM.',
+      inputSchema: {
+         domain: z.string().describe('The domain to report top clicks for, e.g. "getmasset.com".'),
+         period: z
+            .string()
+            .optional()
+            .describe('Reporting window, e.g. "30d", "7d", "90d". Defaults to "30d".'),
+      },
+   },
+   async ({ domain, period }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         const data = await s33kFetch('/api/top-clicks', { query });
+         return jsonResult({ domain: data.domain, period: data.period, clicks: data.clicks, error: data.error });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// form_submissions
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'form_submissions',
+   {
+      title: 'Form submissions',
+      description:
+         'Report form-submission activity on a domain from s33k autocapture: which forms get submitted, how often, and from '
+         + 'which pages, with ZERO per-form setup (the single script tag captures submits automatically). Use this to measure '
+         + 'conversion or funnel health, signup volume, and contact-form engagement. Returns forms[] (each with the form '
+         + 'id/name as label, submissionCount, and a per-page byPage breakdown, sorted by count) plus totalSubmissions. '
+         + 'Privacy: this records THAT a form was submitted and its id/name, NEVER any field value or anything typed. '
+         + 'Cookieless, no PII. Reads the first-party event store; never queries an LLM.',
+      inputSchema: {
+         domain: z.string().describe('The domain to report form submissions for, e.g. "getmasset.com".'),
+         period: z
+            .string()
+            .optional()
+            .describe('Reporting window, e.g. "30d", "7d", "90d". Defaults to "30d".'),
+      },
+   },
+   async ({ domain, period }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         const data = await s33kFetch('/api/form-submissions', { query });
+         return jsonResult({
+            domain: data.domain,
+            period: data.period,
+            forms: data.forms,
+            totalSubmissions: data.totalSubmissions,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// scroll_depth
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'scroll_depth',
+   {
+      title: 'Scroll depth',
+      description:
+         'Report how far visitors scroll on a domain\'s pages from s33k autocapture, with ZERO setup. Use this to find which '
+         + 'pages get read deeply versus abandoned at the top, and whether long pages hold attention. Returns pages[] (each '
+         + 'with the page path, avgScrollDepth and maxScrollDepth as percent of page scrolled, and the session count, sorted '
+         + 'by avgScrollDepth) plus a site-wide distribution histogram bucketed 0-25 / 25-50 / 50-75 / 75-100 percent. '
+         + 'Scroll depth is the max percent reached per session/page. Cookieless, no PII. Reads the first-party event store; '
+         + 'never queries an LLM.',
+      inputSchema: {
+         domain: z.string().describe('The domain to report scroll depth for, e.g. "getmasset.com".'),
+         period: z
+            .string()
+            .optional()
+            .describe('Reporting window, e.g. "30d", "7d", "90d". Defaults to "30d".'),
+      },
+   },
+   async ({ domain, period }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         const data = await s33kFetch('/api/scroll-depth', { query });
+         return jsonResult({
+            domain: data.domain,
+            period: data.period,
+            pages: data.pages,
+            distribution: data.distribution,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// page_engagement
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'page_engagement',
+   {
+      title: 'Page engagement time',
+      description:
+         'Report active engagement (dwell) time per page on a domain from s33k autocapture, with ZERO setup. Use this to see '
+         + 'which pages truly hold attention versus which bounce, beyond raw pageviews. Returns pages[] (each with the page '
+         + 'path, avgEngagementSeconds and totalEngagementSeconds, and the unique session count, sorted by total) plus a '
+         + 'site-wide siteAvgEngagementSeconds. Engagement is ACTIVE time only: the client pauses the timer when the tab is '
+         + 'hidden, the window loses focus, or the visitor goes idle, so this is real attention, not a tab left open. '
+         + 'Cookieless, no PII. Reads the first-party event store; never queries an LLM.',
+      inputSchema: {
+         domain: z.string().describe('The domain to report page engagement for, e.g. "getmasset.com".'),
+         period: z
+            .string()
+            .optional()
+            .describe('Reporting window, e.g. "30d", "7d", "90d". Defaults to "30d".'),
+      },
+   },
+   async ({ domain, period }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         const data = await s33kFetch('/api/page-engagement', { query });
+         return jsonResult({
+            domain: data.domain,
+            period: data.period,
+            pages: data.pages,
+            siteAvgEngagementSeconds: data.siteAvgEngagementSeconds,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // insights
 // ---------------------------------------------------------------------------
 server.registerTool(
@@ -921,7 +1075,7 @@ server.registerTool(
 async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
-   process.stderr.write(`s33k-mcp connected (base URL: ${BASE_URL}). 27 tools registered.\n`);
+   process.stderr.write(`s33k-mcp connected (base URL: ${BASE_URL}). 31 tools registered.\n`);
 }
 
 main().catch((err) => {
