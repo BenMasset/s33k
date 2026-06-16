@@ -1,4 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
+import db from '../../database/database';
 import Domain from '../../database/models/domain';
 import authorize from '../../utils/authorize';
 import { scopeWhere } from '../../utils/scope';
@@ -22,6 +23,9 @@ type DiscoverResponse = SiteCrawlResult | { error: string };
  * @returns {Promise<void>}
  */
 export default async function handler(req: NextApiRequest, res: NextApiResponse<DiscoverResponse>) {
+   // Warm the DB connection like every other model-touching route, so a cold-start
+   // request does not hit ModelNotInitializedError before the first query.
+   await db.sync();
    const { authorized, account, error } = await authorize(req, res);
    if (!authorized) {
       return res.status(401).json({ error: error || 'Not authorized' });
