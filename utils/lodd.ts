@@ -31,6 +31,7 @@ import type {
    SummaryResult, BreakdownResult, BreakdownRow, BreakdownDimension,
    TimeSeriesResult, TimeSeriesPoint, EventsResult, EventRow,
    EngagementResult, EngagementTier,
+   EntryPagesResult,
 } from './analytics';
 import { classifyReferrer } from './ai-sources';
 
@@ -499,6 +500,16 @@ export class LoddProvider implements AnalyticsProvider {
       const guard = await ensureDomainMatchesSite(domain);
       if (!guard.ok) { return { tiers: [], error: guard.error }; }
       return getLoddEngagement(period);
+   }
+
+   // eslint-disable-next-line class-methods-use-this, @typescript-eslint/no-unused-vars
+   async getEntryPages(domain: string, period = '30d'): Promise<EntryPagesResult> {
+      // Lodd has no entry-page endpoint, so entry-page analysis is honestly reported
+      // as unsupported rather than approximated from the wrong shape. The owned,
+      // self-hosted Umami provider is the one that serves this feature (utils/umami.ts).
+      const guard = await ensureDomainMatchesSite(domain);
+      const error = guard.ok ? 'Entry-page analysis is not supported by Lodd. Use the Umami provider.' : guard.error;
+      return { pages: [], siteSources: { direct: 0, referral: 0, search: 0, ai: 0 }, sourcesNote: null, error };
    }
 }
 

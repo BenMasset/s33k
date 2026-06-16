@@ -182,6 +182,53 @@ export type EngagementResult = {
    error: string | null,
 }
 
+/**
+ * The four first-touch source classes an entry (landing) page's sessions are
+ * bucketed into. Mirrors how a marketer thinks about acquisition:
+ *   direct    No referrer (typed/bookmarked) or a self-referral.
+ *   referral  A non-search, non-AI external site.
+ *   search    A traditional search engine (Google, Bing, DuckDuckGo, ...).
+ *   ai        An AI answer engine (ChatGPT, Perplexity, Gemini, ...), via the
+ *             shared AI classifier (utils/ai-sources.ts).
+ */
+export type EntryPageSources = {
+   direct: number,
+   referral: number,
+   search: number,
+   ai: number,
+}
+
+/**
+ * One entry (landing) page: where a session STARTS. The acquisition surface.
+ *
+ *   page      The entry page url/path as reported by the provider.
+ *   pathClean The normalized comparable path (see cleanPath in utils/lodd).
+ *   entries   How many sessions started on this page in the window.
+ *   sources   The first-touch source split for this page (see EntryPageSources).
+ *
+ * sourcesApproximated is true when the per-page source split was estimated from
+ * the site-wide referrer mix rather than measured per page. Umami's aggregate
+ * metrics API does not break referrers down per entry page, so this is true for
+ * the Umami provider. The accompanying sourcesNote on EntryPagesResult explains
+ * it so the split is not read as exact per-page attribution.
+ */
+export type EntryPage = {
+   page: string,
+   pathClean: string,
+   entries: number,
+   sources: EntryPageSources,
+   sourcesApproximated: boolean,
+}
+
+export type EntryPagesResult = {
+   pages: EntryPage[],
+   /** Site-wide first-touch source totals for the window (the basis for any approximation). */
+   siteSources: EntryPageSources,
+   /** Honest note when per-page sources are approximated from the site-wide mix, else null. */
+   sourcesNote: string | null,
+   error: string | null,
+}
+
 export interface AnalyticsProvider {
    /**
     * Return per-page traffic for a domain.
@@ -248,6 +295,20 @@ export interface AnalyticsProvider {
     * @returns {Promise<EngagementResult>} Never rejects; errors come back in `error`.
     */
    getEngagement(domain: string, period?: string): Promise<EngagementResult>,
+
+   /**
+    * Return ENTRY (landing) pages for a domain: where sessions START, the
+    * acquisition surface. Each page carries its entry count plus a first-touch
+    * source split (direct/referral/search/ai). Most providers cannot break
+    * referrers down per entry page, so the per-page source split is approximated
+    * from the site-wide mix (every page flagged sourcesApproximated, with
+    * sourcesNote on the result explaining it); the per-page entry counts and the
+    * site-wide source totals are exact.
+    * @param {string} domain - The site domain, e.g. "getmasset.com".
+    * @param {string} [period] - Reporting window hint, e.g. "30d". Provider-specific.
+    * @returns {Promise<EntryPagesResult>} Never rejects; errors come back in `error`.
+    */
+   getEntryPages(domain: string, period?: string): Promise<EntryPagesResult>,
 }
 
 export type AnalyticsProviderName = 'umami' | 'lodd';
@@ -270,6 +331,9 @@ const unconfiguredProvider = (name: string): AnalyticsProvider => {
       getTimeSeries: async (): Promise<TimeSeriesResult> => ({ series: [], error: notConfigured }),
       getEvents: async (): Promise<EventsResult> => ({ events: [], error: notConfigured }),
       getEngagement: async (): Promise<EngagementResult> => ({ tiers: [], error: notConfigured }),
+      getEntryPages: async (): Promise<EntryPagesResult> => ({
+         pages: [], siteSources: { direct: 0, referral: 0, search: 0, ai: 0 }, sourcesNote: null, error: notConfigured,
+      }),
    };
 };
 

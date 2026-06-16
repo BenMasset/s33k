@@ -40,9 +40,10 @@ import type {
    SummaryResult, BreakdownResult, BreakdownRow, BreakdownDimension,
    TimeSeriesResult, TimeSeriesPoint, EventsResult, EventRow,
    EngagementResult, EngagementTier,
+   EntryPagesResult, EntryPage, EntryPageSources,
 } from './analytics';
 import { cleanPath } from './lodd';
-import { classifyReferrer } from './ai-sources';
+import { classifyReferrer, classifySourceClass, SourceClass } from './ai-sources';
 import Domain from '../database/models/domain';
 
 /**
@@ -241,6 +242,70 @@ const periodToRange = (period: string): { startAt: number, endAt: number } => {
 const UMAMI_PAGE_GRAIN_NOTE = 'Umami does not expose unique_visitors, bounce_rate, or avg_duration at '
    + 'page grain; bounce_rate and avg_duration are null (not zero). Use traffic_summary for site-wide '
    + 'bounce rate and average duration.';
+
+/** Honest note for entry-page source attribution, surfaced whenever Umami is the provider. */
+const UMAMI_ENTRY_SOURCE_NOTE = 'Per-entry-page source breakdown is APPROXIMATED from the site-wide '
+   + 'referrer mix: Umami\'s metrics API reports referrers site-wide, not per landing page, so each page\'s '
+   + 'direct/referral/search/ai split is its entry count scaled by the site-wide proportions, not measured '
+   + 'per page. The site-wide totals (siteSources) and the per-page entry counts ARE exact.';
+
+const EMPTY_ENTRY_SOURCES: EntryPageSources = { direct: 0, referral: 0, search: 0, ai: 0 };
+
+/**
+ * Bucket a list of Umami referrer rows ({ x: host/label, y: count }) into the four
+ * first-touch source classes (direct/referral/search/ai), summing the counts. Pure;
+ * never throws. Empty/blank referrers and self-referrals (matching selfHost) count
+ * as direct via classifySourceClass.
+ * @param {any[]} rows - Umami type=referrer metrics rows.
+ * @param {string} selfHost - The site's own host, so self-referrals count as direct.
+ * @returns {EntryPageSources}
+ */
+export const bucketReferrerRows = (rows: any[], selfHost: string): EntryPageSources => {
+   const totals: EntryPageSources = { ...EMPTY_ENTRY_SOURCES };
+   (Array.isArray(rows) ? rows : []).forEach((row) => {
+      const name = String(row?.x ?? '');
+      const count = Number(row?.y ?? 0);
+      if (!Number.isFinite(count) || count <= 0) { return; }
+      const klass: SourceClass = classifySourceClass(name, selfHost);
+      totals[klass] += count;
+   });
+   return totals;
+};
+
+/**
+ * Approximate a single entry page's source split from the site-wide source mix.
+ * Each page's entry count is distributed across the four classes in the same
+ * proportions the whole site shows. Rounds so the four buckets sum to `entries`
+ * (the largest bucket absorbs the rounding remainder), so no entry is lost or
+ * invented. When the site has no classified sources at all, everything falls to
+ * direct (the honest default for "no referrer signal"). Pure; never throws.
+ * @param {number} entries - This page's entry count.
+ * @param {EntryPageSources} site - The site-wide source totals.
+ * @returns {EntryPageSources}
+ */
+export const approximatePageSources = (entries: number, site: EntryPageSources): EntryPageSources => {
+   const n = Math.max(0, Math.round(Number(entries) || 0));
+   if (n === 0) { return { ...EMPTY_ENTRY_SOURCES }; }
+   const siteTotal = site.direct + site.referral + site.search + site.ai;
+   if (siteTotal <= 0) { return { direct: n, referral: 0, search: 0, ai: 0 }; }
+
+   const order: (keyof EntryPageSources)[] = ['direct', 'referral', 'search', 'ai'];
+   const out: EntryPageSources = { ...EMPTY_ENTRY_SOURCES };
+   let assigned = 0;
+   order.forEach((key) => {
+      const share = Math.floor((site[key] / siteTotal) * n);
+      out[key] = share;
+      assigned += share;
+   });
+   // Hand the rounding remainder to the largest site bucket so the four sum to n exactly.
+   let remainder = n - assigned;
+   if (remainder > 0) {
+      const biggest = order.reduce((a, b) => (site[b] > site[a] ? b : a), order[0]);
+      out[biggest] += remainder;
+   }
+   return out;
+};
+
 export class UmamiProvider implements AnalyticsProvider {
    // eslint-disable-next-line class-methods-use-this
    async getPageTraffic(domain: string, period = '30d'): Promise<AnalyticsResult> {
@@ -544,6 +609,102 @@ export class UmamiProvider implements AnalyticsProvider {
          },
       ];
       return { tiers, error: null };
+   }
+
+   /**
+    * Return ENTRY (landing) pages for a domain: where sessions START, the
+    * acquisition surface. Each page gets its entry count plus a first-touch
+    * source split (direct/referral/search/ai).
+    *
+    * Two Umami calls, both on the metrics endpoint:
+    *   - type=entry    -> [{ x: <entry page url/path>, y: <session count> }]
+    *                      the exact per-page entry counts.
+    *   - type=referrer -> [{ x: <referrer host/label>, y: <count> }]
+    *                      site-wide referrers, bucketed into the four classes by
+    *                      the shared classifier (classifySourceClass).
+    *
+    * HONEST DATA STORY: Umami does NOT break referrers down per entry page, so a
+    * page's source split is APPROXIMATED by scaling the page's entry count by the
+    * site-wide source proportions. The per-page entry counts and the site-wide
+    * source totals are exact; only the per-page split is estimated. Every page is
+    * flagged sourcesApproximated:true and the result carries sourcesNote so the
+    * estimate is never mistaken for measured per-page attribution. This mirrors
+    * how ai_visibility is honest when first-party data is thin.
+    *
+    * Degrades gracefully: a referrer failure does NOT fail the whole call. Entry
+    * pages still come back with zeroed (all-direct-by-default) sources and the
+    * referrer error is surfaced. Never throws.
+    * @param {string} domain - Site domain, e.g. "getmasset.com".
+    * @param {string} [period] - Reporting window, e.g. "30d". Defaults to "30d".
+    * @returns {Promise<EntryPagesResult>} Never rejects; errors come back in `error`.
+    */
+   // eslint-disable-next-line class-methods-use-this
+   async getEntryPages(domain: string, period = '30d'): Promise<EntryPagesResult> {
+      const empty: EntryPagesResult = {
+         pages: [], siteSources: { ...EMPTY_ENTRY_SOURCES }, sourcesNote: null, error: null,
+      };
+      const r = await resolveUmami(domain);
+      if ('error' in r) { return { ...empty, error: r.error }; }
+
+      const { startAt, endAt } = periodToRange(period);
+      const metricsUrl = (type: string): string => {
+         const params = new URLSearchParams({
+            type, startAt: String(startAt), endAt: String(endAt), limit: '500',
+         });
+         return `${r.base}/api/websites/${r.websiteId}/metrics?${params.toString()}`;
+      };
+      const headers = { Authorization: `Bearer ${r.token}` };
+
+      // 1. Entry pages (exact per-page entry counts). A failure here IS fatal to the
+      // call, since with no entry pages there is nothing to attribute sources to.
+      let entryRows: any[] = [];
+      try {
+         const res = await fetch(metricsUrl('entry'), { headers });
+         if (!res.ok) {
+            const text = await res.text().catch(() => '');
+            return { ...empty, error: `Umami entry metrics request failed (${res.status}): ${text || res.statusText}` };
+         }
+         const json: any = await res.json();
+         entryRows = Array.isArray(json) ? json : (Array.isArray(json?.data) ? json.data : []);
+      } catch (error) {
+         const message = error instanceof Error ? error.message : String(error);
+         return { ...empty, error: `Umami entry metrics request error: ${message}` };
+      }
+
+      // 2. Site-wide referrers -> the four source classes. A failure here is NON-fatal:
+      // entry pages still come back, sources default to all-direct, and the referrer
+      // error is surfaced (graceful degradation, never a 500 from a sub-signal).
+      const selfHost = String(domain || '').trim().toLowerCase().replace(/^www\./, '');
+      let siteSources: EntryPageSources = { ...EMPTY_ENTRY_SOURCES };
+      let referrerError: string | null = null;
+      try {
+         const res = await fetch(metricsUrl('referrer'), { headers });
+         if (!res.ok) {
+            const text = await res.text().catch(() => '');
+            referrerError = `Umami referrer metrics request failed (${res.status}): ${text || res.statusText}`;
+         } else {
+            const json: any = await res.json();
+            const rows: any[] = Array.isArray(json) ? json : (Array.isArray(json?.data) ? json.data : []);
+            siteSources = bucketReferrerRows(rows, selfHost);
+         }
+      } catch (error) {
+         referrerError = `Umami referrer metrics request error: ${error instanceof Error ? error.message : String(error)}`;
+      }
+
+      const pages: EntryPage[] = entryRows.map((row) => {
+         const rawUrl = String(row?.x ?? '');
+         const entries = Number(row?.y ?? 0);
+         return {
+            page: rawUrl,
+            pathClean: cleanPath(rawUrl),
+            entries,
+            sources: approximatePageSources(entries, siteSources),
+            sourcesApproximated: true,
+         };
+      });
+      pages.sort((a, b) => b.entries - a.entries);
+
+      return { pages, siteSources, sourcesNote: UMAMI_ENTRY_SOURCE_NOTE, error: referrerError };
    }
 }
 

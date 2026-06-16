@@ -94,4 +94,51 @@ export const classifyReferrer = (source: string): { isAI: boolean, engine: strin
    return { isAI: false, engine: null };
 };
 
+/** The four first-touch source classes a referral string is bucketed into. */
+export type SourceClass = 'direct' | 'referral' | 'search' | 'ai';
+
+/**
+ * Host substrings that identify a TRADITIONAL search engine (not an AI engine,
+ * which is handled by AI_ENGINES). Order does not matter; any match wins. Keep
+ * this conservative: an unknown external referrer should fall through to
+ * "referral", not be guessed as search.
+ */
+const SEARCH_ENGINES: string[] = [
+   'google.', 'bing.', 'duckduckgo', 'yahoo.', 'yandex.', 'baidu.',
+   'ecosia.', 'brave.com/search', 'search.brave', 'startpage', 'qwant',
+   'ask.com', 'aol.', 'naver.', 'seznam.',
+];
+
+/**
+ * Classify a single referral source string into one of four first-touch classes
+ * (direct / referral / search / ai), reusing the AI classifier for the AI case.
+ *
+ * Rules, in order:
+ *   1. Empty/blank/"(none)"/"direct" -> direct (Umami reports no-referrer entries
+ *      this way). When selfHost is provided, a referrer on that same host is also
+ *      treated as direct (an internal self-referral, not a real external source).
+ *   2. An AI engine (classifyReferrer) -> ai.
+ *   3. A known search-engine host -> search.
+ *   4. Anything else external -> referral.
+ *
+ * Never throws.
+ * @param {string} source - The referrer host, full URL, or provider label.
+ * @param {string} [selfHost] - The site's own host, so self-referrals count as direct.
+ * @returns {SourceClass}
+ */
+export const classifySourceClass = (source: string, selfHost?: string): SourceClass => {
+   const raw = String(source || '').trim().toLowerCase();
+   if (!raw || raw === '(none)' || raw === 'direct' || raw === '(direct)' || raw === 'none') {
+      return 'direct';
+   }
+   const target = normalizeSource(raw);
+   const self = String(selfHost || '').trim().toLowerCase().replace(/^www\./, '');
+   if (self && (target === self || target.startsWith(`${self}/`) || target.includes(`//${self}`))) {
+      return 'direct';
+   }
+   if (classifyReferrer(raw).isAI) { return 'ai'; }
+   if (SEARCH_ENGINES.some((needle) => target.includes(needle))) { return 'search'; }
+   return 'referral';
+};
+
 export default classifyReferrer;
