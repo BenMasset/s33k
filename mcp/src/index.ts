@@ -760,10 +760,56 @@ server.registerTool(
    },
 );
 
+// ---------------------------------------------------------------------------
+// onboard
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'onboard',
+   {
+      title: 'Onboard a domain',
+      description:
+         'Give me a domain and I set up everything for it in one call, the fastest way to go from nothing to live data. s33k will: create the domain, crawl a few of its pages and heuristically discover candidate target keywords (no LLM needed), add up to 20 of them and immediately queue background Google rank scrapes (rankings appear shortly, so rankingsPending comes back true), provision a dedicated analytics website for the domain, and return the tracking snippet plus copy-paste install guides for common platforms (raw HTML, Google Tag Manager, WordPress, Webflow, Shopify, Squarespace, Wix, Next.js/React). Pass a bare domain like "getmasset.com", not a full URL. Use this as the first thing you do for a brand new site. Degrades gracefully: if analytics provisioning is unavailable, umamiWebsiteId comes back null with a note while the domain, keywords, and rankings are still set up. Returns { domain, discoveredKeywords, addedKeywords, rankingsPending, umamiWebsiteId, installSnippet, installGuides, note }.',
+      inputSchema: {
+         domain: z.string().describe('The bare domain to onboard, e.g. "getmasset.com". No protocol, no path.'),
+      },
+   },
+   async ({ domain }) => {
+      try {
+         const data = await s33kFetch('/api/onboard', { method: 'POST', body: { domain } });
+         return jsonResult(data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// install_instructions
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'install_instructions',
+   {
+      title: 'Install instructions',
+      description:
+         'Show how to add the s33k analytics tracking code to a site, including the exact snippet and step-by-step instructions for the user\'s platform. Use this when someone asks "how do I add the tracking code on <platform>" (WordPress, Webflow, Shopify, Squarespace, Wix, Google Tag Manager, Next.js/React, or raw HTML), or any time after onboarding when they need the snippet again. The domain must already be onboarded. Returns { domain, umamiWebsiteId, installSnippet, installGuides } where installGuides.platforms is a list of { platform, steps }. Read the steps for the platform the user named and walk them through it.',
+      inputSchema: {
+         domain: z.string().describe('The already-onboarded domain, e.g. "getmasset.com".'),
+      },
+   },
+   async ({ domain }) => {
+      try {
+         const data = await s33kFetch('/api/install-instructions', { query: { domain } });
+         return jsonResult(data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
 async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
-   process.stderr.write(`s33k-mcp connected (base URL: ${BASE_URL}). 21 tools registered.\n`);
+   process.stderr.write(`s33k-mcp connected (base URL: ${BASE_URL}). 23 tools registered.\n`);
 }
 
 main().catch((err) => {
