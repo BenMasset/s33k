@@ -759,6 +759,60 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// conversions_by_source
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'conversions_by_source',
+   {
+      title: 'Conversions by source',
+      description:
+         'Answer "which traffic sources actually drive my conversions" for a domain, with ZERO GA4 setup. s33k stamps a '
+         + 'first-touch source on every autocaptured event at ingest, so this attributes conversions to the source the '
+         + 'visitor arrived from and returns the breakdown directly. By default the conversion event is autocaptured form '
+         + 'submissions (form_submit); pass event to attribute any other captured event type (e.g. "click", "outbound") '
+         + 'instead. Returns conversions[] (one row per source: the source, its conversion count, its share of total '
+         + 'conversions as a percent, and an approximate conversionRate), plus totalConversions and topSource (the single '
+         + 'best-converting source). source is a CLASSIFICATION: "direct" (typed/bookmarked or self-referral), '
+         + '"organic-search" (Google/Bing/etc.), "ai" (ChatGPT/Claude/Perplexity/etc.), or "referral" (another site, shown '
+         + 'as its bare host); it is never a full referrer URL. conversionRate is HONESTLY APPROXIMATE: it is conversions '
+         + 'divided by the distinct sessions that fired any autocaptured event under that source in the window, so sessions '
+         + 'with no event at all are not in the base and the true rate is no higher than reported (read conversionRateNote). '
+         + 'Cookieless, no PII. Reads the first-party event store; never queries an LLM, and never errors on a thin sub-signal.',
+      inputSchema: {
+         domain: z.string().describe('The domain to report conversions for, e.g. "getmasset.com".'),
+         period: z
+            .string()
+            .optional()
+            .describe('Reporting window, e.g. "30d", "7d", "90d". Defaults to "30d".'),
+         event: z
+            .string()
+            .optional()
+            .describe('The conversion event type to attribute. Defaults to "form_submit" (autocaptured form submissions).'),
+      },
+   },
+   async ({ domain, period, event }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         if (event) { query.event = event; }
+         const data = await s33kFetch('/api/conversions', { query });
+         return jsonResult({
+            domain: data.domain,
+            period: data.period,
+            event: data.event,
+            conversions: data.conversions,
+            totalConversions: data.totalConversions,
+            topSource: data.topSource,
+            conversionRateNote: data.conversionRateNote,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // insights
 // ---------------------------------------------------------------------------
 server.registerTool(
@@ -1452,7 +1506,7 @@ async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
    process.stderr.write(
-      `s33k-mcp connected (base URL: ${BASE_URL}). 39 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
+      `s33k-mcp connected (base URL: ${BASE_URL}). 40 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
    );
 }
 

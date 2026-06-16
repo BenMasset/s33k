@@ -85,7 +85,7 @@ export type KnowledgeBase = {
 };
 
 // ---------------------------------------------------------------------------
-// Capabilities: one entry per registered MCP tool (39 total).
+// Capabilities: one entry per registered MCP tool (40 total).
 // Keep these in lockstep with mcp/src/index.ts; the coverage test fails the build
 // if any registered tool lacks an entry here.
 // ---------------------------------------------------------------------------
@@ -323,6 +323,19 @@ const capabilities: CapabilityEntry[] = [
          + 'goes idle.',
       whenToUse: 'Use to see which pages truly hold attention versus which bounce, beyond raw pageviews. Cookieless, no PII.',
       examplePrompt: 'Which pages hold attention longest on getmasset.com?',
+   },
+   {
+      id: 'conversions_by_source',
+      toolName: 'conversions_by_source',
+      category: 'analytics',
+      title: 'Conversions by source',
+      description: 'Attributes conversions (autocaptured form submissions by default, or any chosen event type) to the first-touch source the '
+         + 'visitor arrived from (direct, organic-search, ai, or a referral host), with per-source counts, share of total, the top converting '
+         + 'source, and an honestly-approximate conversion rate. Answers which traffic sources actually convert with no GA4 setup. Cookieless, '
+         + 'no PII; the source is a classification or bare host, never a full referrer URL.',
+      whenToUse: 'Use to find which channels drive real business outcomes (form fills, signups) and not just traffic volume, and to decide where '
+         + 'to invest. Where form_submissions counts conversions by form/page, this splits them by acquisition source.',
+      examplePrompt: 'Which traffic sources drive the most conversions on getmasset.com?',
    },
    // --- Cross-pillar analyst ---
    {

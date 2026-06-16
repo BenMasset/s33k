@@ -11,6 +11,8 @@
 // see another tenant's rows.
 
 // One plain s33k_event row as read with { raw: true }. value/selector are nullable.
+// source is the session's first-touch class ('direct' | 'referral' | 'organic-search' | 'ai')
+// or a bare referral host; it is nullable on legacy rows captured before source existed.
 export type EventRow = {
    type: string,
    page: string | null,
@@ -18,6 +20,7 @@ export type EventRow = {
    selector: string | null,
    value: number | null,
    session: string | null,
+   source: string | null,
    created: string,
 }
 
@@ -207,4 +210,87 @@ export const buildPageEngagement = (rows: EventRow[]): { pages: PageEngagementRo
    });
    pages.sort((a, b) => b.totalEngagementSeconds - a.totalEngagementSeconds);
    return { pages, siteAvgEngagementSeconds: round1(siteSum / Math.max(1, siteSessions)) };
+};
+
+// ---------------------------------------------------------------------------
+// conversions_by_source: attribute conversion events (form_submit by default, or any chosen
+// event type) to the session's first-touch source, so a marketer can answer "which traffic
+// sources actually drive conversions" with no GA4 setup. This is the autocapture join GA4
+// makes painful: s33k already stamps a first-touch source on every event at ingest, so the
+// attribution is a pure group-by here, not a channel-grouping config + wait.
+//
+// Privacy: source is a CLASSIFICATION ('direct' | 'referral' | 'organic-search' | 'ai') or at
+// most a bare referral host, sanitized at ingest; nothing identifying flows through.
+//
+// The optional conversion-rate-by-source uses ONLY first-party owned data: the denominator is
+// the number of DISTINCT sessions that fired ANY event under each source in the same window,
+// derived from the same event store. It is honestly labelled approximate, because a session
+// with no autocaptured event at all is invisible to it (so the true session base per source is
+// at least this large, never smaller), and the rate is conversions / event-bearing-sessions.
+// ---------------------------------------------------------------------------
+export type ConversionSourceRow = {
+   source: string,
+   count: number,
+   share: number,
+   conversionRate?: number | null,
+}
+
+export type ConversionsBySource = {
+   event: string,
+   conversions: ConversionSourceRow[],
+   totalConversions: number,
+   topSource: { source: string, count: number } | null,
+   conversionRateNote: string | null,
+}
+
+// The label used when a row has no stored source (legacy rows captured before the source
+// column existed). Matches the ingest default so the two never split a bucket.
+const UNKNOWN_SOURCE = 'direct';
+
+export const buildConversionsBySource = (rows: EventRow[], eventType = 'form_submit'): ConversionsBySource => {
+   const wantType = String(eventType || 'form_submit').trim().toLowerCase() || 'form_submit';
+
+   // Conversions per source, plus the distinct sessions seen per source across ALL events in
+   // the window (the rate denominator). One pass over the rows builds both.
+   const conversionsBySource = new Map<string, number>();
+   const sessionsBySource = new Map<string, Set<string>>();
+   let totalConversions = 0;
+
+   rows.forEach((row) => {
+      const source = (row.source || '').trim() || UNKNOWN_SOURCE;
+      const session = (row.session || '').trim();
+      if (session) {
+         let set = sessionsBySource.get(source);
+         if (!set) { set = new Set<string>(); sessionsBySource.set(source, set); }
+         set.add(session);
+      }
+      if (String(row.type || '').toLowerCase() !== wantType) { return; }
+      totalConversions += 1;
+      conversionsBySource.set(source, (conversionsBySource.get(source) || 0) + 1);
+   });
+
+   // A rate is only honest where we actually have a session base for that source. When no
+   // source has a usable denominator, drop the rate entirely and say why.
+   let anyRate = false;
+   const conversions: ConversionSourceRow[] = Array.from(conversionsBySource.entries()).map(([source, count]) => {
+      const sessions = sessionsBySource.get(source)?.size ?? 0;
+      const conversionRate = sessions > 0 ? round1((count / sessions) * 100) : null;
+      if (conversionRate !== null) { anyRate = true; }
+      return {
+         source,
+         count,
+         share: totalConversions > 0 ? round1((count / totalConversions) * 100) : 0,
+         conversionRate,
+      };
+   });
+
+   conversions.sort((a, b) => b.count - a.count);
+   const topSource = conversions.length > 0 ? { source: conversions[0].source, count: conversions[0].count } : null;
+   const conversionRateNote = anyRate
+      ? 'Approximate. conversionRate is conversions divided by the distinct sessions that fired any '
+         + 'autocaptured event under that source in the window, so sessions with no event at all are not '
+         + 'counted and the true base per source is at least this large (the real rate is no higher).'
+      : null;
+
+   return { event: wantType, conversions, totalConversions, topSource, conversionRateNote };
 };
