@@ -2,7 +2,9 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import Cryptr from 'cryptr';
 import db from '../../database/database';
 import Domain from '../../database/models/domain';
-import verifyUser from '../../utils/verifyUser';
+import authorize from '../../utils/authorize';
+import { scopeWhere } from '../../utils/scope';
+import type Account from '../../database/models/account';
 
 type DomainGetResponse = {
    domain?: DomainType | null
@@ -10,21 +12,21 @@ type DomainGetResponse = {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-   const authorized = verifyUser(req, res);
-   if (authorized === 'authorized' && req.method === 'GET') {
+   const { authorized, account, error } = await authorize(req, res);
+   if (authorized && req.method === 'GET') {
       await db.sync();
-      return getDomain(req, res);
+      return getDomain(req, res, account);
    }
-   return res.status(401).json({ error: authorized });
+   return res.status(401).json({ error: error || 'Not authorized' });
 }
 
-const getDomain = async (req: NextApiRequest, res: NextApiResponse<DomainGetResponse>) => {
+const getDomain = async (req: NextApiRequest, res: NextApiResponse<DomainGetResponse>, account?: Account | null) => {
    if (!req.query.domain && typeof req.query.domain !== 'string') {
        return res.status(400).json({ error: 'Domain Name is Required!' });
    }
 
    try {
-      const query = { domain: req.query.domain as string };
+      const query = { domain: req.query.domain as string, ...scopeWhere(account) };
       const foundDomain:Domain| null = await Domain.findOne({ where: query });
       const parsedDomain = foundDomain?.get({ plain: true }) || false;
 

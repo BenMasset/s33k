@@ -2,7 +2,9 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { Op } from 'sequelize';
 import db from '../../database/database';
 import Keyword from '../../database/models/keyword';
-import verifyUser from '../../utils/verifyUser';
+import authorize from '../../utils/authorize';
+import { scopeWhere } from '../../utils/scope';
+import type Account from '../../database/models/account';
 import parseKeywords from '../../utils/parseKeywords';
 import { getKeywordsVolume, updateKeywordsVolumeData } from '../../utils/adwords';
 
@@ -13,31 +15,34 @@ type KeywordsRefreshRes = {
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
    await db.sync();
-   const authorized = verifyUser(req, res);
-   if (authorized !== 'authorized') {
-      return res.status(401).json({ error: authorized });
+   const { authorized, account, error } = await authorize(req, res);
+   if (!authorized) {
+      return res.status(401).json({ error });
    }
    if (req.method === 'POST') {
-      return updatekeywordVolume(req, res);
+      return updatekeywordVolume(req, res, account);
    }
    return res.status(502).json({ error: 'Unrecognized Route.' });
 }
 
-const updatekeywordVolume = async (req: NextApiRequest, res: NextApiResponse<KeywordsRefreshRes>) => {
+const updatekeywordVolume = async (req: NextApiRequest, res: NextApiResponse<KeywordsRefreshRes>, account?: Account | null) => {
    const { keywords = [], domain = '', update = true } = req.body || {};
    if (keywords.length === 0 && !domain) {
       return res.status(400).json({ error: 'Please provide keyword Ids or a domain name.' });
    }
 
    try {
+      const scope = scopeWhere(account);
       let keywordsToSend: KeywordType[] = [];
       if (keywords.length > 0) {
-         const allKeywords:Keyword[] = await Keyword.findAll({ where: { ID: { [Op.in]: keywords } } });
+         const allKeywords:Keyword[] = await Keyword.findAll({ where: { ID: { [Op.in]: keywords }, ...scope } });
          keywordsToSend = parseKeywords(allKeywords.map((e) => e.get({ plain: true })));
       }
       if (domain) {
          const allDomain = domain === 'all';
-         const allKeywords:Keyword[] = allDomain ? await Keyword.findAll() : await Keyword.findAll(allDomain ? {} : { where: { domain } });
+         const allKeywords:Keyword[] = allDomain
+            ? await Keyword.findAll({ where: { ...scope } })
+            : await Keyword.findAll({ where: { domain, ...scope } });
          keywordsToSend = parseKeywords(allKeywords.map((e) => e.get({ plain: true })));
       }
 

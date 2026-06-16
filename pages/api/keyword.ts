@@ -2,7 +2,9 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import db from '../../database/database';
 import Keyword from '../../database/models/keyword';
 import parseKeywords from '../../utils/parseKeywords';
-import verifyUser from '../../utils/verifyUser';
+import authorize from '../../utils/authorize';
+import { scopeWhere } from '../../utils/scope';
+import type Account from '../../database/models/account';
 
 type KeywordGetResponse = {
    keyword?: KeywordType | null
@@ -10,21 +12,21 @@ type KeywordGetResponse = {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-   const authorized = verifyUser(req, res);
-   if (authorized === 'authorized' && req.method === 'GET') {
+   const { authorized, account, error } = await authorize(req, res);
+   if (authorized && req.method === 'GET') {
       await db.sync();
-      return getKeyword(req, res);
+      return getKeyword(req, res, account);
    }
-   return res.status(401).json({ error: authorized });
+   return res.status(401).json({ error: error || 'Not authorized' });
 }
 
-const getKeyword = async (req: NextApiRequest, res: NextApiResponse<KeywordGetResponse>) => {
+const getKeyword = async (req: NextApiRequest, res: NextApiResponse<KeywordGetResponse>, account?: Account | null) => {
    if (!req.query.id && typeof req.query.id !== 'string') {
        return res.status(400).json({ error: 'Keyword ID is Required!' });
    }
 
    try {
-      const query = { ID: parseInt((req.query.id as string), 10) };
+      const query = { ID: parseInt((req.query.id as string), 10), ...scopeWhere(account) };
       const foundKeyword:Keyword| null = await Keyword.findOne({ where: query });
       const parsedKeyword = foundKeyword && parseKeywords([foundKeyword.get({ plain: true })]);
       const keywords = parsedKeyword && parsedKeyword[0] ? parsedKeyword[0] : null;

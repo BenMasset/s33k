@@ -5,7 +5,9 @@ import Keyword from '../../database/models/keyword';
 import Domain from '../../database/models/domain';
 import refreshAndUpdateKeywords from '../../utils/refresh';
 import { getAppSettings } from './settings';
-import verifyUser from '../../utils/verifyUser';
+import authorize from '../../utils/authorize';
+import { scopeWhere } from '../../utils/scope';
+import type Account from '../../database/models/account';
 import parseKeywords from '../../utils/parseKeywords';
 import { scrapeKeywordFromGoogle } from '../../utils/scraper';
 
@@ -26,20 +28,20 @@ type KeywordSearchResultRes = {
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
    await db.sync();
-   const authorized = verifyUser(req, res);
-   if (authorized !== 'authorized') {
-      return res.status(401).json({ error: authorized });
+   const { authorized, account, error } = await authorize(req, res);
+   if (!authorized) {
+      return res.status(401).json({ error });
    }
    if (req.method === 'GET') {
       return getKeywordSearchResults(req, res);
    }
    if (req.method === 'POST') {
-      return refresTheKeywords(req, res);
+      return refresTheKeywords(req, res, account);
    }
    return res.status(502).json({ error: 'Unrecognized Route.' });
 }
 
-const refresTheKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsRefreshRes>) => {
+const refresTheKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsRefreshRes>, account?: Account | null) => {
    if (!req.query.id && typeof req.query.id !== 'string') {
       return res.status(400).json({ error: 'keyword ID is Required!' });
    }
@@ -55,10 +57,11 @@ const refresTheKeywords = async (req: NextApiRequest, res: NextApiResponse<Keywo
       if (!settings || (settings && settings.scraper_type === 'never')) {
          return res.status(400).json({ error: 'Scraper has not been set up yet.' });
       }
-      const query = req.query.id === 'all' && domain ? { domain } : { ID: { [Op.in]: keywordIDs } };
+      const scope = scopeWhere(account);
+      const query = req.query.id === 'all' && domain ? { domain, ...scope } : { ID: { [Op.in]: keywordIDs }, ...scope };
       await Keyword.update({ updating: true }, { where: query });
       const keywordQueries: Keyword[] = await Keyword.findAll({ where: query });
-      const allDomains: Domain[] = await Domain.findAll();
+      const allDomains: Domain[] = await Domain.findAll({ where: { ...scope } });
       const domainList: DomainType[] = allDomains.map((d) => d.get({ plain: true }));
 
       let keywords = [];
