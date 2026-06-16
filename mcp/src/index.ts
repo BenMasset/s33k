@@ -338,6 +338,51 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// ai_visibility
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'ai_visibility',
+   {
+      title: 'AI visibility funnel',
+      description:
+         'Measure a domain\'s standing in AI search (ChatGPT, Claude, Perplexity, Gemini, Copilot, and more) using ONLY '
+         + 'first-party, un-gameable behavior s33k already records: which AI engines CRAWL the site and which AI engines '
+         + 'actually REFER traffic. It never queries an LLM and never asks an AI engine whether it cites the site, so the '
+         + 'signal cannot be gamed. Use this to answer "how visible am I in AI search, and where is the gap?" The novel '
+         + 'output is the FUNNEL between crawl (an AI engine is learning about you, the leading indicator) and referral '
+         + '(an AI engine is recommending you, the outcome), per engine and per page. Returns: pages[] each with a status '
+         + 'of "ai-visible" (crawled AND cited: the goal), "crawled-not-cited" (AI knows the page but does not recommend '
+         + 'it yet, the prime opportunity), "cited-not-crawled" (rare), or "ai-invisible" (no AI crawl at all); engines[] '
+         + 'each with a status of "advocate" (crawls and refers), "aware-not-recommending" (crawls, no referrals yet), or '
+         + '"absent"; and a summary (totalAICrawls, totalAIReferrals, crawlToReferralRate, topAdvocate engine, and the '
+         + 'biggestGap engine). Read crawled-not-cited pages and aware-not-recommending engines as the work to do. Note: '
+         + 'when the analytics provider reports referrals only site-wide (no landing page), per-page isCited cannot be '
+         + 'attributed, so pages show isCited=false while engine-level referrals and the totals stay accurate (the note '
+         + 'field flags this). When first-party crawl/referral data is thin, the response also includes a deterministic '
+         + 'citabilityAudit that fetches the top pages and scores their AI-readiness (llms.txt, Markdown twins, JSON-LD, '
+         + 'answer-shaped content) as a leading indicator. This complements ai_crawlers (raw crawl detail) and '
+         + 'ai_referrals (raw referral detail) by joining them into one funnel.',
+      inputSchema: {
+         domain: z.string().describe('The domain to measure AI-search visibility for, e.g. "getmasset.com".'),
+         period: z
+            .string()
+            .optional()
+            .describe('Reporting window, e.g. "30d", "7d", "90d". Defaults to "30d".'),
+      },
+   },
+   async ({ domain, period }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         const data = await s33kFetch('/api/ai-visibility', { query });
+         return jsonResult(data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // traffic_summary
 // ---------------------------------------------------------------------------
 server.registerTool(
@@ -718,7 +763,7 @@ server.registerTool(
 async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
-   process.stderr.write(`s33k-mcp connected (base URL: ${BASE_URL}). 20 tools registered.\n`);
+   process.stderr.write(`s33k-mcp connected (base URL: ${BASE_URL}). 21 tools registered.\n`);
 }
 
 main().catch((err) => {

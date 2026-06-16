@@ -32,6 +32,7 @@ export const allowedApiRoutes = [
    'GET:/api/engagement',
    'POST:/api/crawler-hit',
    'GET:/api/ai-crawlers',
+   'GET:/api/ai-visibility',
    'GET:/api/discover',
    'GET:/api/briefing',
    'POST:/api/account',

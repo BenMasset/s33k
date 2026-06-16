@@ -77,7 +77,7 @@ const normalizeDomain = (input: string): string => String(input || '')
  * @param {string} hostname - The URL hostname (already lowercased by URL).
  * @returns {boolean} True if safe to fetch.
  */
-const isPublicHostname = (hostname: string): boolean => {
+export const isPublicHostname = (hostname: string): boolean => {
    const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
    if (!host) { return false; }
    // Loopback / unspecified / local names.
@@ -107,7 +107,7 @@ const isPublicHostname = (hostname: string): boolean => {
  * @param {string} [accept] - Optional Accept header.
  * @returns {Promise<string | null>} The response body text, or null.
  */
-const safeFetchText = async (url: string, accept?: string): Promise<string | null> => {
+export const safeFetchText = async (url: string, accept?: string): Promise<string | null> => {
    let parsed: URL;
    try { parsed = new URL(url); } catch { return null; }
    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') { return null; }
