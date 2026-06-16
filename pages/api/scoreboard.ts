@@ -1,7 +1,10 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import db from '../../database/database';
+import Domain from '../../database/models/domain';
 import Keyword from '../../database/models/keyword';
-import verifyUser from '../../utils/verifyUser';
+import authorize from '../../utils/authorize';
+import { scopeWhere } from '../../utils/scope';
+import type Account from '../../database/models/account';
 import parseKeywords from '../../utils/parseKeywords';
 import { cleanPath } from '../../utils/lodd';
 import { getAnalyticsProvider, NormalizedPage, ReferralSource } from '../../utils/analytics';
@@ -55,26 +58,33 @@ type ScoreboardResponse = {
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<ScoreboardResponse>) {
    await db.sync();
-   const authorized = verifyUser(req, res);
-   if (authorized !== 'authorized') {
-      return res.status(401).json({ error: authorized });
+   const { authorized, account, error } = await authorize(req, res);
+   if (!authorized) {
+      return res.status(401).json({ error });
    }
    if (req.method !== 'GET') {
       return res.status(405).json({ error: 'Method Not Allowed. Use GET.' });
    }
-   return getScoreboard(req, res);
+   return getScoreboard(req, res, account);
 }
 
-const getScoreboard = async (req: NextApiRequest, res: NextApiResponse<ScoreboardResponse>) => {
+const getScoreboard = async (req: NextApiRequest, res: NextApiResponse<ScoreboardResponse>, account?: Account | null) => {
    if (!req.query.domain || typeof req.query.domain !== 'string') {
       return res.status(400).json({ error: 'Domain is Required!' });
    }
    const domain = req.query.domain as string;
    const period = (typeof req.query.period === 'string' && req.query.period) ? req.query.period : '30d';
 
+   // Verify the caller owns this domain before exposing any of its data. With MULTI_TENANT
+   // off, scopeWhere returns {} so this matches the domain by name exactly as before.
+   const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+   if (!owned) {
+      return res.status(403).json({ error: 'Domain not found for this account' });
+   }
+
    try {
       // 1. Load this domain's keywords from the DB (same path as keywords.ts getKeywords).
-      const allKeywords: Keyword[] = await Keyword.findAll({ where: { domain } });
+      const allKeywords: Keyword[] = await Keyword.findAll({ where: { domain, ...scopeWhere(account) } });
       const keywords: KeywordType[] = parseKeywords(allKeywords.map((e) => e.get({ plain: true })));
 
       // 2. Fetch per-page traffic from the configured analytics provider.

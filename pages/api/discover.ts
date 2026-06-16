@@ -1,5 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import verifyUser from '../../utils/verifyUser';
+import Domain from '../../database/models/domain';
+import authorize from '../../utils/authorize';
+import { scopeWhere } from '../../utils/scope';
 import { crawlSite, SiteCrawlResult } from '../../utils/site-crawl';
 
 type DiscoverResponse = SiteCrawlResult | { error: string };
@@ -20,9 +22,9 @@ type DiscoverResponse = SiteCrawlResult | { error: string };
  * @returns {Promise<void>}
  */
 export default async function handler(req: NextApiRequest, res: NextApiResponse<DiscoverResponse>) {
-   const authorized = verifyUser(req, res);
-   if (authorized !== 'authorized') {
-      return res.status(401).json({ error: authorized });
+   const { authorized, account, error } = await authorize(req, res);
+   if (!authorized) {
+      return res.status(401).json({ error: error || 'Not authorized' });
    }
    if (req.method !== 'GET') {
       return res.status(405).json({ error: 'Method Not Allowed. Use GET.' });
@@ -32,11 +34,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
    }
 
    const domain = req.query.domain as string;
+   const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+   if (!owned) {
+      return res.status(403).json({ error: 'Domain not found for this account' });
+   }
+
    try {
       const result = await crawlSite(domain);
       return res.status(200).json(result);
-   } catch (error) {
-      console.log('[ERROR] Discovering pages for ', domain, error);
+   } catch (err) {
+      console.log('[ERROR] Discovering pages for ', domain, err);
       return res.status(400).json({ error: 'Error discovering pages for this Domain.' });
    }
 }

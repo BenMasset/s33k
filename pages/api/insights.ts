@@ -1,7 +1,10 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import db from '../../database/database';
+import Domain from '../../database/models/domain';
 import Keyword from '../../database/models/keyword';
-import verifyUser from '../../utils/verifyUser';
+import authorize from '../../utils/authorize';
+import { scopeWhere } from '../../utils/scope';
+import type Account from '../../database/models/account';
 import parseKeywords from '../../utils/parseKeywords';
 import { cleanPath } from '../../utils/lodd';
 import {
@@ -69,17 +72,17 @@ const BOT_SHARE_WARN = 30; // percent
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<InsightsResponse>) {
    await db.sync();
-   const authorized = verifyUser(req, res);
-   if (authorized !== 'authorized') {
-      return res.status(401).json({ error: authorized });
+   const { authorized, account, error } = await authorize(req, res);
+   if (!authorized) {
+      return res.status(401).json({ error });
    }
    if (req.method !== 'GET') {
       return res.status(405).json({ error: 'Method Not Allowed. Use GET.' });
    }
-   return getInsights(req, res);
+   return getInsights(req, res, account);
 }
 
-const getInsights = async (req: NextApiRequest, res: NextApiResponse<InsightsResponse>) => {
+const getInsights = async (req: NextApiRequest, res: NextApiResponse<InsightsResponse>, account?: Account | null) => {
    if (!req.query.domain || typeof req.query.domain !== 'string') {
       return res.status(400).json({ error: 'Domain is Required!' });
    }
@@ -87,12 +90,19 @@ const getInsights = async (req: NextApiRequest, res: NextApiResponse<InsightsRes
    const period = (typeof req.query.period === 'string' && req.query.period) ? req.query.period : '30d';
 
    try {
+      // Verify the caller owns this domain before exposing any of its data. With
+      // MULTI_TENANT off, scopeWhere is {} so this matches any existing domain row.
+      const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+      if (!owned) {
+         return res.status(403).json({ error: 'Domain not found for this account' });
+      }
+
       const provider = getAnalyticsProvider();
 
       // Pull every pillar in parallel. None of these throw; each carries its own
       // error field, which we collect into `notes` instead of failing the route.
       const [allKeywordRows, traffic, referrals, summary, botEstimate] = await Promise.all([
-         Keyword.findAll({ where: { domain } }),
+         Keyword.findAll({ where: { domain, ...scopeWhere(account) } }),
          provider.getPageTraffic(domain, period),
          provider.getReferralSources(domain, period),
          provider.getSummary(domain, period),

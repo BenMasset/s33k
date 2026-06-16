@@ -2,7 +2,9 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import db from '../../database/database';
 import { getCountryInsight, getKeywordsInsight, getPagesInsight } from '../../utils/insight';
 import { fetchDomainSCData, getSearchConsoleApiInfo, readLocalSCData } from '../../utils/searchConsole';
-import verifyUser from '../../utils/verifyUser';
+import authorize from '../../utils/authorize';
+import { scopeWhere } from '../../utils/scope';
+import type Account from '../../database/models/account';
 import Domain from '../../database/models/domain';
 
 type SCInsightRes = {
@@ -12,19 +14,27 @@ type SCInsightRes = {
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
    await db.sync();
-   const authorized = verifyUser(req, res);
-   if (authorized !== 'authorized') {
-      return res.status(401).json({ error: authorized });
+   const { authorized, account, error } = await authorize(req, res);
+   if (!authorized) {
+      return res.status(401).json({ error });
    }
    if (req.method === 'GET') {
-      return getDomainSearchConsoleInsight(req, res);
+      return getDomainSearchConsoleInsight(req, res, account);
    }
    return res.status(502).json({ error: 'Unrecognized Route.' });
 }
 
-const getDomainSearchConsoleInsight = async (req: NextApiRequest, res: NextApiResponse<SCInsightRes>) => {
+const getDomainSearchConsoleInsight = async (req: NextApiRequest, res: NextApiResponse<SCInsightRes>, account?: Account | null) => {
    if (!req.query.domain && typeof req.query.domain !== 'string') return res.status(400).json({ data: null, error: 'Domain is Missing.' });
    const domainname = (req.query.domain as string).replaceAll('-', '.').replaceAll('_', '-');
+
+   // Verify the caller owns this domain before reading any (possibly cached) Search Console
+   // data for it. Scoped by scopeWhere: admin / MULTI_TENANT-off callers match any domain,
+   // a tenant only matches their own rows. This guards the local-SC-file read below too.
+   const ownedDomain: Domain | null = await Domain.findOne({ where: { domain: domainname, ...scopeWhere(account) } });
+   if (!ownedDomain) {
+      return res.status(403).json({ data: null, error: 'Domain not found for this account' });
+   }
    const getInsightFromSCData = (localSCData: SCDomainDataType): InsightDataType => {
       const { stats = [] } = localSCData;
       const countries = getCountryInsight(localSCData);
@@ -47,9 +57,7 @@ const getDomainSearchConsoleInsight = async (req: NextApiRequest, res: NextApiRe
 
    // If the Local SC Domain Data file does not exist, fetch from Googel Search Console.
    try {
-      const query = { domain: domainname };
-      const foundDomain:Domain| null = await Domain.findOne({ where: query });
-      const domainObj: DomainType = foundDomain && foundDomain.get({ plain: true });
+      const domainObj: DomainType = ownedDomain.get({ plain: true });
       const scDomainAPI = await getSearchConsoleApiInfo(domainObj);
       if (!(scDomainAPI.client_email && scDomainAPI.private_key)) {
          return res.status(200).json({ data: null, error: 'Google Search Console is not Integrated.' });

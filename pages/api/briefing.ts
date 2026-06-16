@@ -3,7 +3,10 @@ import { Op } from 'sequelize';
 import db from '../../database/database';
 import Keyword from '../../database/models/keyword';
 import CrawlerHit from '../../database/models/crawlerHit';
-import verifyUser from '../../utils/verifyUser';
+import Domain from '../../database/models/domain';
+import authorize from '../../utils/authorize';
+import { scopeWhere } from '../../utils/scope';
+import type Account from '../../database/models/account';
 import parseKeywords from '../../utils/parseKeywords';
 import { cleanPath } from '../../utils/lodd';
 import {
@@ -100,22 +103,33 @@ const secs = (n: number | undefined): string => (typeof n === 'number' && Number
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<BriefingResponse>) {
    await db.sync();
-   const authorized = verifyUser(req, res);
-   if (authorized !== 'authorized') {
-      return res.status(401).json({ error: authorized });
+   const { authorized, account, error } = await authorize(req, res);
+   if (!authorized) {
+      return res.status(401).json({ error: error || 'Not authorized' });
    }
    if (req.method !== 'GET') {
       return res.status(405).json({ error: 'Method Not Allowed. Use GET.' });
    }
-   return getBriefing(req, res);
+   return getBriefing(req, res, account);
 }
 
-const getBriefing = async (req: NextApiRequest, res: NextApiResponse<BriefingResponse>) => {
+const getBriefing = async (req: NextApiRequest, res: NextApiResponse<BriefingResponse>, account?: Account | null) => {
    if (!req.query.domain || typeof req.query.domain !== 'string') {
       return res.status(400).json({ error: 'Domain is Required!' });
    }
    const domain = req.query.domain as string;
    const period = (typeof req.query.period === 'string' && req.query.period) ? req.query.period : '30d';
+
+   // Verify the caller owns this domain before reading any of its data. With
+   // MULTI_TENANT off (default), scopeWhere returns {} so this is just an existence
+   // check against the same Domain row the legacy app would have read. With the flag
+   // on, a tenant can only brief a domain they own; everything below (Keyword,
+   // CrawlerHit, and the analytics providers, all keyed by the domain string) is
+   // gated behind this single ownership check.
+   const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+   if (!owned) {
+      return res.status(403).json({ error: 'Domain not found for this account' });
+   }
 
    try {
       const provider = getAnalyticsProvider();
@@ -125,7 +139,7 @@ const getBriefing = async (req: NextApiRequest, res: NextApiResponse<BriefingRes
       // briefing. Analytics providers already resolve (not reject) with an
       // `error` field; the DB and crawler queries get explicit catches.
       const [keywordRows, traffic, referrals, summary, engagement, botEstimate, crawlerRows] = await Promise.all([
-         Keyword.findAll({ where: { domain } }).catch(() => [] as Keyword[]),
+         Keyword.findAll({ where: { domain, ...scopeWhere(account) } }).catch(() => [] as Keyword[]),
          provider.getPageTraffic(domain, period).catch((e) => ({ pages: [], error: String(e) })),
          provider.getReferralSources(domain, period).catch((e) => ({ sources: [], error: String(e) })),
          provider.getSummary(domain, period).catch((e) => ({

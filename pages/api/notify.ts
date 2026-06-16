@@ -5,6 +5,9 @@ import Domain from '../../database/models/domain';
 import Keyword from '../../database/models/keyword';
 import generateEmail from '../../utils/generateEmail';
 import parseKeywords from '../../utils/parseKeywords';
+import authorize from '../../utils/authorize';
+import { scopeWhere } from '../../utils/scope';
+import type Account from '../../database/models/account';
 import { getAppSettings } from './settings';
 
 type NotifyResponse = {
@@ -15,12 +18,16 @@ type NotifyResponse = {
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
    if (req.method === 'POST') {
       await db.sync();
-      return notify(req, res);
+      const { authorized, account, error } = await authorize(req, res);
+      if (!authorized) {
+         return res.status(401).json({ success: false, error });
+      }
+      return notify(req, res, account);
    }
    return res.status(401).json({ success: false, error: 'Invalid Method' });
 }
 
-const notify = async (req: NextApiRequest, res: NextApiResponse<NotifyResponse>) => {
+const notify = async (req: NextApiRequest, res: NextApiResponse<NotifyResponse>, account?: Account | null) => {
    const reqDomain = req?.query?.domain as string || '';
    try {
       const settings = await getAppSettings();
@@ -31,17 +38,17 @@ const notify = async (req: NextApiRequest, res: NextApiResponse<NotifyResponse>)
       }
 
       if (reqDomain) {
-         const theDomain = await Domain.findOne({ where: { domain: reqDomain } });
+         const theDomain = await Domain.findOne({ where: { domain: reqDomain, ...scopeWhere(account) } });
          if (theDomain) {
-            await sendNotificationEmail(theDomain, settings);
+            await sendNotificationEmail(theDomain, settings, account);
          }
       } else {
-         const allDomains: Domain[] = await Domain.findAll();
+         const allDomains: Domain[] = await Domain.findAll({ where: { ...scopeWhere(account) } });
          if (allDomains && allDomains.length > 0) {
             const domains = allDomains.map((el) => el.get({ plain: true }));
             for (const domain of domains) {
                if (domain.notification !== false) {
-                  await sendNotificationEmail(domain, settings);
+                  await sendNotificationEmail(domain, settings, account);
                }
             }
          }
@@ -54,7 +61,7 @@ const notify = async (req: NextApiRequest, res: NextApiResponse<NotifyResponse>)
    }
 };
 
-const sendNotificationEmail = async (domain: Domain, settings: SettingsType) => {
+const sendNotificationEmail = async (domain: Domain, settings: SettingsType, account?: Account | null) => {
    const {
       smtp_server = '',
       smtp_port = '',
@@ -74,7 +81,7 @@ const sendNotificationEmail = async (domain: Domain, settings: SettingsType) => 
    }
    const transporter = nodeMailer.createTransport(mailerSettings);
    const domainName = domain.domain;
-   const query = { where: { domain: domainName } };
+   const query = { where: { domain: domainName, ...scopeWhere(account) } };
    const domainKeywords:Keyword[] = await Keyword.findAll(query);
    const keywordsArray = domainKeywords.map((el) => el.get({ plain: true }));
    const keywords: KeywordType[] = parseKeywords(keywordsArray);
