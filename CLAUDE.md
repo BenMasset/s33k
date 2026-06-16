@@ -90,6 +90,18 @@ hard-won lesson, so the next session never relearns it.
   DEPENDENCY-FREE: no DB-model imports. Importing a model drags sequelize/uuid ESM into jest and
   breaks suites. That exact regression happened and was fixed. Do not reintroduce it.
 
+### Import provider/util classes STATICALLY, never via runtime `require('./x').Named`
+- A dynamic `const { UmamiProvider } = require('./umami')` resolved to `undefined` in the Next
+  STANDALONE production bundle (`new UmamiProvider()` threw "is not a constructor"), even though
+  the export map registered the full name. Next/webpack does not reliably expose a harmony (ESM)
+  NAMED export through a runtime require in standalone output. Jest never caught it (jest runs
+  source, not the bundle) and it only fired on the configured provider (Umami on prod), so a
+  Lodd-path local test looked green. Fix: `import { UmamiProvider } from './umami'` at module top.
+  Static imports are rewritten correctly by webpack and are the durable form. The lazy-require was
+  a micro-optimization not worth a prod-breaking footgun. To reproduce a bundle-only bug like this:
+  `npm run build`, copy `data/database.sqlite` into `.next/standalone/data/`, `export
+  ANALYTICS_PROVIDER=umami`, run `node .next/standalone/server.js`, and curl the route.
+
 ### No server-side LLM, ever (a verified-true trust property)
 - The AI features (`briefing`, `insights`, `ai_visibility`, `alerts`, `entry_pages`) are
   RULES-BASED. They return structured data for the USER's own LLM to narrate. s33k has no

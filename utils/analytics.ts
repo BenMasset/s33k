@@ -36,6 +36,16 @@
  * When a metric is null, `metricsNote` explains why so the value is not mistaken
  * for zero.
  */
+// Provider classes are imported STATICALLY (not lazy-required). The Next.js
+// standalone bundle does not reliably expose a harmony (ESM) named export
+// through a runtime `require('./umami').UmamiProvider`: the property comes back
+// undefined and `new UmamiProvider()` throws "is not a constructor". That broke
+// all Umami-backed analytics on prod. Static `import` is rewritten correctly by
+// webpack, so it is the durable form. These imports only DEFINE the classes;
+// no provider work (and no DB or network call) runs until a getter is invoked.
+import { LoddProvider } from './lodd';
+import { UmamiProvider } from './umami';
+
 export type NormalizedPage = {
    url: string,
    pathClean: string,
@@ -355,8 +365,6 @@ export const getAnalyticsProvider = (): AnalyticsProvider => {
       if (!process.env.LODD_API_KEY || !process.env.LODD_SITE) {
          return unconfiguredProvider('lodd');
       }
-      // eslint-disable-next-line global-require
-      const { LoddProvider } = require('./lodd');
       return new LoddProvider();
    }
 
@@ -368,10 +376,5 @@ export const getAnalyticsProvider = (): AnalyticsProvider => {
    if (!hasBase || (!hasApiKey && !hasLogin)) {
       return unconfiguredProvider('umami');
    }
-   // eslint-disable-next-line global-require
-   const umamiModule = require('./umami');
-   // Tolerate both the named and (legacy) default export shapes so a bundler interop
-   // quirk cannot silently break analytics again (it did once on prod).
-   const UmamiProvider = umamiModule.UmamiProvider || umamiModule.default;
    return new UmamiProvider();
 };

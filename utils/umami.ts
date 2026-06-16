@@ -708,7 +708,9 @@ export class UmamiProvider implements AnalyticsProvider {
    }
 }
 
-// NOTE: do NOT add `export default UmamiProvider`. Exporting the class as the default
-// clobbers the named export in the Next standalone bundle, so getAnalyticsProvider's
-// `require('./umami').UmamiProvider` comes back undefined ("UmamiProvider is not a
-// constructor"). It broke all analytics reads on prod once. Keep the named export only.
+// Keep `UmamiProvider` a NAMED export and let utils/analytics.ts import it
+// STATICALLY. Do not switch callers to a runtime `require('./umami').UmamiProvider`:
+// the Next standalone bundle does not reliably expose this harmony named export to a
+// dynamic require, so it resolves to undefined and `new UmamiProvider()` throws
+// "is not a constructor". That broke all Umami-backed analytics on prod. A static
+// `import { UmamiProvider }` is rewritten correctly by webpack and is the durable form.
