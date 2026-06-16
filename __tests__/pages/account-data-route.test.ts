@@ -31,6 +31,8 @@ jest.mock('../../database/models/crawlerHit', () => ({ __esModule: true, default
 jest.mock('../../database/models/s33kEvent', () => ({ __esModule: true, default: { destroy: jest.fn() } }));
 jest.mock('../../database/models/account', () => ({ __esModule: true, default: { destroy: jest.fn() } }));
 jest.mock('../../database/models/apiKey', () => ({ __esModule: true, default: { destroy: jest.fn() } }));
+jest.mock('../../database/models/invite', () => ({ __esModule: true, default: { destroy: jest.fn() } }));
+jest.mock('../../database/models/featureRequest', () => ({ __esModule: true, default: { destroy: jest.fn() } }));
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('../../utils/umami-provision', () => ({ __esModule: true, deleteUmamiWebsite: jest.fn() }));
 
@@ -55,6 +57,10 @@ import AccountModel from '../../database/models/account';
 // eslint-disable-next-line import/first
 import ApiKeyModel from '../../database/models/apiKey';
 // eslint-disable-next-line import/first
+import InviteModel from '../../database/models/invite';
+// eslint-disable-next-line import/first
+import FeatureRequestModel from '../../database/models/featureRequest';
+// eslint-disable-next-line import/first
 import authorizeFn from '../../utils/authorize';
 // eslint-disable-next-line import/first
 import { deleteUmamiWebsite } from '../../utils/umami-provision';
@@ -65,6 +71,8 @@ const mockCrawlerHit = CrawlerHitModel as unknown as { destroy: jest.Mock };
 const mockEvent = S33kEventModel as unknown as { destroy: jest.Mock };
 const mockAccount = AccountModel as unknown as { destroy: jest.Mock };
 const mockApiKey = ApiKeyModel as unknown as { destroy: jest.Mock };
+const mockInvite = InviteModel as unknown as { destroy: jest.Mock };
+const mockFeatureRequest = FeatureRequestModel as unknown as { destroy: jest.Mock };
 const mockAuthorize = authorizeFn as unknown as jest.Mock;
 const mockDeleteUmami = deleteUmamiWebsite as unknown as jest.Mock;
 
@@ -98,6 +106,8 @@ const expectNothingDeleted = () => {
    expect(mockCrawlerHit.destroy).not.toHaveBeenCalled();
    expect(mockEvent.destroy).not.toHaveBeenCalled();
    expect(mockApiKey.destroy).not.toHaveBeenCalled();
+   expect(mockInvite.destroy).not.toHaveBeenCalled();
+   expect(mockFeatureRequest.destroy).not.toHaveBeenCalled();
    expect(mockAccount.destroy).not.toHaveBeenCalled();
    expect(mockDeleteUmami).not.toHaveBeenCalled();
 };
@@ -112,6 +122,8 @@ beforeEach(() => {
    mockCrawlerHit.destroy.mockResolvedValue(0);
    mockEvent.destroy.mockResolvedValue(0);
    mockApiKey.destroy.mockResolvedValue(0);
+   mockInvite.destroy.mockResolvedValue(0);
+   mockFeatureRequest.destroy.mockResolvedValue(0);
    mockAccount.destroy.mockResolvedValue(0);
    mockDeleteUmami.mockResolvedValue({ deleted: true, error: null });
 });

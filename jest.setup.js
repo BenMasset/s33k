@@ -51,5 +51,16 @@ if (typeof global.ReadableStream === 'undefined'
    global.TransformStream = global.TransformStream || TransformStream;
 }
 
+// Default-mock DNS resolution. utils/site-crawl.ts now resolves each hostname and
+// rejects any that maps to a private IP (SSRF defense, security review #1). Unit tests
+// mock global.fetch with fixture hostnames (e.g. blog.example, thin-site.example) that do
+// not resolve, so without this they would be correctly blocked before any fetch. Return a
+// fixed public IP by default; an SSRF-specific test can override this to assert that a
+// hostname resolving to a private address is rejected.
+jest.mock('dns/promises', () => ({
+   __esModule: true,
+   lookup: jest.fn(async () => [{ address: '93.184.216.34', family: 4 }]),
+}));
+
 // Enable Fetch Mocking
 enableFetchMocks();

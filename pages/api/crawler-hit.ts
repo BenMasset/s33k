@@ -6,6 +6,7 @@ import Domain from '../../database/models/domain';
 import CrawlerHit from '../../database/models/crawlerHit';
 import type Account from '../../database/models/account';
 import { classifyCrawler, CrawlerClassification } from '../../utils/ai-crawlers';
+import { MAX_CRAWLER_PATH_LEN, MAX_CRAWLER_UA_LEN } from '../../utils/limits';
 
 type CrawlerHitResponse = {
    recorded?: boolean,
@@ -22,14 +23,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
    if (req.method !== 'POST') {
       return res.status(405).json({ error: 'Method Not Allowed. Use POST.' });
    }
+   // FEATURE GATE (security review #4): the crawler-hit ingest is dormant by default. No
+   // first-party feeder ships yet (the on-site reporter was deferred), so leaving an open
+   // write path invites storage abuse for zero current benefit. It stays disabled until an
+   // operator explicitly turns it on alongside a real, rate-aware feeder.
+   if (process.env.CRAWLER_INGEST_ENABLED !== 'true') {
+      return res.status(403).json({ error: 'Crawler-hit ingest is disabled. Set CRAWLER_INGEST_ENABLED=true to enable.' });
+   }
    return recordCrawlerHit(req, res, account);
 }
 
 const recordCrawlerHit = async (req: NextApiRequest, res: NextApiResponse<CrawlerHitResponse>, account?: Account | null) => {
    const body = (req.body && typeof req.body === 'object') ? req.body : {};
    const domain = typeof body.domain === 'string' ? body.domain.trim() : '';
-   const path = typeof body.path === 'string' ? body.path : '';
-   const userAgent = typeof body.userAgent === 'string' ? body.userAgent : '';
+   // Cap the free-text fields so an authenticated caller cannot push unbounded blobs into the
+   // TEXT columns (security review #4). Real paths/UAs are well under these limits.
+   const path = typeof body.path === 'string' ? body.path.slice(0, MAX_CRAWLER_PATH_LEN) : '';
+   const userAgent = typeof body.userAgent === 'string' ? body.userAgent.slice(0, MAX_CRAWLER_UA_LEN) : '';
 
    if (!domain) {
       return res.status(400).json({ error: 'Domain is Required!' });

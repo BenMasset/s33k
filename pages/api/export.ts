@@ -7,6 +7,8 @@ import CrawlerHit from '../../database/models/crawlerHit';
 import S33kEvent from '../../database/models/s33kEvent';
 import Account from '../../database/models/account';
 import ApiKey from '../../database/models/apiKey';
+import Invite from '../../database/models/invite';
+import FeatureRequest from '../../database/models/featureRequest';
 import authorize from '../../utils/authorize';
 import { scopeWhere, ADMIN_ACCOUNT_ID } from '../../utils/scope';
 import type Account2 from '../../database/models/account';
@@ -48,6 +50,8 @@ type ExportResponse = {
    keywords?: Record<string, unknown>[],
    crawlerHits?: Record<string, unknown>[],
    events?: Record<string, unknown>[],
+   invites?: Record<string, unknown>[],
+   featureRequests?: Record<string, unknown>[],
    counts?: Record<string, number>,
    error?: string | null,
 };
@@ -131,10 +135,38 @@ const exportData = async (req: NextApiRequest, res: NextApiResponse<ExportRespon
          });
       }
 
+      // 6. Feature requests: account-linked text, scoped by owner_id (scope). Part of "everything
+      //    s33k holds for you" (security review #3). Admin/single-tenant (scope {}) gets all.
+      const featureRequests: FeatureRequest[] = await FeatureRequest.findAll({ where: { ...scope } });
+
+      // 7. Invites tied to this account as inviter, target, or accepted-by. Only meaningful with
+      //    MULTI_TENANT on (account present); the table is inert otherwise. Invite has no owner_id,
+      //    so it is scoped explicitly by the three account-id columns rather than scopeWhere.
+      let invites: Invite[] = [];
+      if (account && account.ID) {
+         invites = await Invite.findAll({
+            where: {
+               [Op.or]: [
+                  { inviter_account_id: account.ID },
+                  { target_account_id: account.ID },
+                  { accepted_by_account_id: account.ID },
+               ],
+            },
+         });
+      }
+
       const domainsOut = domains.map(sanitizeDomain);
       const keywordsOut = keywords.map((k) => k.get({ plain: true }) as Record<string, unknown>);
       const crawlerHitsOut = crawlerHits.map((c) => c.get({ plain: true }) as Record<string, unknown>);
       const eventsOut = events.map((e) => e.get({ plain: true }) as Record<string, unknown>);
+      const featureRequestsOut = featureRequests.map((f) => f.get({ plain: true }) as Record<string, unknown>);
+      // Invites: the secret `code` is stripped (it is a live credential that mints API keys); we
+      // export only the non-sensitive invite metadata so the bundle never leaks an active code.
+      const invitesOut = invites.map((i) => {
+         const p = i.get({ plain: true }) as Record<string, unknown>;
+         delete p.code;
+         return p;
+      });
 
       return res.status(200).json({
          exportedAt: new Date().toJSON(),
@@ -145,12 +177,16 @@ const exportData = async (req: NextApiRequest, res: NextApiResponse<ExportRespon
          keywords: keywordsOut,
          crawlerHits: crawlerHitsOut,
          events: eventsOut,
+         invites: invitesOut,
+         featureRequests: featureRequestsOut,
          counts: {
             domains: domainsOut.length,
             keywords: keywordsOut.length,
             crawlerHits: crawlerHitsOut.length,
             events: eventsOut.length,
             apiKeys: apiKeys.length,
+            invites: invitesOut.length,
+            featureRequests: featureRequestsOut.length,
          },
       });
    } catch (error) {

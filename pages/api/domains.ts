@@ -106,10 +106,20 @@ export const deleteDomain = async (req: NextApiRequest, res: NextApiResponse<Dom
    try {
       const { domain } = req.query || {};
       const scope = scopeWhere(account);
+      // OWNERSHIP GATE (security review #5): confirm the caller actually owns a domain row
+      // BEFORE touching anything, so a tenant cannot delete another tenant's keywords or
+      // its on-disk Search Console cache by passing the bare domain string. With
+      // MULTI_TENANT off, scopeWhere is {} so this is the existing "does the domain exist"
+      // check; with it on, it enforces owner_id.
+      const owned = await Domain.findOne({ where: { domain, ...scope } });
+      if (!owned) {
+         return res.status(404).json({ domainRemoved: 0, keywordsRemoved: 0, SCDataRemoved: false, error: 'Domain not found for this account' });
+      }
       await Promise.all((await Keyword.findAll({ where: { domain, ...scope } })).map((keyword) => removeFromRetryQueue(keyword.ID)));
       const removedDomCount: number = await Domain.destroy({ where: { domain, ...scope } });
       const removedKeywordCount: number = await Keyword.destroy({ where: { domain, ...scope } });
-      const SCDataRemoved = await removeLocalSCData(domain as string);
+      // Only clear the local Search Console cache once a scoped domain was actually removed.
+      const SCDataRemoved = removedDomCount > 0 ? await removeLocalSCData(domain as string) : false;
 
       return res.status(200).json({ domainRemoved: removedDomCount, keywordsRemoved: removedKeywordCount, SCDataRemoved });
    } catch (error) {

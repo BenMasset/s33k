@@ -31,6 +31,8 @@ jest.mock('../../database/models/crawlerHit', () => ({ __esModule: true, default
 jest.mock('../../database/models/s33kEvent', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../database/models/account', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
 jest.mock('../../database/models/apiKey', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
+jest.mock('../../database/models/invite', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
+jest.mock('../../database/models/featureRequest', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
 
 // eslint-disable-next-line import/first
@@ -54,6 +56,10 @@ import AccountModel from '../../database/models/account';
 // eslint-disable-next-line import/first
 import ApiKeyModel from '../../database/models/apiKey';
 // eslint-disable-next-line import/first
+import InviteModel from '../../database/models/invite';
+// eslint-disable-next-line import/first
+import FeatureRequestModel from '../../database/models/featureRequest';
+// eslint-disable-next-line import/first
 import authorizeFn from '../../utils/authorize';
 
 const mockDomain = DomainModel as unknown as { findAll: jest.Mock };
@@ -62,6 +68,8 @@ const mockCrawlerHit = CrawlerHitModel as unknown as { findAll: jest.Mock };
 const mockEvent = S33kEventModel as unknown as { findAll: jest.Mock };
 const mockAccount = AccountModel as unknown as { findOne: jest.Mock };
 const mockApiKey = ApiKeyModel as unknown as { findAll: jest.Mock };
+const mockInvite = InviteModel as unknown as { findAll: jest.Mock };
+const mockFeatureRequest = FeatureRequestModel as unknown as { findAll: jest.Mock };
 const mockAuthorize = authorizeFn as unknown as jest.Mock;
 
 const ORIGINAL_ENV = { ...process.env };
@@ -100,6 +108,8 @@ beforeEach(() => {
    mockEvent.findAll.mockResolvedValue([]);
    mockAccount.findOne.mockResolvedValue(null);
    mockApiKey.findAll.mockResolvedValue([]);
+   mockInvite.findAll.mockResolvedValue([]);
+   mockFeatureRequest.findAll.mockResolvedValue([]);
 });
 
 afterEach(() => { process.env = { ...ORIGINAL_ENV }; });

@@ -76,21 +76,30 @@ module.exports = {
       if (queryInterface.sequelize.getDialect() !== 'postgres') { return; }
 
       const describedTables = {};
+      // Attempt every column, then FAIL the migration if any real ALTER failed. A genuinely
+      // absent column (fresh DB) is skipped and is NOT a failure; an ALTER that throws IS, and
+      // must not be swallowed, or Umzug records the migration as applied while columns are still
+      // VARCHAR(255) and the original overflow bug silently returns (security review #8).
+      const failures = [];
       for (const [table, column] of COLUMNS_TO_WIDEN) {
+         if (!(table in describedTables)) {
+            describedTables[table] = await safeDescribeTable(queryInterface, table);
+         }
+         const definition = describedTables[table];
+         // Skip anything not present yet on this DB so the migration is safe on a fresh schema.
+         if (!definition || !definition[column]) { continue; }
          try {
-            if (!(table in describedTables)) {
-               describedTables[table] = await safeDescribeTable(queryInterface, table);
-            }
-            const definition = describedTables[table];
-            // Skip anything not present yet on this DB so the migration is safe on a fresh schema.
-            if (!definition || !definition[column]) { continue; }
             // ALTER ... TYPE TEXT is a non-destructive widen and a clean no-op when already TEXT,
             // which is what makes re-running safe. Identifiers are quoted to preserve case
             // (userAgent) and avoid any reserved-word collisions.
             await queryInterface.sequelize.query(`ALTER TABLE "${table}" ALTER COLUMN "${column}" TYPE TEXT`);
          } catch (error) {
-            console.log(`widen-string-columns-to-text: skipped ${table}.${column}:`, error.message);
+            console.log(`widen-string-columns-to-text: FAILED ${table}.${column}:`, error.message);
+            failures.push(`${table}.${column}: ${error.message}`);
          }
+      }
+      if (failures.length > 0) {
+         throw new Error(`widen-string-columns-to-text: ${failures.length} column(s) failed to widen to TEXT: ${failures.join('; ')}`);
       }
    },
    // No down migration: narrowing TEXT back to VARCHAR(255) would risk truncating real data that

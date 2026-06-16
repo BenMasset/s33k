@@ -2,9 +2,11 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { Op } from 'sequelize';
 import db from '../../database/database';
 import Keyword from '../../database/models/keyword';
+import Domain from '../../database/models/domain';
 import { getAppSettings } from './settings';
 import authorize from '../../utils/authorize';
 import { scopeWhere, ownerIdFor } from '../../utils/scope';
+import { MAX_KEYWORDS_PER_REQUEST, MAX_KEYWORDS_PER_DOMAIN } from '../../utils/limits';
 import type Account from '../../database/models/account';
 import parseKeywords from '../../utils/parseKeywords';
 import { integrateKeywordSCData, readLocalSCData } from '../../utils/searchConsole';
@@ -81,12 +83,54 @@ const getKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGet
 const addKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGetResponse>, account?: Account | null) => {
    const { keywords } = req.body;
    if (keywords && Array.isArray(keywords) && keywords.length > 0) {
-      // const keywordsArray = keywords.replaceAll('\n', ',').split(',').map((item:string) => item.trim());
+      // Per-request cap. Bounds one bulk insert and the scrape burst it queues.
+      if (keywords.length > MAX_KEYWORDS_PER_REQUEST) {
+         return res.status(400).json({ error: `Too many keywords in one request (max ${MAX_KEYWORDS_PER_REQUEST}).` });
+      }
+      // Every keyword must name a domain.
+      if (keywords.some((k: KeywordAddPayload) => !k || typeof k.domain !== 'string' || !k.domain.trim())) {
+         return res.status(400).json({ error: 'Every keyword must include a domain.' });
+      }
+
+      // OWNERSHIP GATE (security review #2): the caller must OWN every domain they add
+      // keywords for, before any cost-bearing bulkCreate + scrape. scopeWhere is {} when
+      // MULTI_TENANT is off (so this just requires the domain to exist, which is correct),
+      // and enforces owner_id when on (so a tenant cannot add keywords against another
+      // tenant's domain string, burn the operator's SERP quota, or skew their stats).
+      const requestedDomains = Array.from(new Set(keywords.map((k: KeywordAddPayload) => k.domain.trim())));
+      const ownedDomains = await Domain.findAll({ where: { domain: { [Op.in]: requestedDomains }, ...scopeWhere(account) } });
+      const ownedDomainSet = new Set(ownedDomains.map((d) => d.domain));
+      const unowned = requestedDomains.filter((d) => !ownedDomainSet.has(d));
+      if (unowned.length > 0) {
+         return res.status(403).json({ error: `Domain not found for this account: ${unowned.join(', ')}` });
+      }
+
+      // PER-DOMAIN CAP (security review #2 / #6): the keyword-cap claim in the product's
+      // own knowledge facts is enforced here. Count existing tracked keywords per domain
+      // and reject if this request would push any domain over the cap.
+      const newByDomain: Record<string, number> = {};
+      for (const k of keywords as KeywordAddPayload[]) { newByDomain[k.domain.trim()] = (newByDomain[k.domain.trim()] || 0) + 1; }
+      for (const domain of requestedDomains) {
+         // eslint-disable-next-line no-await-in-loop
+         const existing = await Keyword.count({ where: { domain, ...scopeWhere(account) } });
+         if (existing + newByDomain[domain] > MAX_KEYWORDS_PER_DOMAIN) {
+            return res.status(400).json({
+               error: `Keyword cap reached for ${domain} (max ${MAX_KEYWORDS_PER_DOMAIN}; ${existing} already tracked).`,
+            });
+         }
+      }
+
       const keywordsToAdd: any = []; // QuickFIX for bug: https://github.com/sequelize/sequelize-typescript/issues/936
       const owner_id = ownerIdFor(account);
+      // Dedupe within the request by the natural key, so a single call cannot insert (and
+      // pay to scrape) the same keyword+device+country+domain twice.
+      const seen = new Set<string>();
 
       keywords.forEach((kwrd: KeywordAddPayload) => {
          const { keyword, device, country, domain, tags, city, target_page } = kwrd;
+         const dedupeKey = `${(keyword || '').trim().toLowerCase()}|${device}|${country}|${domain.trim()}`;
+         if (seen.has(dedupeKey)) { return; }
+         seen.add(dedupeKey);
          const tagsArray = tags ? tags.split(',').map((item:string) => item.trim()) : [];
          const newKeyword = {
             keyword,

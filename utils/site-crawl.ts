@@ -18,11 +18,16 @@
  * not run any server-side LLM here.
  */
 
+import { lookup } from 'dns/promises';
+
 /** Maximum number of pages summarized in a single crawl. */
 export const MAX_PAGES = 25;
 
 /** Per-request fetch timeout in milliseconds. */
 const FETCH_TIMEOUT_MS = 10000;
+
+/** Max redirect hops we follow (and revalidate) before giving up. */
+const MAX_REDIRECTS = 4;
 
 /** A realistic, honest user agent so well-behaved sites do not block us. */
 const USER_AGENT = 's33k-onboarding-crawler/0.1 (+https://github.com/s33k)';
@@ -77,26 +82,78 @@ const normalizeDomain = (input: string): string => String(input || '')
  * @param {string} hostname - The URL hostname (already lowercased by URL).
  * @returns {boolean} True if safe to fetch.
  */
+// True if a numeric IPv4 (by its first two octets) is in a private/reserved/
+// link-local/metadata/multicast range that must never be fetched server-side.
+const isPrivateIpv4 = (a: number, b: number): boolean => {
+   if (a === 127 || a === 10 || a === 0) { return true; }
+   if (a === 169 && b === 254) { return true; } // link-local incl. 169.254.169.254 metadata
+   if (a === 172 && b >= 16 && b <= 31) { return true; }
+   if (a === 192 && b === 168) { return true; }
+   if (a === 100 && b >= 64 && b <= 127) { return true; } // CGNAT
+   if (a >= 224) { return true; } // multicast + reserved
+   return false;
+};
+
+/**
+ * True if a raw IP literal (IPv4, IPv6, or IPv4-mapped IPv6 in dotted OR hex form)
+ * is private/reserved/loopback/link-local. Unknown shapes are treated as unsafe.
+ * IPv4-mapped IPv6 (::ffff:10.0.0.1 / ::ffff:0a00:0001) is the form the previous
+ * literal-only guard missed (security review #1).
+ * @param {string} ip - An IP literal.
+ * @returns {boolean} True if the IP must not be fetched.
+ */
+export const isPrivateIp = (ip: string): boolean => {
+   const host = String(ip || '').toLowerCase().replace(/^\[|\]$/g, '');
+   if (!host) { return true; }
+   if (host === '::1' || host === '::' || host === '0.0.0.0') { return true; }
+   const mappedDotted = host.match(/^::ffff:(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/);
+   if (mappedDotted) { return isPrivateIpv4(Number(mappedDotted[1]), Number(mappedDotted[2])); }
+   const mappedHex = host.match(/^::ffff:([0-9a-f]{1,4}):[0-9a-f]{1,4}$/);
+   if (mappedHex) { const hi = parseInt(mappedHex[1], 16); return isPrivateIpv4((hi >> 8) & 0xff, hi & 0xff); }
+   const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/);
+   if (v4) { return isPrivateIpv4(Number(v4[1]), Number(v4[2])); }
+   // IPv6 unique-local (fc/fd) and link-local (fe80::/10 -> fe8/fe9/fea/feb).
+   if (/^f[cd]/.test(host) || /^fe[89ab]/.test(host)) { return true; }
+   return false;
+};
+
+/**
+ * SSRF guard on the LITERAL hostname (no DNS). Cheap first gate: blocks localhost,
+ * .local names, and private/reserved IP literals (incl. IPv4-mapped IPv6). A bare
+ * hostname passes here; it is resolved and re-checked in isResolvedHostPublic
+ * before any fetch.
+ * @param {string} hostname - The URL hostname.
+ * @returns {boolean} True if safe at the literal level.
+ */
 export const isPublicHostname = (hostname: string): boolean => {
    const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
    if (!host) { return false; }
-   // Loopback / unspecified / local names.
    if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) { return false; }
-   if (host === '0.0.0.0' || host === '::' || host === '::1') { return false; }
-   // IPv4-literal ranges: loopback, RFC1918 private, link-local (incl. metadata),
-   // and carrier-grade NAT.
-   const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-   if (v4) {
-      const [a, b] = [Number(v4[1]), Number(v4[2])];
-      if (a === 127 || a === 10 || a === 0) { return false; }
-      if (a === 169 && b === 254) { return false; } // link-local + 169.254.169.254 metadata
-      if (a === 172 && b >= 16 && b <= 31) { return false; }
-      if (a === 192 && b === 168) { return false; }
-      if (a === 100 && b >= 64 && b <= 127) { return false; } // CGNAT
-   }
-   // IPv6 private / loopback / unique-local / link-local literals.
-   if (host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe80') || host.startsWith('::ffff:127')) { return false; }
+   const looksLikeIp = /^[0-9.]+$/.test(host) || host.includes(':');
+   if (looksLikeIp) { return !isPrivateIp(host); }
    return true;
+};
+
+/**
+ * SSRF guard that RESOLVES the hostname and requires EVERY resolved address to be
+ * public. Closes the DNS-rebind / hostname-points-at-private hole the literal-only
+ * check cannot (security review #1). Never throws; a resolution failure is unsafe.
+ * @param {string} hostname - The URL hostname.
+ * @returns {Promise<boolean>} True only if safe to fetch.
+ */
+export const isResolvedHostPublic = async (hostname: string): Promise<boolean> => {
+   const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+   if (!host) { return false; }
+   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) { return false; }
+   const looksLikeIp = /^[0-9.]+$/.test(host) || host.includes(':');
+   if (looksLikeIp) { return !isPrivateIp(host); }
+   try {
+      const addresses = await lookup(host, { all: true });
+      if (!addresses || addresses.length === 0) { return false; }
+      return addresses.every((a) => !isPrivateIp(a.address));
+   } catch {
+      return false;
+   }
 };
 
 /**
@@ -108,28 +165,41 @@ export const isPublicHostname = (hostname: string): boolean => {
  * @returns {Promise<string | null>} The response body text, or null.
  */
 export const safeFetchText = async (url: string, accept?: string): Promise<string | null> => {
-   let parsed: URL;
-   try { parsed = new URL(url); } catch { return null; }
-   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') { return null; }
-   if (!isPublicHostname(parsed.hostname)) { return null; }
-   const controller = new AbortController();
-   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-   try {
-      const res = await fetch(url, {
-         headers: {
-            'User-Agent': USER_AGENT,
-            ...(accept ? { Accept: accept } : {}),
-         },
-         signal: controller.signal,
-         redirect: 'follow',
-      });
-      if (!res.ok) { return null; }
-      return await res.text();
-   } catch {
-      return null;
-   } finally {
-      clearTimeout(timer);
+   let current = url;
+   // Follow redirects MANUALLY so every destination (initial + each Location) is re-validated
+   // through the DNS-resolving guard. With redirect:'follow', a public URL that 30x-redirects to
+   // an internal host would slip past a one-time check (security review #1).
+   for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+      let parsed: URL;
+      try { parsed = new URL(current); } catch { return null; }
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') { return null; }
+      // eslint-disable-next-line no-await-in-loop
+      if (!await isResolvedHostPublic(parsed.hostname)) { return null; }
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+      try {
+         // eslint-disable-next-line no-await-in-loop
+         const res = await fetch(current, {
+            headers: { 'User-Agent': USER_AGENT, ...(accept ? { Accept: accept } : {}) },
+            signal: controller.signal,
+            redirect: 'manual',
+         });
+         if (res.status >= 300 && res.status < 400) {
+            const location = res.headers.get('location');
+            if (!location) { return null; }
+            current = new URL(location, current).toString();
+            continue;
+         }
+         if (!res.ok) { return null; }
+         // eslint-disable-next-line no-await-in-loop
+         return await res.text();
+      } catch {
+         return null;
+      } finally {
+         clearTimeout(timer);
+      }
    }
+   return null; // exceeded MAX_REDIRECTS
 };
 
 /**

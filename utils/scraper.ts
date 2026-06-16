@@ -318,7 +318,12 @@ export const scrapeKeywordFromGoogle = async (keyword:KeywordType, settings:Sett
       const scrapeResult:string = (scraperResult || res.data || res.html || res.results || '');
       if (res && scrapeResult) {
          const extracted = scraperObj?.serpExtractor ? scraperObj.serpExtractor(scrapeResult) : extractScrapedResult(scrapeResult, keyword.device);
-         await writeFile('result.txt', JSON.stringify(scrapeResult), { encoding: 'utf-8' }).catch((err) => { console.log(err); });
+         // Debug-only dump of the raw SERP payload. Off by default: writing result.txt on every
+         // production scrape is needless disk churn and could leak scraped content (security
+         // review #10). Set SCRAPE_DEBUG=true to re-enable when diagnosing a parser issue.
+         if (process.env.SCRAPE_DEBUG === 'true') {
+            await writeFile('result.txt', JSON.stringify(scrapeResult), { encoding: 'utf-8' }).catch((err) => { console.log(err); });
+         }
          const serp = getSerp(keyword.domain, extracted, subdomainMatching);
          refreshedResults = { ID: keyword.ID, keyword: keyword.keyword, position: serp.position, url: serp.url, result: extracted, error: false };
          console.log('[SERP]: ', keyword.keyword, serp.position, serp.url);

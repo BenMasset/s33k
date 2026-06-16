@@ -564,9 +564,10 @@ const reasoning: ReasoningEntry[] = [
       id: 'why_caps_and_invites',
       question: 'Why the keyword caps, the invite-only model, and the external-invite quota?',
       answer: 'Because s33k runs the SERP and LLM-adjacent infrastructure server-side, so cost ceilings are a day-one design '
-         + 'input. Per-account keyword caps and a default external-invite quota of 5 bound the cost of the infrastructure s33k '
-         + 'pays for and double as the free-to-paid lever. Internal read-only member seats are unlimited because they add no '
-         + 'SERP cost. The invite model is also the growth lever: external invites bring new accounts in.',
+         + 'input. Enforced per-domain and per-request keyword caps and a default external-invite quota of 5 bound the cost of '
+         + 'the infrastructure s33k pays for and double as the free-to-paid lever. Internal read-only member seats are '
+         + 'unlimited because they add no SERP cost. The invite model is also the growth lever: external invites bring new '
+         + 'accounts in.',
    },
    {
       id: 'why_open_source',
@@ -647,8 +648,9 @@ const pricingAndLimits = {
    model: 's33k is open source and self-hostable: run it yourself on your own infrastructure and database, free. The '
       + 'managed hosted service (s33k.io) is the paid surface (open-core). When self-hosting, you supply your own Serper '
       + 'key and host, so your only cost is your infrastructure.',
-   keywordTracking: 'Keyword tracking and rank-scrape cadence are bounded by per-account caps, because s33k runs the SERP '
-      + 'infrastructure server-side. Onboarding adds up to 20 discovered keywords per domain automatically.',
+   keywordTracking: 'Keyword tracking is bounded by enforced per-domain and per-request caps (configurable; defaults 200 '
+      + 'per domain and 50 per request, see utils/limits.ts), because s33k runs the SERP infrastructure server-side. '
+      + 'Onboarding adds up to 20 discovered keywords per domain automatically.',
    externalInvites: 'External invites (which create brand-new accounts) are limited per account by a quota, default 5. '
       + 'Internal read-only member seats are unlimited and do not consume the external quota.',
    memberSeats: 'A member seat is read-only: it can read every SEO and analytics surface but cannot write, invite, onboard, '

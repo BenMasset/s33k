@@ -7,6 +7,8 @@ import CrawlerHit from '../../database/models/crawlerHit';
 import S33kEvent from '../../database/models/s33kEvent';
 import Account from '../../database/models/account';
 import ApiKey from '../../database/models/apiKey';
+import Invite from '../../database/models/invite';
+import FeatureRequest from '../../database/models/featureRequest';
 import authorize from '../../utils/authorize';
 import { scopeWhere, ADMIN_ACCOUNT_ID } from '../../utils/scope';
 import type Account2 from '../../database/models/account';
@@ -38,6 +40,8 @@ type DeleteResponse = {
    keywordsRemoved?: number,
    crawlerHitsRemoved?: number,
    eventsRemoved?: number,
+   featureRequestsRemoved?: number,
+   invitesRemoved?: number,
    apiKeysRemoved?: number,
    accountRemoved?: boolean,
    umamiWebsitesDeleted?: number,
@@ -105,6 +109,21 @@ const deleteAccountData = async (req: NextApiRequest, res: NextApiResponse<Delet
          : 0;
       const domainsRemoved = await Domain.destroy({ where: { ...scope } });
 
+      // Account-linked records the export/delete trust claim must also cover (security review #3).
+      // Feature requests are owner-scoped. Invites have no owner_id, so they are deleted by the
+      // three account-id columns: this revokes any PENDING external invite this account issued,
+      // which must not outlive the deleted account as a usable account-creation credential.
+      const featureRequestsRemoved = await FeatureRequest.destroy({ where: { ...scope } });
+      const invitesRemoved = await Invite.destroy({
+         where: {
+            [Op.or]: [
+               { inviter_account_id: accountId },
+               { target_account_id: accountId },
+               { accepted_by_account_id: accountId },
+            ],
+         },
+      });
+
       // The account's API keys, then the account row. Scoped strictly to this account_id / ID,
       // never a wildcard, so no other account's keys or account row can be touched.
       const apiKeysRemoved = await ApiKey.destroy({ where: { account_id: accountId } });
@@ -113,8 +132,9 @@ const deleteAccountData = async (req: NextApiRequest, res: NextApiResponse<Delet
 
       console.log(
          `[DELETE] Hard-deleted account ID ${accountId}: ${domainsRemoved} domains, ${keywordsRemoved} keywords, `
-         + `${crawlerHitsRemoved} crawler hits, ${eventsRemoved} events, ${apiKeysRemoved} api keys, `
-         + `account row removed: ${accountRemoved}, umami websites deleted: ${umamiWebsitesDeleted}. IRREVERSIBLE.`,
+         + `${crawlerHitsRemoved} crawler hits, ${eventsRemoved} events, ${featureRequestsRemoved} feature requests, `
+         + `${invitesRemoved} invites, ${apiKeysRemoved} api keys, account row removed: ${accountRemoved}, `
+         + `umami websites deleted: ${umamiWebsitesDeleted}. IRREVERSIBLE.`,
       );
 
       return res.status(200).json({
@@ -124,6 +144,8 @@ const deleteAccountData = async (req: NextApiRequest, res: NextApiResponse<Delet
          keywordsRemoved,
          crawlerHitsRemoved,
          eventsRemoved,
+         featureRequestsRemoved,
+         invitesRemoved,
          apiKeysRemoved,
          accountRemoved,
          umamiWebsitesDeleted,

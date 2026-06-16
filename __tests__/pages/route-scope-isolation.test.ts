@@ -40,7 +40,7 @@ jest.mock('../../database/models/domain', () => ({
 jest.mock('../../database/models/keyword', () => ({
    __esModule: true,
    default: {
-      findAll: jest.fn(), findOne: jest.fn(), destroy: jest.fn(), bulkCreate: jest.fn(), update: jest.fn(),
+      findAll: jest.fn(), findOne: jest.fn(), destroy: jest.fn(), bulkCreate: jest.fn(), update: jest.fn(), count: jest.fn(),
    },
 }));
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
@@ -88,7 +88,7 @@ const mockDomain = DomainModel as unknown as {
    findAll: jest.Mock, findOne: jest.Mock, destroy: jest.Mock, bulkCreate: jest.Mock,
 };
 const mockKeyword = KeywordModel as unknown as {
-   findAll: jest.Mock, findOne: jest.Mock, destroy: jest.Mock, bulkCreate: jest.Mock, update: jest.Mock,
+   findAll: jest.Mock, findOne: jest.Mock, destroy: jest.Mock, bulkCreate: jest.Mock, update: jest.Mock, count: jest.Mock,
 };
 const mockAuthorize = authorizeFn as unknown as jest.Mock;
 
@@ -171,10 +171,14 @@ describe('POST /api/domains owner stamping', () => {
 describe('DELETE /api/domains where-clause scoping', () => {
    it('scopes a tenant delete (and its keyword cleanup) to its own owner_id', async () => {
       asCaller(TENANT);
+      mockDomain.findOne.mockResolvedValue(row({ ID: 1, domain: 'a.com' })); // ownership pre-check passes
       mockKeyword.findAll.mockResolvedValue([]);
       mockDomain.destroy.mockResolvedValue(1);
       mockKeyword.destroy.mockResolvedValue(0);
       await domainsHandler(makeReq({ method: 'DELETE', query: { domain: 'a.com' } }), makeRes());
+
+      // The ownership pre-check is itself scoped to the tenant.
+      expect(mockDomain.findOne.mock.calls[0][0].where).toEqual({ domain: 'a.com', owner_id: TENANT.ID });
 
       expect(mockDomain.destroy.mock.calls[0][0].where).toEqual({ domain: 'a.com', owner_id: TENANT.ID });
       expect(mockKeyword.destroy.mock.calls[0][0].where).toEqual({ domain: 'a.com', owner_id: TENANT.ID });
@@ -184,6 +188,7 @@ describe('DELETE /api/domains where-clause scoping', () => {
 
    it('does NOT scope the admin delete', async () => {
       asCaller(ADMIN);
+      mockDomain.findOne.mockResolvedValue(row({ ID: 1, domain: 'a.com' })); // ownership pre-check passes
       mockKeyword.findAll.mockResolvedValue([]);
       mockDomain.destroy.mockResolvedValue(1);
       mockKeyword.destroy.mockResolvedValue(0);
@@ -215,6 +220,8 @@ describe('GET /api/keywords where-clause scoping', () => {
 describe('POST /api/keywords owner stamping', () => {
    it('stamps the tenant owner_id on every created keyword row', async () => {
       asCaller(TENANT);
+      mockDomain.findAll.mockResolvedValue([row({ domain: 'a.com' })]); // caller owns the domain
+      mockKeyword.count.mockResolvedValue(0); // under the per-domain cap
       mockKeyword.bulkCreate.mockResolvedValue([row({ ID: 1 })]);
       const body = { keywords: [{ keyword: 'seo', device: 'desktop', country: 'US', domain: 'a.com' }] };
       await keywordsHandler(makeReq({ method: 'POST', body }), makeRes());
@@ -224,6 +231,8 @@ describe('POST /api/keywords owner stamping', () => {
 
    it('stamps null owner_id for the admin', async () => {
       asCaller(ADMIN);
+      mockDomain.findAll.mockResolvedValue([row({ domain: 'a.com' })]); // domain exists (scope {} for admin)
+      mockKeyword.count.mockResolvedValue(0);
       mockKeyword.bulkCreate.mockResolvedValue([row({ ID: 1 })]);
       const body = { keywords: [{ keyword: 'seo', device: 'desktop', country: 'US', domain: 'a.com' }] };
       await keywordsHandler(makeReq({ method: 'POST', body }), makeRes());
