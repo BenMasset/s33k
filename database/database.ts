@@ -9,8 +9,9 @@ import ApiKey from './models/apiKey';
 import Invite from './models/invite';
 import Waitlist from './models/waitlist';
 import S33kEvent from './models/s33kEvent';
+import FeatureRequest from './models/featureRequest';
 
-const models = [Domain, Keyword, CrawlerHit, Account, ApiKey, Invite, Waitlist, S33kEvent];
+const models = [Domain, Keyword, CrawlerHit, Account, ApiKey, Invite, Waitlist, S33kEvent, FeatureRequest];
 const pool = { max: 5, min: 0, idle: 10000 };
 
 // Use Postgres when DATABASE_URL is set (hosted deploy), otherwise SQLite (local dev).
