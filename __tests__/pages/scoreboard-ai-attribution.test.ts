@@ -18,7 +18,7 @@
  *   4. When getReferralSources returns an error string (no landing detail), that
  *      error is surfaced as referralError and attribution stays at 0.
  *
- * The route's heavy dependencies (db, the Keyword model, verifyUser) are mocked
+ * The route's heavy dependencies (db, the Domain and Keyword models, authorize) are mocked
  * so the test exercises the handler's join/attribution logic in isolation.
  */
 
@@ -26,14 +26,24 @@ import handler from '../../pages/api/scoreboard';
 import { getAnalyticsProvider } from '../../utils/analytics';
 import Keyword from '../../database/models/keyword';
 
+// scoreboard.ts now imports the Domain model (for the multi-tenant ownership check),
+// which transitively pulls sequelize. Stub sequelize so jest does not transform its
+// ESM uuid dependency, and mock Domain.findOne to a resolved owned row.
+jest.mock('sequelize', () => ({ __esModule: true, Op: { in: Symbol('in'), gte: Symbol('gte') } }));
 jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn().mockResolvedValue(undefined) } }));
-jest.mock('../../utils/verifyUser', () => ({ __esModule: true, default: jest.fn(() => 'authorized') }));
+jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
+jest.mock('../../database/models/domain', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
 jest.mock('../../database/models/keyword', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../utils/analytics', () => {
    const actual = jest.requireActual('../../utils/analytics');
    return { __esModule: true, ...actual, getAnalyticsProvider: jest.fn() };
 });
 
+import authorize from '../../utils/authorize';
+import Domain from '../../database/models/domain';
+
+const mockedAuthorize = authorize as unknown as jest.Mock;
+const mockedDomainFindOne = (Domain as unknown as { findOne: jest.Mock }).findOne;
 const mockedFindAll = (Keyword as unknown as { findAll: jest.Mock }).findAll;
 const mockedGetProvider = getAnalyticsProvider as jest.Mock;
 
@@ -94,6 +104,10 @@ const pageRow = (over: Record<string, unknown> = {}) => ({
 
 beforeEach(() => {
    jest.clearAllMocks();
+   // Authorized admin caller (account.ID === 1) and an owned domain, so the route
+   // passes auth + the ownership gate and reaches the attribution logic under test.
+   mockedAuthorize.mockResolvedValue({ authorized: true, account: { ID: 1 } });
+   mockedDomainFindOne.mockResolvedValue({ ID: 1, domain: 'getmasset.com' });
    mockedFindAll.mockResolvedValue([keywordRow({ ID: 1, keyword: 'masset', target_page: '/' })]);
 });
 

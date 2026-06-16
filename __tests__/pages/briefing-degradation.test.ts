@@ -21,7 +21,7 @@
  *   5. Many sub-signals failing at once still yields a usable 200 briefing.
  *   6. Auth failure returns 401; a missing domain returns 400.
  *
- * All heavy deps (db, Keyword, CrawlerHit, verifyUser, the analytics provider,
+ * All heavy deps (db, Domain, Keyword, CrawlerHit, authorize, the analytics provider,
  * estimateHumanTraffic) are mocked. No DB, no network, no LLM.
  */
 
@@ -36,7 +36,8 @@ import CrawlerHit from '../../database/models/crawlerHit';
 // (the model layer is mocked anyway, so Op is never exercised against a real DB).
 jest.mock('sequelize', () => ({ __esModule: true, Op: { gte: Symbol('gte') } }));
 jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn().mockResolvedValue(undefined) } }));
-jest.mock('../../utils/verifyUser', () => ({ __esModule: true, default: jest.fn(() => 'authorized') }));
+jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
+jest.mock('../../database/models/domain', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
 jest.mock('../../database/models/keyword', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../database/models/crawlerHit', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../utils/analytics', () => {
@@ -45,9 +46,11 @@ jest.mock('../../utils/analytics', () => {
 });
 jest.mock('../../utils/bot-filter', () => ({ __esModule: true, estimateHumanTraffic: jest.fn() }));
 
-import verifyUser from '../../utils/verifyUser';
+import authorize from '../../utils/authorize';
+import Domain from '../../database/models/domain';
 
-const mockedVerify = verifyUser as unknown as jest.Mock;
+const mockedAuthorize = authorize as unknown as jest.Mock;
+const mockedDomainFindOne = (Domain as unknown as { findOne: jest.Mock }).findOne;
 const mockedKeywordFindAll = (Keyword as unknown as { findAll: jest.Mock }).findAll;
 const mockedCrawlerFindAll = (CrawlerHit as unknown as { findAll: jest.Mock }).findAll;
 const mockedGetProvider = getAnalyticsProvider as jest.Mock;
@@ -125,7 +128,10 @@ const goodEstimate = {
 
 beforeEach(() => {
    jest.clearAllMocks();
-   mockedVerify.mockReturnValue('authorized');
+   // Authorized admin caller (account.ID === 1) and an owned domain, so the route
+   // passes auth + the ownership gate and reaches the degradation logic under test.
+   mockedAuthorize.mockResolvedValue({ authorized: true, account: { ID: 1 } });
+   mockedDomainFindOne.mockResolvedValue({ ID: 1, domain: 'getmasset.com' });
    mockedKeywordFindAll.mockResolvedValue([
       keywordRow({ ID: 1, keyword: 'masset', target_page: '/', position: 1 }),
       keywordRow({ ID: 2, keyword: 'DAM MCP server', target_page: '/software/mcp', position: 14 }),
@@ -211,7 +217,7 @@ describe('briefing composer graceful degradation', () => {
    });
 
    it('returns 401 when the request is not authorized', async () => {
-      mockedVerify.mockReturnValue('This Route Requires a valid Authorization Bearer Token.');
+      mockedAuthorize.mockResolvedValue({ authorized: false, account: null, error: 'This Route Requires a valid Authorization Bearer Token.' });
       const { req, res, captured } = makeReqRes({ domain: 'getmasset.com' });
       await handler(req, res);
 
