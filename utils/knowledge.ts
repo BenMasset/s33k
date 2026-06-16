@@ -85,7 +85,7 @@ export type KnowledgeBase = {
 };
 
 // ---------------------------------------------------------------------------
-// Capabilities: one entry per registered MCP tool (34 total).
+// Capabilities: one entry per registered MCP tool (38 total).
 // Keep these in lockstep with mcp/src/index.ts; the coverage test fails the build
 // if any registered tool lacks an entry here.
 // ---------------------------------------------------------------------------
@@ -334,6 +334,22 @@ const capabilities: CapabilityEntry[] = [
          + 'gaps are.',
       whenToUse: 'Use for the core SEO-plus-analytics view, and to find pages with traffic but no tracked keyword (a content-gap signal).',
       examplePrompt: 'Show the per-page scoreboard for getmasset.com.',
+   },
+   {
+      id: 'entry_pages',
+      toolName: 'entry_pages',
+      category: 'cross-pillar',
+      title: 'Entry page analysis',
+      description: 'Analyzes a domain\'s ENTRY (landing) pages, where sessions start and acquisition happens. For each entry page it joins the '
+         + 'first-touch source split (direct/referral/search/ai), the page\'s tracked keywords and current Google rank, and its AI referrals, '
+         + 'then assigns a status: working (ranks AND lands from search), ranking-not-landing (tracks ranking keywords but gets little entry '
+         + 'traffic, a gap to fix), brand-direct (lots of direct/referral entries but no tracked ranking), ai-landing (AI search is a meaningful '
+         + 'first-touch source), or opportunity (entry traffic but neither ranking nor AI). Per-page source splits are approximated from the '
+         + 'site-wide referrer mix and the response says so.',
+      whenToUse: 'Use to see which pages are the real acquisition surface, connect "we rank for X" to "X actually lands people", find pages '
+         + 'that rank but drive no entry traffic, and decide where to invest. Complements page_scoreboard (all pages) by focusing only on '
+         + 'entry pages.',
+      examplePrompt: 'Which entry pages on getmasset.com rank AND land, and which rank but drive no traffic?',
    },
    {
       id: 'insights',

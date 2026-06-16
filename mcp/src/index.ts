@@ -280,6 +280,46 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// entry_pages
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'entry_pages',
+   {
+      title: 'Entry page analysis',
+      description:
+         'Analyze a domain\'s ENTRY (landing) pages, where sessions START and acquisition actually happens, and behave differently from deeper '
+         + 'pages. This is the cross-pillar join nobody else offers: for each entry page it connects "we rank for X" to "X actually LANDS people". '
+         + 'Per entry page it returns the first-touch SOURCE split (direct / referral / search / ai), the page\'s tracked keywords with current '
+         + 'Google rank, its aiReferrals (AI-engine-referred entries), and a STATUS: "working" (ranks AND is a real landing page from search), '
+         + '"ranking-not-landing" (s33k tracks ranking keywords for it but it gets little or no entry traffic, the clearest gap to fix), '
+         + '"brand-direct" (lots of direct/referral entries but no tracked ranking, brand-driven not search-driven), "ai-landing" (AI search is a '
+         + 'meaningful first-touch source for the page), or "opportunity" (entry traffic but neither ranking nor AI, where to invest). Also returns a '
+         + 'summary (topLandingPages, biggestRankingNotLandingGap, aiLandingPages, statusCounts) and a statusLegend. HONEST DATA NOTE: most providers '
+         + '(e.g. Umami) report referrers site-wide, not per landing page, so each page\'s source split is APPROXIMATED from the site-wide referrer '
+         + 'mix (sourcesNote flags this) and per-page aiReferrals is 0 unless the provider exposes a landing path (aiReferralNote flags that). The '
+         + 'per-page entry counts and tracked ranks are exact. Complements page_scoreboard (all pages) by focusing only on entry pages. Never queries '
+         + 'an LLM; degrades gracefully and never fails on a missing sub-signal.',
+      inputSchema: {
+         domain: z.string().describe('The domain to analyze entry pages for, e.g. "getmasset.com".'),
+         period: z
+            .string()
+            .optional()
+            .describe('Reporting window for analytics, e.g. "30d", "7d". Defaults to "30d".'),
+      },
+   },
+   async ({ domain, period }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         const data = await s33kFetch('/api/entry-pages', { query });
+         return jsonResult(data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // ai_referrals
 // ---------------------------------------------------------------------------
 server.registerTool(
@@ -1363,7 +1403,7 @@ async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
    process.stderr.write(
-      `s33k-mcp connected (base URL: ${BASE_URL}). 37 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
+      `s33k-mcp connected (base URL: ${BASE_URL}). 38 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
    );
 }
 

@@ -23,6 +23,7 @@ export const allowedApiRoutes = [
    'GET:/api/insight',
    'GET:/api/insights',
    'GET:/api/scoreboard',
+   'GET:/api/entry-pages',
    'GET:/api/ai-referrals',
    'GET:/api/summary',
    'GET:/api/human-traffic',
