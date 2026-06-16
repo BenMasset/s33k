@@ -34,6 +34,11 @@ export const allowedApiRoutes = [
    'GET:/api/ai-crawlers',
    'GET:/api/discover',
    'GET:/api/briefing',
+   'POST:/api/account',
+   'GET:/api/account',
+   'POST:/api/account-key',
+   'DELETE:/api/account-key',
+   'GET:/api/me',
 ];
 
 export const isAllowedApiRoute = (req: NextApiRequest): boolean => Boolean(

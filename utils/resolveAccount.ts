@@ -38,6 +38,22 @@ export const hashApiKey = (fullKey: string): string => crypto.createHash('sha256
 // short, stable leading slice for the indexed lookup.
 export const apiKeyPrefix = (fullKey: string): string => fullKey.slice(0, 12);
 
+// Base62 alphabet for human-friendly, URL-safe key bodies (no +, /, or = padding).
+const BASE62 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+
+// Mint a fresh full API key in the `s33k_<random>` format. The random body is drawn from
+// cryptographically secure bytes mapped onto a base62 alphabet, so the key is URL-safe and
+// copy-paste friendly. Default length gives ~40 base62 chars (>200 bits) of entropy. The
+// full key is returned to the caller exactly once; only its hash + prefix are ever stored.
+export const generateApiKey = (length = 40): string => {
+   const bytes = crypto.randomBytes(length);
+   let body = '';
+   for (let i = 0; i < length; i += 1) {
+      body += BASE62[bytes[i] % BASE62.length];
+   }
+   return `s33k_${body}`;
+};
+
 const resolveAccount = async (req: NextApiRequest, res: NextApiResponse): Promise<ResolvedAccount> => {
    const cookies = new Cookies(req, res);
    const token = cookies && cookies.get('token');

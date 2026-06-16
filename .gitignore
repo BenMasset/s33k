@@ -51,3 +51,6 @@ mcp/dist
 
 #deploy resume doc (contains production API key)
 RESUME_DEPLOY.md
+
+#night build report (local only)
+NIGHT_REPORT.md
