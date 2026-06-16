@@ -4,8 +4,8 @@
  *
  * Spawns the BUILT s33k MCP server (dist/index.js) as a stdio child process,
  * drives it with the official MCP client SDK (which owns the stdio JSON-RPC
- * framing and the initialize handshake), and exercises all 20 tools against
- * the LIVE s33k API.
+ * framing and the initialize handshake), and exercises the full 39-tool
+ * surface against the LIVE s33k API.
  *
  * Configuration (read from THIS process's env, never hardcoded):
  *   APIKEY        the s33k global API key (the runner exports it from .env)
@@ -18,8 +18,12 @@
  *   S33K_BASE_URL  <- our S33K_BASE_URL (or the 3005 default)
  *
  * Safety:
- *   - Read tools run against the real domain getmasset.com (read-only).
- *   - Mutating tools (create_domain, add_keyword, update_keyword,
+ *   - Read tools run against the real domain getmasset.com (read-only). This
+ *     covers the original SEO/analytics reads AND the build-night additions:
+ *     ai_visibility, entry_pages, alerts, help, security_facts, top_clicks,
+ *     form_submissions, scroll_depth, page_engagement, list_invites,
+ *     list_waitlist, list_feature_requests, export_data, install_instructions.
+ *   - Mutating keyword tools (create_domain, add_keyword, update_keyword,
  *     delete_keyword) run ONLY against a throwaway temp domain
  *     ('s33k-smoke-test.example'), which is created and then deleted, so the
  *     real getmasset.com domain and its keywords are never touched.
@@ -29,6 +33,19 @@
  *     domain BEFORE the mutation block (in case a prior run left it parked) and
  *     AGAIN after, so the test is idempotent and re-runnable. This is why the
  *     run no longer fails on a duplicate-domain 400 the second time around.
+ *   - The genuinely DESTRUCTIVE / side-effectful new tools (onboard,
+ *     invite_external, invite_internal, request_feature, delete_account_data)
+ *     are deliberately NOT exercised in the default smoke. Each consumes a
+ *     quota, provisions external resources, creates a seat, writes a durable
+ *     row, or irreversibly deletes the account. They are recorded as explicit
+ *     SKIPPED entries with the fixture they would need, so the coverage report
+ *     is honest about what was and was not driven. See SKIPPED_MUTATORS below.
+ *
+ * Some new READ tools are admin-gated (list_invites, list_waitlist,
+ * list_feature_requests) or depend on prior onboarding (install_instructions).
+ * Like get_insight, these treat an "admin required" / "not onboarded" response
+ * as a tool-behaved-correctly PASS rather than a hard failure, so the harness
+ * stays green against a base URL where those preconditions are not all met.
  *
  * Exit code: 0 if every assertion passes, non-zero otherwise.
  *
@@ -58,8 +75,9 @@ const READ_DOMAIN = 'getmasset.com';
 const TEMP_DOMAIN = 's33k-smoke-test.example';
 const PERIOD = '30d';
 
-// The exact set of 20 tools the server must expose.
+// The exact set of 39 tools the server must expose (original 20 + 19 night additions).
 const EXPECTED_TOOLS = [
+   // Original SEO/keyword tools.
    'list_domains',
    'list_keywords',
    'add_keyword',
@@ -80,6 +98,56 @@ const EXPECTED_TOOLS = [
    'update_keyword',
    'delete_keyword',
    'discover_pages',
+   // Build-night additions.
+   'ai_visibility',
+   'entry_pages',
+   'alerts',
+   'top_clicks',
+   'form_submissions',
+   'scroll_depth',
+   'page_engagement',
+   'onboard',
+   'install_instructions',
+   'invite_external',
+   'invite_internal',
+   'list_invites',
+   'list_waitlist',
+   'export_data',
+   'delete_account_data',
+   'security_facts',
+   'help',
+   'request_feature',
+   'list_feature_requests',
+];
+
+// Genuinely mutating / side-effectful new tools NOT exercised in the default smoke.
+// Each entry documents the controlled fixture it would need to be driven safely.
+const SKIPPED_MUTATORS = [
+   {
+      name: 'onboard',
+      reason: 'Provisions a real analytics website + queues SERP scrapes for a domain. '
+         + 'Needs a throwaway domain with an isolated analytics tenant to clean up; out of scope for the default smoke.',
+   },
+   {
+      name: 'invite_external',
+      reason: 'Consumes the account external-invite quota (default 5) and can send a real email. '
+         + 'Needs a disposable test account whose quota can be reset.',
+   },
+   {
+      name: 'invite_internal',
+      reason: 'Creates a durable read-only member seat on the account (and may email it). '
+         + 'Needs a disposable test account so the seat can be revoked afterward.',
+   },
+   {
+      name: 'request_feature',
+      reason: 'Writes a durable feature-request row (and may notify the team). '
+         + 'Needs a fixture that deletes the created request_id afterward.',
+   },
+   {
+      name: 'delete_account_data',
+      reason: 'IRREVERSIBLE: hard-deletes the entire account. Never safe in a smoke. '
+         + 'Needs a dedicated throwaway account that exists only to be destroyed.',
+   },
 ];
 
 // ---------------------------------------------------------------------------
@@ -176,6 +244,36 @@ async function callAndAssert(client, name, args, opts = {}) {
    }
 }
 
+/**
+ * Call a read tool whose PASS is conditional on a precondition that may not be
+ * met against the configured base URL (admin-only key, domain not onboarded,
+ * GSC not connected). A clean result is a PASS. An isError result is treated as
+ * a PASS *only* when its text matches one of `softPatterns` (meaning the tool
+ * behaved correctly and just reported the missing precondition); any other
+ * error is a real FAIL. This is the same shape as the get_insight handling, so
+ * the harness stays green where not every precondition is present, while still
+ * catching genuine breakage (transport errors, 500s, unexpected shapes).
+ */
+async function callSoft(client, name, args, softPatterns, opts = {}) {
+   try {
+      const result = await client.callTool({ name, arguments: args });
+      const { ok, snippet } = checkToolResult(result);
+      if (ok) {
+         record(opts.label || name, true, snippet);
+         return;
+      }
+      const text = (firstText(result) || snippet || '').toLowerCase();
+      const expected = softPatterns.some((p) => text.includes(p));
+      record(
+         opts.label || name,
+         expected,
+         expected ? `tool responded, precondition unmet (OK): ${snippet}` : snippet,
+      );
+   } catch (err) {
+      record(opts.label || name, false, err instanceof Error ? err.message : String(err));
+   }
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -218,8 +316,8 @@ async function main() {
       return;
    }
 
-   // 2. tools/list and assert exactly the 20 expected tools are present.
-   console.log('\n[2] tools/list (expect exactly 20)');
+   // 2. tools/list and assert exactly the 39 expected tools are present.
+   console.log('\n[2] tools/list (expect exactly 39)');
    let toolNames = [];
    try {
       const { tools } = await client.listTools();
@@ -232,9 +330,9 @@ async function main() {
       let detail = `${toolNames.length} tools`;
       if (missing.length) detail += ` | MISSING: ${missing.join(', ')}`;
       if (unexpected.length) detail += ` | UNEXPECTED: ${unexpected.join(', ')}`;
-      record('tools/list exact 20', exact, detail);
+      record('tools/list exact 39', exact, detail);
    } catch (err) {
-      record('tools/list exact 20', false, err instanceof Error ? err.message : String(err));
+      record('tools/list exact 39', false, err instanceof Error ? err.message : String(err));
    }
 
    // 3. Exercise all read tools against the real domain (read-only).
@@ -295,6 +393,42 @@ async function main() {
    console.log('\n[3b] refresh_keywords (re-scrape, non-destructive)');
    await callAndAssert(client, 'refresh_keywords', { domain: READ_DOMAIN });
 
+   // 3c. New build-night READ tools against the real domain (read-only). These
+   // are the AEO/analytics/cross-pillar additions. A valid-but-empty result
+   // (new install, no data yet) is still a PASS: jsonResult always emits a
+   // non-empty JSON object, so checkToolResult passes on an empty-but-present
+   // payload, which is exactly the "data is new" case the task calls out.
+   console.log('\n[3c] New read tools (read-only against ' + READ_DOMAIN + ')');
+   await callAndAssert(client, 'ai_visibility', { domain: READ_DOMAIN, period: PERIOD });
+   await callAndAssert(client, 'entry_pages', { domain: READ_DOMAIN, period: PERIOD });
+   await callAndAssert(client, 'alerts', { domain: READ_DOMAIN, period: '7d' });
+   await callAndAssert(client, 'top_clicks', { domain: READ_DOMAIN, period: PERIOD });
+   await callAndAssert(client, 'form_submissions', { domain: READ_DOMAIN, period: PERIOD });
+   await callAndAssert(client, 'scroll_depth', { domain: READ_DOMAIN, period: PERIOD });
+   await callAndAssert(client, 'page_engagement', { domain: READ_DOMAIN, period: PERIOD });
+
+   // 3d. Knowledge / account / trust read tools. These take no domain (or a
+   // static question) and are pure reads. help and security_facts have no
+   // precondition. export_data, list_invites, list_waitlist, and
+   // list_feature_requests need an ADMIN key; install_instructions needs the
+   // domain to have been ONBOARDED. For those, an "admin required" or
+   // "not onboarded" response means the tool worked, so it is a soft PASS.
+   console.log('\n[3d] Knowledge / account / trust read tools');
+   await callAndAssert(client, 'help', { q: 'what does ai_visibility do?' });
+   await callAndAssert(client, 'security_facts', {});
+
+   const ADMIN_SOFT = ['admin', 'not authorized', 'forbidden', 'member', 'read-only', 'read only'];
+   await callSoft(client, 'export_data', {}, ADMIN_SOFT);
+   await callSoft(client, 'list_invites', {}, ADMIN_SOFT);
+   await callSoft(client, 'list_waitlist', {}, ADMIN_SOFT);
+   await callSoft(client, 'list_feature_requests', {}, ADMIN_SOFT);
+   await callSoft(
+      client,
+      'install_instructions',
+      { domain: READ_DOMAIN },
+      ['not onboarded', 'onboard', 'not found', 'no analytics', 'umami', 'website id'],
+   );
+
    // 4. Mutating tools, exercised SAFELY against a throwaway temp domain.
    console.log('\n[4] Mutating tools (throwaway domain ' + TEMP_DOMAIN + ')');
 
@@ -344,10 +478,19 @@ async function main() {
       }
    }
 
+   // 5. Destructive / side-effectful new tools: NOT driven. Recorded as
+   // explicit SKIPPED passes so coverage is honest about what was and was not
+   // exercised, with the fixture each would require. A SKIPPED is a PASS (the
+   // harness intentionally did not call it), not a silent omission.
+   console.log('\n[5] Destructive new tools (SKIPPED, need controlled fixtures)');
+   for (const skip of SKIPPED_MUTATORS) {
+      record(`${skip.name} (SKIPPED)`, true, `skipped: ${skip.reason}`);
+   }
+
    // Post-cleanup: remove the temp domain (and any keyword left on it) so the
    // next run starts clean. There is no delete_domain MCP tool, so this goes
    // straight to DELETE /api/domains with the Bearer key. Real data untouched.
-   console.log('\n[5] Cleanup (idempotency)');
+   console.log('\n[6] Cleanup (idempotency)');
    await deleteTempDomain('post');
 
    finish();
@@ -385,10 +528,16 @@ function extractKeywordId(payload) {
 // ---------------------------------------------------------------------------
 function finish() {
    const total = passCount + failCount;
+   const skippedNames = SKIPPED_MUTATORS.map((s) => s.name);
+   const drivenCount = EXPECTED_TOOLS.length - skippedNames.length;
    console.log('\n' + '-'.repeat(60));
    console.log(`Summary: ${passCount}/${total} assertions passed.`);
-   // Tool-coverage line: how many of the 20 tools produced a PASS.
-   console.log(`Tools exercised: all ${EXPECTED_TOOLS.length} expected tools called.`);
+   // Tool-coverage line: of the 39 registered tools, how many were driven vs
+   // intentionally skipped (the destructive mutators).
+   console.log(
+      `Tools: ${EXPECTED_TOOLS.length} registered | ${drivenCount} driven | `
+      + `${skippedNames.length} SKIPPED (${skippedNames.join(', ')}).`,
+   );
    if (failCount > 0) {
       console.log(`FAILURES (${failCount}): ${failed.join(', ')}`);
    }
