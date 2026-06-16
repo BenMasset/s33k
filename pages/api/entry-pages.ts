@@ -1,0 +1,223 @@
+/**
+ * GET /api/entry-pages
+ *
+ * ENTRY-PAGE (landing-page) analysis: the cross-pillar join nobody else offers.
+ *
+ * Entry pages are where a session STARTS, so they are the acquisition surface and
+ * behave differently from deeper pages. For each entry page this route joins:
+ *   - the page's first-touch SOURCE split (direct / referral / search / ai), from
+ *     the analytics provider's getEntryPages (utils/umami.ts);
+ *   - the page's tracked SEO keywords + current Google rank, from the Keyword model
+ *     (matched by target_page, exactly like page_scoreboard);
+ *   - the page's AI referrals (AI-engine-referred entries), from the referral
+ *     sources when the provider exposes per-landing-page detail;
+ * and synthesizes a STATUS (utils/entry-page-status.ts) that connects "we rank for
+ * X" to "X actually LANDS people": working / ranking-not-landing / brand-direct /
+ * ai-landing / opportunity.
+ *
+ * This is a SEGMENTATION (entry pages by source class) plus a JOIN to existing
+ * per-page keyword/rank/AI data, NOT new data collection. It is honest where the
+ * data is thin: Umami reports referrers site-wide, so per-page source splits are
+ * APPROXIMATED from the site-wide mix (sourcesNote flags it), and per-page AI
+ * referrals are only exact when the provider reports a landing_path (aiReferralNote
+ * flags the fallback), mirroring how page_scoreboard and ai_visibility stay honest.
+ *
+ * Never 500s on a sub-signal failure: a referral or keyword read that fails degrades
+ * that one signal (surfaced as referralError / a zeroed signal) while the entry-page
+ * table still returns.
+ */
+
+import type { NextApiRequest, NextApiResponse } from 'next';
+import db from '../../database/database';
+import Domain from '../../database/models/domain';
+import Keyword from '../../database/models/keyword';
+import authorize from '../../utils/authorize';
+import { scopeWhere } from '../../utils/scope';
+import type Account from '../../database/models/account';
+import parseKeywords from '../../utils/parseKeywords';
+import { cleanPath } from '../../utils/lodd';
+import { getAnalyticsProvider, ReferralSource, EntryPageSources } from '../../utils/analytics';
+import { classifyEntryPage, EntryPageStatus, ENTRY_PAGE_STATUS_LABELS } from '../../utils/entry-page-status';
+
+type EntryPageKeyword = {
+   keyword: string,
+   rank: number,
+}
+
+type EntryPageRecord = {
+   page: string,
+   pathClean: string,
+   entries: number,
+   sources: EntryPageSources,
+   sourcesApproximated: boolean,
+   keywords: EntryPageKeyword[],
+   aiReferrals: number,
+   status: EntryPageStatus,
+}
+
+type EntryPagesSummary = {
+   topLandingPages: { page: string, entries: number, status: EntryPageStatus }[],
+   biggestRankingNotLandingGap: { page: string, entries: number, keywords: number } | null,
+   aiLandingPages: { page: string, entries: number, aiReferrals: number }[],
+   statusCounts: Record<EntryPageStatus, number>,
+}
+
+type EntryPagesResponse = {
+   domain?: string,
+   period?: string,
+   entryPages?: EntryPageRecord[],
+   summary?: EntryPagesSummary,
+   statusLegend?: Record<EntryPageStatus, string>,
+   sourcesNote?: string | null,
+   aiReferralNote?: string | null,
+   analyticsError?: string | null,
+   referralError?: string | null,
+   error?: string | null,
+}
+
+export default async function handler(req: NextApiRequest, res: NextApiResponse<EntryPagesResponse>) {
+   await db.sync();
+   const { authorized, account, error } = await authorize(req, res);
+   if (!authorized) {
+      return res.status(401).json({ error });
+   }
+   if (req.method !== 'GET') {
+      return res.status(405).json({ error: 'Method Not Allowed. Use GET.' });
+   }
+   return getEntryPages(req, res, account);
+}
+
+const getEntryPages = async (req: NextApiRequest, res: NextApiResponse<EntryPagesResponse>, account?: Account | null) => {
+   if (!req.query.domain || typeof req.query.domain !== 'string') {
+      return res.status(400).json({ error: 'Domain is Required!' });
+   }
+   const domain = req.query.domain as string;
+   const period = (typeof req.query.period === 'string' && req.query.period) ? req.query.period : '30d';
+
+   // Ownership gate (identical to scoreboard.ts): verify the caller owns this domain
+   // before exposing any of its data. With MULTI_TENANT off, scopeWhere returns {}.
+   const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+   if (!owned) {
+      return res.status(403).json({ error: 'Domain not found for this account' });
+   }
+
+   try {
+      const provider = getAnalyticsProvider();
+
+      // 1. Entry pages + their (approximated) first-touch source split. The provider
+      // never throws; a failure comes back as an error string with an empty list.
+      const entryResult = await provider.getEntryPages(domain, period);
+      const analyticsError = entryResult.error;
+
+      // 2. Per-page AI-referral attribution, reusing the scoreboard's approach: AI
+      // referrals can only be attributed to a specific landing page when the provider
+      // exposes a per-source landing_path. When it does not, per-page AI referrals are
+      // 0 and aiReferralNote explains it. A referral failure NEVER breaks this route.
+      let aiVisitorsByLanding = new Map<string, number>();
+      let referralError: string | null = null;
+      let aiReferralLandingAvailable = false;
+      try {
+         const { sources, error: refError } = await provider.getReferralSources(domain, period);
+         referralError = refError;
+         (sources || []).filter((s: ReferralSource) => s.isAI).forEach((s) => {
+            if (s.landing_path) {
+               aiReferralLandingAvailable = true;
+               const key = cleanPath(s.landing_path);
+               aiVisitorsByLanding.set(key, (aiVisitorsByLanding.get(key) || 0) + Number(s.unique_visitors ?? 0));
+            }
+         });
+      } catch (refErr) {
+         referralError = refErr instanceof Error ? refErr.message : String(refErr);
+         aiVisitorsByLanding = new Map<string, number>();
+      }
+      const aiReferralNote = aiReferralLandingAvailable
+         ? null
+         : 'AI-referral data has no per-landing-page detail from this provider, so aiReferrals is 0 per page; the '
+            + 'ai-landing status still uses the approximated per-page AI source share. Use ai_referrals for site-wide totals.';
+
+      // 3. Tracked keywords for this domain, grouped by normalized target_page path
+      // (same join as page_scoreboard). A keyword read failure degrades to "no tracked
+      // keywords" rather than failing the route.
+      const keywordsByPath = new Map<string, EntryPageKeyword[]>();
+      try {
+         const allKeywords: Keyword[] = await Keyword.findAll({ where: { domain, ...scopeWhere(account) } });
+         const keywords: KeywordType[] = parseKeywords(allKeywords.map((e) => e.get({ plain: true })));
+         keywords.forEach((kw) => {
+            const targetClean = cleanPath(kw.target_page || '');
+            if (!targetClean) { return; }
+            const list = keywordsByPath.get(targetClean) || [];
+            list.push({ keyword: kw.keyword, rank: kw.position });
+            keywordsByPath.set(targetClean, list);
+         });
+      } catch (kwErr) {
+         console.log('[WARN] entry-pages keyword join failed for ', domain, kwErr);
+      }
+
+      // 4. Build the per-entry-page records, joining all three signals + the status.
+      const entryPages: EntryPageRecord[] = entryResult.pages.map((p) => {
+         const matchedKeywords = keywordsByPath.get(p.pathClean) || [];
+         const aiReferrals = aiVisitorsByLanding.get(p.pathClean) || 0;
+         // AI-traffic signal: an exact per-page AI referral (when available) OR a
+         // non-trivial approximated AI source share. Either is "AI is landing people here".
+         const hasAiTraffic = aiReferrals > 0 || p.sources.ai > 0;
+         // Non-direct traffic = search or referral first-touch (the search/referral land path).
+         const hasNonDirectTraffic = p.sources.search > 0 || p.sources.referral > 0;
+         const status = classifyEntryPage({
+            hasTrackedKeywords: matchedKeywords.length > 0,
+            hasNonDirectTraffic,
+            hasAiTraffic,
+         });
+         return {
+            page: p.page,
+            pathClean: p.pathClean,
+            entries: p.entries,
+            sources: p.sources,
+            sourcesApproximated: p.sourcesApproximated,
+            keywords: matchedKeywords,
+            aiReferrals,
+            status,
+         };
+      });
+      entryPages.sort((a, b) => b.entries - a.entries);
+
+      // 5. Top-level summary: the headline landing pages, the biggest
+      // ranking-not-landing gap, and the AI-landing pages.
+      const statusCounts = entryPages.reduce((acc, p) => {
+         acc[p.status] += 1;
+         return acc;
+      }, { working: 0, 'ranking-not-landing': 0, 'brand-direct': 0, 'ai-landing': 0, opportunity: 0 } as Record<EntryPageStatus, number>);
+
+      // Biggest ranking-not-landing gap = the page that ranks but lands fewest entries.
+      // It is the clearest "you rank, it just is not landing" signal. Lowest entries wins.
+      const rankingNotLanding = entryPages
+         .filter((p) => p.status === 'ranking-not-landing')
+         .sort((a, b) => a.entries - b.entries);
+      const gap = rankingNotLanding[0]
+         ? { page: rankingNotLanding[0].page, entries: rankingNotLanding[0].entries, keywords: rankingNotLanding[0].keywords.length }
+         : null;
+
+      const summary: EntryPagesSummary = {
+         topLandingPages: entryPages.slice(0, 5).map((p) => ({ page: p.page, entries: p.entries, status: p.status })),
+         biggestRankingNotLandingGap: gap,
+         aiLandingPages: entryPages
+            .filter((p) => p.status === 'ai-landing')
+            .map((p) => ({ page: p.page, entries: p.entries, aiReferrals: p.aiReferrals })),
+         statusCounts,
+      };
+
+      return res.status(200).json({
+         domain,
+         period,
+         entryPages,
+         summary,
+         statusLegend: ENTRY_PAGE_STATUS_LABELS,
+         sourcesNote: entryResult.sourcesNote,
+         aiReferralNote,
+         analyticsError,
+         referralError,
+      });
+   } catch (error) {
+      console.log('[ERROR] Building Entry Pages for ', domain, error);
+      return res.status(400).json({ error: 'Error Building Entry Pages for this Domain.' });
+   }
+};
