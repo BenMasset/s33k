@@ -14,13 +14,13 @@ s33k is a fork of [`towfiqi/serpbear`](https://github.com/towfiqi/serpbear) (MIT
 
 1. **SEO.** Track unlimited keywords per domain, each mapped to its target page, and scrape live Google rankings (Serper is the day-one source; one key, results in about two minutes).
 2. **AEO.** Detect which AI answer engines are citing you by classifying referral traffic. You see per-engine visitors and the AI share of referred traffic, with no need to query any LLM.
-3. **Analytics.** Read traffic totals, per-page traffic, referrers, geography, devices, browsers, and engagement tiers from your owned Umami instance (Lodd is supported as a legacy provider).
+3. **Analytics.** Read traffic totals, per-page traffic, referrers, geography, devices, browsers, and engagement tiers from your owned Umami instance (Lodd is supported as a legacy provider). s33k also ships its own cookieless, no-PII autocapture script (one tag, zero per-element setup) that records clicks, form submits, scroll depth, engagement time, and first-touch source for conversion attribution.
 
 The product is the unified MCP control plane that joins all three. The per-page scoreboard ties traffic to live rank and flags content gaps (pages with traffic but no tracked keyword) and dead keywords (target pages getting no traffic).
 
 ## MCP tools
 
-s33k is fully controllable from an LLM over MCP. The server exposes 20 tools (authoritative list from `mcp/src/index.ts`), grouped below by pillar with one example prompt each. The example prompts are what you would type into Claude or Cursor; the LLM picks the tool.
+s33k is fully controllable from an LLM over MCP. The server exposes 40 tools and 5 knowledge resources (authoritative list from `mcp/src/index.ts`), grouped below by pillar with one example prompt each. The example prompts are what you would type into Claude or Cursor; the LLM picks the tool.
 
 ### Start here (cross-pillar)
 
@@ -29,12 +29,13 @@ s33k is fully controllable from an LLM over MCP. The server exposes 20 tools (au
 | `briefing` | One proactive daily standup for a domain: what changed across every pillar and the top three things to do about it. The best first call of the day. | "Give me the s33k briefing for getmasset.com." |
 | `insights` | The cross-pillar analyst. Joins SEO rank, traffic, AI referrals, and the bot estimate into rules-based findings and prioritized recommendations. | "What does s33k recommend I work on for getmasset.com?" |
 | `page_scoreboard` | Joins per-page traffic with tracked keywords and rank. Surfaces content-gap pages and keywords whose target page got no traffic. | "Show me the per-page scoreboard for getmasset.com." |
+| `alerts` | The "what changed and what to do" standup. Compares this period to the prior one and surfaces the notable rank moves, traffic swings, and new AI engines as a prioritized list, plus the single top priority. | "What changed on getmasset.com this week and what should I do?" |
+| `entry_pages` | Analyzes only the ENTRY (landing) pages where sessions start, joining first-touch source split to tracked rank, and flags pages that rank but do not land traffic. | "Analyze the entry pages for getmasset.com." |
 
 ### SEO (rank tracking)
 
 | Tool | What it does | Example prompt |
 |---|---|---|
-| `discover_pages` | Crawls a domain (sitemap first, then homepage links) and returns up to 25 pages so the LLM can map keywords to real target pages in one shot. The onboarding fast path. | "Discover the main pages on getmasset.com so we can map keywords." |
 | `list_keywords` | Lists a domain's keywords with current Google rank, ranking URL, target page, and the last seven days of rank history. | "List the keywords I'm tracking for getmasset.com and their ranks." |
 | `add_keyword` | Adds a keyword to track for a domain and queues a background SERP scrape. | "Track 'AI-ready DAM' for getmasset.com, mapped to the /software page." |
 | `update_keyword` | Updates keywords by ID: sets the target page and/or toggles sticky. | "Set the target page for keyword 14 to /software." |
@@ -48,8 +49,9 @@ s33k is fully controllable from an LLM over MCP. The server exposes 20 tools (au
 |---|---|---|
 | `ai_referrals` | Reports which AI engines are sending real visitors (per-engine visitors and page views, plus the AI share of referred traffic). | "Which AI engines are sending traffic to getmasset.com?" |
 | `ai_crawlers` | Reports which AI and search crawlers (GPTBot, ClaudeBot, PerplexityBot, Google-Extended, Bingbot, etc.) are crawling a domain. The leading indicator of AEO: AI bots crawl a site before they cite it. | "Are any AI crawlers hitting getmasset.com yet?" |
+| `ai_visibility` | The AI-visibility funnel. Joins crawl (an AI engine is learning about you) to referral (an AI engine is recommending you), per engine and per page, and flags crawled-not-cited pages and aware-not-recommending engines as the work to do. Uses only first-party behavior, never queries an LLM. | "How visible is getmasset.com in AI search, and where is the gap?" |
 
-### Analytics (owned traffic)
+### Analytics (owned traffic, plus autocapture)
 
 | Tool | What it does | Example prompt |
 |---|---|---|
@@ -60,12 +62,56 @@ s33k is fully controllable from an LLM over MCP. The server exposes 20 tools (au
 | `engagement` | Session-quality engagement tiers (bounced / browsed / engaged) with session counts, percentages, and averages. | "How engaged are visitors to getmasset.com?" |
 | `human_traffic` | Estimates how much of a domain's traffic is likely human vs likely bot, using a bounce/duration heuristic with a known-human referrer floor. An estimate, not an exact per-session count. | "How much of getmasset.com traffic is real humans vs bots?" |
 
+The next five read from s33k's own autocapture event store (one script tag, zero per-element setup, cookieless and no PII). They do not need Umami:
+
+| Tool | What it does | Example prompt |
+|---|---|---|
+| `top_clicks` | The most-clicked buttons and links by visible text and stable selector, with a per-page breakdown. Records that an element was clicked, never any typed value. | "What gets clicked most on getmasset.com?" |
+| `form_submissions` | Which forms get submitted, how often, and from which pages. Records that a form was submitted (its id/name), never field values. | "How many form submissions did getmasset.com get?" |
+| `scroll_depth` | How far visitors scroll per page (avg and max percent) plus a site-wide depth histogram. | "Which getmasset.com pages get read deeply vs abandoned at the top?" |
+| `page_engagement` | Active engagement (dwell) time per page, with the timer paused when the tab is hidden or the visitor goes idle, so it is real attention. | "Which getmasset.com pages actually hold attention?" |
+| `conversions_by_source` | Attributes conversions (autocaptured form submits by default) to the first-touch source: direct, organic-search, ai, or referral, with an approximate conversion rate per source. | "Which traffic sources drive conversions on getmasset.com?" |
+
 ### Domains
 
 | Tool | What it does | Example prompt |
 |---|---|---|
 | `list_domains` | Lists all domains tracked in s33k. | "What domains am I tracking in s33k?" |
 | `create_domain` | Adds one or more domains to track (bare hostnames, no protocol). | "Start tracking getmasset.com in s33k." |
+
+### Onboarding and tracking-code setup
+
+| Tool | What it does | Example prompt |
+|---|---|---|
+| `discover_pages` | Crawls a domain (sitemap first, then homepage links) and returns up to 25 pages so the LLM can map keywords to real target pages in one shot. | "Discover the main pages on getmasset.com so we can map keywords." |
+| `onboard` | The one-call cold start: creates the domain, discovers and adds candidate keywords with rank scrapes queued, provisions a per-domain analytics website, and returns the tracking snippet plus per-platform install guides. | "Onboard getmasset.com from scratch." |
+| `install_instructions` | Returns the analytics tracking snippet and step-by-step install steps for the user's platform (WordPress, Webflow, Shopify, GTM, Next.js, raw HTML, and more) for an already-onboarded domain. | "How do I add the s33k tracking code on Webflow?" |
+
+### Account, invites, and waitlist (multi-tenant mode)
+
+These manage the invite-only multi-tenant system and are active when `MULTI_TENANT` is on. Write tools require an admin key; read-only member keys are rejected.
+
+| Tool | What it does | Example prompt |
+|---|---|---|
+| `invite_external` | Sends an external invite that brings a new admin and their own account into s33k (quota-limited). | "Invite jane@company.com to s33k." |
+| `invite_internal` | Adds a read-only member seat to your own account for a teammate (unlimited). | "Invite my teammate to view my domains read-only." |
+| `list_invites` | Lists every invite you have sent, with status. | "Show me the invites I have sent." |
+| `list_waitlist` | Lists waitlist signups so you can decide who to invite (root admin only). | "Who is on the s33k waitlist?" |
+
+### Trust, data ownership, and self-support
+
+| Tool | What it does | Example prompt |
+|---|---|---|
+| `security_facts` | Returns s33k's complete, source-cited trust facts: no model training, tenant isolation, encryption at rest, data ownership, cookieless/no-PII, and sub-processors. | "Is s33k safe? Does it train on my data?" |
+| `export_data` | Downloads everything s33k holds about your account as one JSON bundle. Never includes a secret. | "Export all of my s33k data." |
+| `delete_account_data` | Permanently and irreversibly deletes your entire account and all of its data. Requires the exact confirmation string. | "Delete my s33k account and all its data." |
+| `help` | Answers any question about s33k from its single authoritative product-knowledge layer. Reads no account data and never queries an LLM. | "What does ai_visibility do?" |
+| `request_feature` | Submits a request for a capability s33k does not have, after confirming via `help` that it is genuinely missing. | "Request CSV export of keyword rank history." |
+| `list_feature_requests` | Lists submitted feature requests (root admin only). | "Show me the feature requests people have submitted." |
+
+### Knowledge resources
+
+Five read-only MCP resources expose the same product-knowledge layer the `help` tool reads, so a client can pull a whole doc into context with `resources/read`: `knowledge://capabilities`, `knowledge://setup`, `knowledge://reasoning`, `knowledge://troubleshooting`, and `knowledge://trust`.
 
 ## AI crawler detection (the flagship AEO signal)
 
@@ -90,10 +136,11 @@ Either way the classifier runs s33k-side, so the shipper stays dumb (it forwards
 V1 is honest about its scope. It is a working, installable product, not a finished SaaS.
 
 - There is **no web dashboard for the s33k features in V1**. You drive everything from your LLM over MCP. The forked SerpBear web UI still exists for logging in and pasting your scraper key, but the SEO, AEO, and analytics features are MCP-first by design.
-- s33k stores its own data in **sqlite**. The analytics data lives in whatever provider you point it at (your own Umami, or Lodd as a legacy option).
+- s33k stores its own data in **Postgres in production and SQLite locally**, selected automatically by whether `DATABASE_URL` is set. The analytics data lives in whatever provider you point it at (your own Umami, or Lodd as a legacy option), and the autocapture event store lives in s33k's own database.
 - **AI-referral (AEO) detection reads real referral and crawler data.** It does not call any LLM to guess at citations, and it cannot show AI visibility until your site actually starts getting AI referrals or crawler hits.
 - The **AI-crawler feed needs a small shipper on your production site** to POST crawler hits to s33k. The detection engine is built and shipped here; wiring it into a live site is a follow-up that lives in your site's repo, not this one. See the AI crawler detection section above.
-- Single admin account. The experimental multi-tenant mode (`MULTI_TENANT`) is documented in `MULTI_TENANT.md` but is not the default path.
+- **Single admin account by default.** The invite-only multi-tenant mode (invites, read-only members, waitlist) is flag-gated behind `MULTI_TENANT` and off by default. With the flag off, behavior is byte-for-byte single-tenant. It is documented in `MULTI_TENANT.md`.
+- **No server-side LLM, ever.** The AI features (briefing, insights, ai_visibility, alerts, entry_pages) are rules-based: they compute structured findings on your data and hand them to your own LLM to narrate. s33k makes no model-provider calls and has no model-training path. Your data is never used to train any model. See `SECURITY.md`.
 
 ## Quickstart (local, from source)
 
@@ -212,11 +259,19 @@ After registering, restart your LLM client (or reload MCP servers) and the s33k 
 
 ## Hosting
 
-For deploying s33k somewhere your LLM and your team can reach it (a server or VPS), with the full owned analytics stack, see [`DEPLOY.md`](DEPLOY.md).
+For deploying s33k somewhere your LLM and your team can reach it (a server or VPS), with the full owned analytics stack, run it on Postgres in production (s33k selects Postgres automatically when `DATABASE_URL` is set, SQLite otherwise). The current operator checklist and env-var reference is [`DEPLOYMENT_READINESS.md`](DEPLOYMENT_READINESS.md), and [`CLAUDE.md`](CLAUDE.md) section A is the source of truth for the database choice and deploy mechanism. [`DEPLOY.md`](DEPLOY.md) is the long-form Railway recipe (note: its SQLite-on-volume sections are historical, superseded by `CLAUDE.md` section A).
+
+## Security and trust
+
+s33k is cookieless, captures no PII, never trains on your data, and makes no server-side LLM calls. Every trust claim points at the exact code or test that proves it: see [`SECURITY.md`](SECURITY.md), or ask your own LLM via the `security_facts` MCP tool.
+
+## Repo orientation for contributors
+
+[`CLAUDE.md`](CLAUDE.md) is the door-sign for anyone (human or AI) working in the repo: runtime and commands, the hard-won deploy gotchas, the multi-tenant scoping seam, and the no-server-side-LLM invariant.
 
 ## Analytics parity with Lodd
 
-s33k collects and exposes at least every datapoint that the Lodd analytics SaaS does, and beats it (per-page traffic joined to live rank and content-gap detection, provider-independent AI-referral detection, five extra Umami-only dimensions, and the full MCP control surface). The complete datapoint-by-datapoint mapping with live sample values is in [`PARITY.md`](PARITY.md).
+s33k collects and exposes at least every datapoint that the Lodd analytics SaaS does, and beats it (per-page traffic joined to live rank and content-gap detection, provider-independent AI-referral detection, four extra Umami-only breakdown dimensions plus a true daily time series, and the full MCP control surface). The complete datapoint-by-datapoint mapping with live sample values is in [`PARITY.md`](PARITY.md).
 
 ## License
 
