@@ -37,16 +37,19 @@ class S33kEvent extends Model {
    type!: string;
 
    // The page path the event happened on, e.g. "/pricing". Query string and hash stripped.
-   @Column({ type: DataType.STRING, allowNull: true, defaultValue: '' })
+   // TEXT not STRING: long paths, click labels, and deep CSS selector chains can exceed 255 chars,
+   // which silently overflows VARCHAR(255) on Postgres while passing on SQLite. TEXT keeps them
+   // consistent across dialects.
+   @Column({ type: DataType.TEXT, allowNull: true, defaultValue: '' })
    page!: string;
 
    // The element's visible text (clicks), the form id/name (form_submit), or the outbound
    // host (outbound). Sanitized and truncated at ingest. NEVER an input value.
-   @Column({ type: DataType.STRING, allowNull: true, defaultValue: '' })
+   @Column({ type: DataType.TEXT, allowNull: true, defaultValue: '' })
    label!: string;
 
    // A short CSS selector path for the clicked element (clicks only). Nullable.
-   @Column({ type: DataType.STRING, allowNull: true, defaultValue: '' })
+   @Column({ type: DataType.TEXT, allowNull: true, defaultValue: '' })
    selector!: string;
 
    // Numeric payload: scroll depth percent (scroll) or active engagement seconds

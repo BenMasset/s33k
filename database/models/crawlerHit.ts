@@ -22,10 +22,13 @@ class CrawlerHit extends Model {
    @Column({ type: DataType.BOOLEAN, allowNull: false, defaultValue: false })
    isAiEngine!: boolean;
 
-   @Column({ type: DataType.STRING, allowNull: true, defaultValue: '' })
+   // TEXT not STRING: a request path and especially a full User-Agent routinely exceed 255 chars
+   // (modern UAs plus tracking suffixes run 300+), which silently overflows VARCHAR(255) on
+   // Postgres while passing on SQLite. TEXT keeps the dialects consistent.
+   @Column({ type: DataType.TEXT, allowNull: true, defaultValue: '' })
    path!: string;
 
-   @Column({ type: DataType.STRING, allowNull: true, defaultValue: '' })
+   @Column({ type: DataType.TEXT, allowNull: true, defaultValue: '' })
    userAgent!: string;
 
    @Column({ type: DataType.STRING, allowNull: false })

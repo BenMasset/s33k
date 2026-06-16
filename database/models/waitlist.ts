@@ -21,7 +21,9 @@ class Waitlist extends Model {
    @Column({ type: DataType.STRING, allowNull: true })
    domain!: string;
 
-   @Column({ type: DataType.STRING, allowNull: true })
+   // TEXT not STRING: a free-text user note can run past 255 chars, which silently overflows
+   // VARCHAR(255) on Postgres while passing on SQLite.
+   @Column({ type: DataType.TEXT, allowNull: true })
    note!: string;
 
    // 'waiting' | 'invited'.

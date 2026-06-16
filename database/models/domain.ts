@@ -10,8 +10,12 @@ class Domain extends Model {
    @Column({ type: DataType.INTEGER, allowNull: false, primaryKey: true, autoIncrement: true })
    ID!: number;
 
+   // TEXT not STRING so the dialects match (STRING == VARCHAR(255) on Postgres, TEXT on SQLite).
+   // A hostname is normally short, but punycode/unicode and long subdomain chains can approach or
+   // exceed 255; TEXT removes the edge case. Postgres allows a UNIQUE index on a TEXT column, so
+   // the @Unique guarantee that one domain belongs to exactly one account still holds.
    @Unique
-   @Column({ type: DataType.STRING, allowNull: false, defaultValue: true, unique: true })
+   @Column({ type: DataType.TEXT, allowNull: false, defaultValue: true, unique: true })
    domain!: string;
 
    @Unique
@@ -27,7 +31,7 @@ class Domain extends Model {
    @Column({ type: DataType.STRING, allowNull: true })
    added!: string;
 
-   @Column({ type: DataType.STRING, allowNull: true, defaultValue: JSON.stringify([]) })
+   @Column({ type: DataType.TEXT, allowNull: true, defaultValue: JSON.stringify([]) })
    tags!: string;
 
    @Column({ type: DataType.BOOLEAN, allowNull: true, defaultValue: true })
@@ -36,13 +40,13 @@ class Domain extends Model {
    @Column({ type: DataType.STRING, allowNull: true, defaultValue: 'daily' })
    notification_interval!: string;
 
-   @Column({ type: DataType.STRING, allowNull: true, defaultValue: '' })
+   @Column({ type: DataType.TEXT, allowNull: true, defaultValue: '' })
    notification_emails!: string;
 
-   @Column({ type: DataType.STRING, allowNull: true })
+   @Column({ type: DataType.TEXT, allowNull: true })
    search_console!: string;
 
-   @Column({ type: DataType.STRING, allowNull: true, defaultValue: '' })
+   @Column({ type: DataType.TEXT, allowNull: true, defaultValue: '' })
    scrape_strategy!: string;
 
    @Column({ type: DataType.INTEGER, allowNull: true, defaultValue: 0 })
@@ -51,7 +55,7 @@ class Domain extends Model {
    @Column({ type: DataType.BOOLEAN, allowNull: true, defaultValue: false })
    scrape_smart_full_fallback!: boolean;
 
-   @Column({ type: DataType.STRING, allowNull: true, defaultValue: '' })
+   @Column({ type: DataType.TEXT, allowNull: true, defaultValue: '' })
    subdomain_matching!: string;
 
    // Multi-tenant ownership. NULL == the legacy single-tenant admin account.
