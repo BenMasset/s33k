@@ -59,6 +59,12 @@ class Domain extends Model {
    // stay byte-for-byte identical while MULTI_TENANT is off.
    @Column({ type: DataType.INTEGER, allowNull: true })
    owner_id!: number;
+
+   // Per-domain Umami analytics website id (a UUID string). NULL == fall back to the
+   // UMAMI_WEBSITE_ID env, so getmasset.com and existing rows stay unchanged. The
+   // onboard flow provisions a Umami website per domain and stamps its id here.
+   @Column({ type: DataType.STRING, allowNull: true })
+   umami_website_id!: string;
 }
 
 export default Domain;

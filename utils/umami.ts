@@ -43,9 +43,33 @@ import type {
 } from './analytics';
 import { cleanPath } from './lodd';
 import { classifyReferrer } from './ai-sources';
+import Domain from '../database/models/domain';
+
+/**
+ * Load the per-domain Umami website id stored on the Domain row, if any.
+ *
+ * This is the multi-tenant override: when a domain has been onboarded, its own
+ * provisioned Umami website id lives on Domain.umami_website_id, and analytics
+ * reads should target THAT website rather than the single UMAMI_WEBSITE_ID env.
+ * Returns null when there is no row, no stored id, or the lookup fails (so the
+ * env fallback still applies and getmasset.com is unchanged). Never throws.
+ * @param {string} domain - Site domain, e.g. "getmasset.com".
+ * @returns {Promise<string | null>} The stored website id, or null.
+ */
+const loadDomainWebsiteId = async (domain: string): Promise<string | null> => {
+   try {
+      const wanted = String(domain || '').trim().toLowerCase().replace(/^www\./, '');
+      if (!wanted) { return null; }
+      const row = await Domain.findOne({ where: { domain: wanted } });
+      const id = row?.umami_website_id ? String(row.umami_website_id).trim() : '';
+      return id || null;
+   } catch {
+      return null;
+   }
+};
 
 /** Strip a trailing slash and a trailing /api so we can build /api/... cleanly. */
-const normalizeBaseUrl = (raw: string): string => {
+export const normalizeBaseUrl = (raw: string): string => {
    let base = String(raw || '').trim().replace(/\/+$/, '');
    base = base.replace(/\/api$/i, '');
    return base;
@@ -57,7 +81,7 @@ const normalizeBaseUrl = (raw: string): string => {
  * @param {string} base - Normalized base URL (no trailing slash, no /api).
  * @returns {Promise<{ token: string | null, error: string | null }>}
  */
-const getToken = async (base: string): Promise<{ token: string | null, error: string | null }> => {
+export const getToken = async (base: string): Promise<{ token: string | null, error: string | null }> => {
    const apiKey = process.env.UMAMI_API_KEY;
    if (apiKey) { return { token: apiKey, error: null }; }
 
@@ -89,17 +113,27 @@ const getToken = async (base: string): Promise<{ token: string | null, error: st
 
 /**
  * Resolve the Umami website id for a domain.
- * Uses UMAMI_WEBSITE_ID when set; otherwise lists websites and matches by domain.
+ *
+ * Resolution order (per-domain first, so multi-tenant domains each read their OWN
+ * Umami website while getmasset.com keeps working unchanged):
+ *   1. preferredId  - the Domain row's umami_website_id, when provisioned/stamped.
+ *   2. UMAMI_WEBSITE_ID env - the legacy single-tenant fallback (getmasset.com).
+ *   3. GET /api/websites lookup by matching domain - last resort.
  * @param {string} base - Normalized base URL.
  * @param {string} token - Bearer token.
  * @param {string} domain - Site domain, e.g. "getmasset.com".
+ * @param {string | null} [preferredId] - A per-domain website id (Domain.umami_website_id).
  * @returns {Promise<{ websiteId: string | null, error: string | null }>}
  */
-const resolveWebsiteId = async (
+export const resolveWebsiteId = async (
    base: string,
    token: string,
    domain: string,
+   preferredId?: string | null,
 ): Promise<{ websiteId: string | null, error: string | null }> => {
+   const fromDomain = String(preferredId || '').trim();
+   if (fromDomain) { return { websiteId: fromDomain, error: null }; }
+
    const fromEnv = process.env.UMAMI_WEBSITE_ID;
    if (fromEnv) { return { websiteId: fromEnv, error: null }; }
 
@@ -165,7 +199,8 @@ const resolveUmami = async (
    const { token, error: tokenError } = await getToken(base);
    if (!token) { return { error: tokenError || 'Umami auth failed.' }; }
 
-   const { websiteId, error: idError } = await resolveWebsiteId(base, token, domain);
+   const preferredId = await loadDomainWebsiteId(domain);
+   const { websiteId, error: idError } = await resolveWebsiteId(base, token, domain, preferredId);
    if (!websiteId) { return { error: idError || 'Umami website id not resolved.' }; }
 
    return { base, token, websiteId };
@@ -218,7 +253,8 @@ export class UmamiProvider implements AnalyticsProvider {
       const { token, error: tokenError } = await getToken(base);
       if (!token) { return { pages: [], error: tokenError }; }
 
-      const { websiteId, error: idError } = await resolveWebsiteId(base, token, domain);
+      const preferredId = await loadDomainWebsiteId(domain);
+      const { websiteId, error: idError } = await resolveWebsiteId(base, token, domain, preferredId);
       if (!websiteId) { return { pages: [], error: idError }; }
 
       // Umami v3 groups per-page metrics under type "path" (v2 used "url").
@@ -277,7 +313,8 @@ export class UmamiProvider implements AnalyticsProvider {
       const { token, error: tokenError } = await getToken(base);
       if (!token) { return { sources: [], error: tokenError }; }
 
-      const { websiteId, error: idError } = await resolveWebsiteId(base, token, domain);
+      const preferredId = await loadDomainWebsiteId(domain);
+      const { websiteId, error: idError } = await resolveWebsiteId(base, token, domain, preferredId);
       if (!websiteId) { return { sources: [], error: idError }; }
 
       // Umami reports referrers via the metrics endpoint with type=referrer.
