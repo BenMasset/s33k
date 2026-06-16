@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import Cookies from 'cookies';
 import jwt from 'jsonwebtoken';
+import { allowedApiRoutes } from './allowedApiRoutes';
 
 /**
  * Psuedo Middleware: Verifies the user by their cookie value or their API Key
@@ -13,35 +14,6 @@ const verifyUser = (req: NextApiRequest, res: NextApiResponse): string => {
    const cookies = new Cookies(req, res);
    const token = cookies && cookies.get('token');
 
-   const allowedApiRoutes = [
-      'GET:/api/keyword',
-      'GET:/api/keywords',
-      'PUT:/api/keywords',
-      'DELETE:/api/keywords',
-      'GET:/api/domains',
-      'POST:/api/keywords',
-      'POST:/api/domains',
-      'DELETE:/api/domains',
-      'POST:/api/refresh',
-      'POST:/api/cron',
-      'POST:/api/notify',
-      'POST:/api/searchconsole',
-      'GET:/api/searchconsole',
-      'GET:/api/insight',
-      'GET:/api/insights',
-      'GET:/api/scoreboard',
-      'GET:/api/ai-referrals',
-      'GET:/api/summary',
-      'GET:/api/human-traffic',
-      'GET:/api/breakdown',
-      'GET:/api/timeseries',
-      'GET:/api/events',
-      'GET:/api/engagement',
-      'POST:/api/crawler-hit',
-      'GET:/api/ai-crawlers',
-      'GET:/api/discover',
-      'GET:/api/briefing',
-   ];
    const verifiedAPI = req.headers.authorization ? req.headers.authorization.substring('Bearer '.length) === process.env.APIKEY : false;
    const accessingAllowedRoute = req.url && req.method && allowedApiRoutes.includes(`${req.method}:${req.url.replace(/\?(.*)/, '')}`);
    console.log(req.method, req.url);

@@ -1,0 +1,42 @@
+import type { NextApiRequest } from 'next';
+
+// The single source of truth for which routes an API key (the legacy global key or a
+// per-tenant key) is allowed to call. Cookie/UI sessions are NOT restricted by this list.
+//
+// This lives in its own dependency-free module on purpose: verifyUser imports it, and
+// verifyUser must stay lightweight (no transitive database-model imports), otherwise any
+// test or code path that loads a route using verifyUser would pull sequelize into scope.
+export const allowedApiRoutes = [
+   'GET:/api/keyword',
+   'GET:/api/keywords',
+   'PUT:/api/keywords',
+   'DELETE:/api/keywords',
+   'GET:/api/domains',
+   'POST:/api/keywords',
+   'POST:/api/domains',
+   'DELETE:/api/domains',
+   'POST:/api/refresh',
+   'POST:/api/cron',
+   'POST:/api/notify',
+   'POST:/api/searchconsole',
+   'GET:/api/searchconsole',
+   'GET:/api/insight',
+   'GET:/api/insights',
+   'GET:/api/scoreboard',
+   'GET:/api/ai-referrals',
+   'GET:/api/summary',
+   'GET:/api/human-traffic',
+   'GET:/api/breakdown',
+   'GET:/api/timeseries',
+   'GET:/api/events',
+   'GET:/api/engagement',
+   'POST:/api/crawler-hit',
+   'GET:/api/ai-crawlers',
+   'GET:/api/discover',
+   'GET:/api/briefing',
+];
+
+export const isAllowedApiRoute = (req: NextApiRequest): boolean => Boolean(
+   req.url && req.method
+   && allowedApiRoutes.includes(`${req.method}:${req.url.replace(/\?(.*)/, '')}`),
+);

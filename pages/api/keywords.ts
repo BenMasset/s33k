@@ -3,7 +3,9 @@ import { Op } from 'sequelize';
 import db from '../../database/database';
 import Keyword from '../../database/models/keyword';
 import { getAppSettings } from './settings';
-import verifyUser from '../../utils/verifyUser';
+import authorize from '../../utils/authorize';
+import { scopeWhere, ownerIdFor } from '../../utils/scope';
+import type Account from '../../database/models/account';
 import parseKeywords from '../../utils/parseKeywords';
 import { integrateKeywordSCData, readLocalSCData } from '../../utils/searchConsole';
 import refreshAndUpdateKeywords from '../../utils/refresh';
@@ -23,27 +25,27 @@ type KeywordsDeleteRes = {
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
    await db.sync();
-   const authorized = verifyUser(req, res);
-   if (authorized !== 'authorized') {
-      return res.status(401).json({ error: authorized });
+   const { authorized, account, error } = await authorize(req, res);
+   if (!authorized) {
+      return res.status(401).json({ error });
    }
 
    if (req.method === 'GET') {
-      return getKeywords(req, res);
+      return getKeywords(req, res, account);
    }
    if (req.method === 'POST') {
-      return addKeywords(req, res);
+      return addKeywords(req, res, account);
    }
    if (req.method === 'DELETE') {
-      return deleteKeywords(req, res);
+      return deleteKeywords(req, res, account);
    }
    if (req.method === 'PUT') {
-      return updateKeywords(req, res);
+      return updateKeywords(req, res, account);
    }
    return res.status(502).json({ error: 'Unrecognized Route.' });
 }
 
-const getKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGetResponse>) => {
+const getKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGetResponse>, account?: Account | null) => {
    if (!req.query.domain && typeof req.query.domain !== 'string') {
       return res.status(400).json({ error: 'Domain is Required!' });
    }
@@ -54,7 +56,7 @@ const getKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGet
    const domainSCData = integratedSC || (search_console_client_email && search_console_private_key) ? await readLocalSCData(domain) : false;
 
    try {
-      const allKeywords:Keyword[] = await Keyword.findAll({ where: { domain } });
+      const allKeywords:Keyword[] = await Keyword.findAll({ where: { domain, ...scopeWhere(account) } });
       const keywords: KeywordType[] = parseKeywords(allKeywords.map((e) => e.get({ plain: true })));
       const processedKeywords = keywords.map((keyword) => {
          const historyArray = Object.keys(keyword.history).map((dateKey:string) => ({
@@ -76,11 +78,12 @@ const getKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGet
    }
 };
 
-const addKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGetResponse>) => {
+const addKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGetResponse>, account?: Account | null) => {
    const { keywords } = req.body;
    if (keywords && Array.isArray(keywords) && keywords.length > 0) {
       // const keywordsArray = keywords.replaceAll('\n', ',').split(',').map((item:string) => item.trim());
       const keywordsToAdd: any = []; // QuickFIX for bug: https://github.com/sequelize/sequelize-typescript/issues/936
+      const owner_id = ownerIdFor(account);
 
       keywords.forEach((kwrd: KeywordAddPayload) => {
          const { keyword, device, country, domain, tags, city, target_page } = kwrd;
@@ -100,6 +103,7 @@ const addKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGet
             sticky: false,
             lastUpdated: new Date().toJSON(),
             added: new Date().toJSON(),
+            owner_id,
          };
          keywordsToAdd.push(newKeyword);
       });
@@ -132,7 +136,7 @@ const addKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGet
    }
 };
 
-const deleteKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsDeleteRes>) => {
+const deleteKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsDeleteRes>, account?: Account | null) => {
    if (!req.query.id && typeof req.query.id !== 'string') {
       return res.status(400).json({ error: 'keyword ID is Required!' });
    }
@@ -140,7 +144,7 @@ const deleteKeywords = async (req: NextApiRequest, res: NextApiResponse<Keywords
 
    try {
       const keywordsToRemove = (req.query.id as string).split(',').map((item) => parseInt(item, 10));
-      const removeQuery = { where: { ID: { [Op.in]: keywordsToRemove } } };
+      const removeQuery = { where: { ID: { [Op.in]: keywordsToRemove }, ...scopeWhere(account) } };
       const removedKeywordCount: number = await Keyword.destroy(removeQuery);
 
       // remove keyword from retry queue if exists
@@ -153,7 +157,7 @@ const deleteKeywords = async (req: NextApiRequest, res: NextApiResponse<Keywords
    }
 };
 
-const updateKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGetResponse>) => {
+const updateKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGetResponse>, account?: Account | null) => {
    if (!req.query.id && typeof req.query.id !== 'string') {
       return res.status(400).json({ error: 'keyword ID is Required!' });
    }
@@ -164,17 +168,18 @@ const updateKeywords = async (req: NextApiRequest, res: NextApiResponse<Keywords
    const { sticky, tags, target_page } = req.body;
 
    try {
+      const scope = scopeWhere(account);
       let keywords: KeywordType[] = [];
       if (target_page !== undefined) {
-         await Keyword.update({ target_page }, { where: { ID: { [Op.in]: keywordIDs } } });
-         const updatedKeywords:Keyword[] = await Keyword.findAll({ where: { ID: { [Op.in]: keywordIDs } } });
+         await Keyword.update({ target_page }, { where: { ID: { [Op.in]: keywordIDs }, ...scope } });
+         const updatedKeywords:Keyword[] = await Keyword.findAll({ where: { ID: { [Op.in]: keywordIDs }, ...scope } });
          const formattedKeywords = updatedKeywords.map((el) => el.get({ plain: true }));
          keywords = parseKeywords(formattedKeywords);
          return res.status(200).json({ keywords });
       }
       if (sticky !== undefined) {
-         await Keyword.update({ sticky }, { where: { ID: { [Op.in]: keywordIDs } } });
-         const updateQuery = { where: { ID: { [Op.in]: keywordIDs } } };
+         await Keyword.update({ sticky }, { where: { ID: { [Op.in]: keywordIDs }, ...scope } });
+         const updateQuery = { where: { ID: { [Op.in]: keywordIDs }, ...scope } };
          const updatedKeywords:Keyword[] = await Keyword.findAll(updateQuery);
          const formattedKeywords = updatedKeywords.map((el) => el.get({ plain: true }));
           keywords = parseKeywords(formattedKeywords);
@@ -184,7 +189,7 @@ const updateKeywords = async (req: NextApiRequest, res: NextApiResponse<Keywords
          const tagsKeywordIDs = Object.keys(tags);
          const multipleKeywords = tagsKeywordIDs.length > 1;
          for (const keywordID of tagsKeywordIDs) {
-            const selectedKeyword = await Keyword.findOne({ where: { ID: keywordID } });
+            const selectedKeyword = await Keyword.findOne({ where: { ID: keywordID, ...scope } });
             const currentTags = selectedKeyword && selectedKeyword.tags ? JSON.parse(selectedKeyword.tags) : [];
             const mergedTags = Array.from(new Set([...currentTags, ...tags[keywordID]]));
             if (selectedKeyword) {

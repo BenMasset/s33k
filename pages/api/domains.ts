@@ -4,7 +4,9 @@ import db from '../../database/database';
 import Domain from '../../database/models/domain';
 import Keyword from '../../database/models/keyword';
 import getdomainStats from '../../utils/domains';
-import verifyUser from '../../utils/verifyUser';
+import authorize from '../../utils/authorize';
+import { scopeWhere, ownerIdFor } from '../../utils/scope';
+import type Account from '../../database/models/account';
 import { checkSerchConsoleIntegration, removeLocalSCData } from '../../utils/searchConsole';
 import { removeFromRetryQueue } from '../../utils/scraper';
 
@@ -32,29 +34,29 @@ type DomainsUpdateRes = {
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
    await db.sync();
-   const authorized = verifyUser(req, res);
-   if (authorized !== 'authorized') {
-      return res.status(401).json({ error: authorized });
+   const { authorized, account, error } = await authorize(req, res);
+   if (!authorized) {
+      return res.status(401).json({ error });
    }
    if (req.method === 'GET') {
-      return getDomains(req, res);
+      return getDomains(req, res, account);
    }
    if (req.method === 'POST') {
-      return addDomain(req, res);
+      return addDomain(req, res, account);
    }
    if (req.method === 'DELETE') {
-      return deleteDomain(req, res);
+      return deleteDomain(req, res, account);
    }
    if (req.method === 'PUT') {
-      return updateDomain(req, res);
+      return updateDomain(req, res, account);
    }
    return res.status(502).json({ error: 'Unrecognized Route.' });
 }
 
-export const getDomains = async (req: NextApiRequest, res: NextApiResponse<DomainsGetRes>) => {
+export const getDomains = async (req: NextApiRequest, res: NextApiResponse<DomainsGetRes>, account?: Account | null) => {
    const withStats = !!req?.query?.withstats;
    try {
-      const allDomains: Domain[] = await Domain.findAll();
+      const allDomains: Domain[] = await Domain.findAll({ where: { ...scopeWhere(account) } });
       const formattedDomains: DomainType[] = allDomains.map((el) => {
          const domainItem:DomainType = el.get({ plain: true });
          const scData = domainItem?.search_console ? JSON.parse(domainItem.search_console) : {};
@@ -69,10 +71,11 @@ export const getDomains = async (req: NextApiRequest, res: NextApiResponse<Domai
    }
 };
 
-const addDomain = async (req: NextApiRequest, res: NextApiResponse<DomainsAddResponse>) => {
+const addDomain = async (req: NextApiRequest, res: NextApiResponse<DomainsAddResponse>, account?: Account | null) => {
    const { domains } = req.body;
    if (domains && Array.isArray(domains) && domains.length > 0) {
       const domainsToAdd: any = [];
+      const owner_id = ownerIdFor(account);
 
       domains.forEach((domain: string) => {
          domainsToAdd.push({
@@ -80,6 +83,7 @@ const addDomain = async (req: NextApiRequest, res: NextApiResponse<DomainsAddRes
             slug: domain.trim().replaceAll('-', '_').replaceAll('.', '-').replaceAll('/', '-'),
             lastUpdated: new Date().toJSON(),
             added: new Date().toJSON(),
+            owner_id,
          });
       });
       try {
@@ -95,15 +99,16 @@ const addDomain = async (req: NextApiRequest, res: NextApiResponse<DomainsAddRes
    }
 };
 
-export const deleteDomain = async (req: NextApiRequest, res: NextApiResponse<DomainsDeleteRes>) => {
+export const deleteDomain = async (req: NextApiRequest, res: NextApiResponse<DomainsDeleteRes>, account?: Account | null) => {
    if (!req.query.domain && typeof req.query.domain !== 'string') {
       return res.status(400).json({ domainRemoved: 0, keywordsRemoved: 0, SCDataRemoved: false, error: 'Domain is Required!' });
    }
    try {
       const { domain } = req.query || {};
-      await Promise.all((await Keyword.findAll({ where: { domain } })).map((keyword) => removeFromRetryQueue(keyword.ID)));
-      const removedDomCount: number = await Domain.destroy({ where: { domain } });
-      const removedKeywordCount: number = await Keyword.destroy({ where: { domain } });
+      const scope = scopeWhere(account);
+      await Promise.all((await Keyword.findAll({ where: { domain, ...scope } })).map((keyword) => removeFromRetryQueue(keyword.ID)));
+      const removedDomCount: number = await Domain.destroy({ where: { domain, ...scope } });
+      const removedKeywordCount: number = await Keyword.destroy({ where: { domain, ...scope } });
       const SCDataRemoved = await removeLocalSCData(domain as string);
 
       return res.status(200).json({ domainRemoved: removedDomCount, keywordsRemoved: removedKeywordCount, SCDataRemoved });
@@ -113,7 +118,7 @@ export const deleteDomain = async (req: NextApiRequest, res: NextApiResponse<Dom
    }
 };
 
-export const updateDomain = async (req: NextApiRequest, res: NextApiResponse<DomainsUpdateRes>) => {
+export const updateDomain = async (req: NextApiRequest, res: NextApiResponse<DomainsUpdateRes>, account?: Account | null) => {
    if (!req.query.domain) {
       return res.status(400).json({ domain: null, error: 'Domain is Required!' });
    }
@@ -125,7 +130,7 @@ export const updateDomain = async (req: NextApiRequest, res: NextApiResponse<Dom
    } = req.body as DomainSettings;
 
    try {
-      const domainToUpdate: Domain|null = await Domain.findOne({ where: { domain } });
+      const domainToUpdate: Domain|null = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
       // Validate Search Console API Data
       if (domainToUpdate && search_console?.client_email && search_console?.private_key) {
          const theDomainObj = domainToUpdate.get({ plain: true });
