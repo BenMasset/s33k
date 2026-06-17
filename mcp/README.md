@@ -6,26 +6,40 @@ The server is a thin wrapper over the s33k REST API. It speaks stdio transport a
 
 ## Tools
 
-The server registers 20 tools, grouped by pillar. The authoritative source is `src/index.ts`.
+The server registers 70 tools and 5 knowledge resources, grouped by pillar. The authoritative source is `src/index.ts`; the per-tool descriptions live in `utils/knowledge.ts` in the root repo. Most read tools take `domain` and an optional `period` (e.g. `30d`); the per-tool specifics are below.
 
 ### Cross-pillar
 
-| Tool | What it does | Arguments |
-|---|---|---|
-| `briefing` | One proactive daily standup for a domain: what changed across every pillar and the top three actions. Best first call of the day. | `domain`, `period` (optional, e.g. `30d`) |
-| `insights` | Cross-pillar analyst. Joins rank, traffic, AI referrals, and the bot estimate into rules-based findings and prioritized recommendations. | `domain`, `period` (optional) |
-| `page_scoreboard` | Joins per-page traffic with tracked keywords and rank. Flags content-gap pages and keywords whose target page got no traffic. | `domain`, `period` (optional) |
+| Tool | What it does |
+|---|---|
+| `briefing` | One proactive daily standup for a domain: a headline, sections, and the top three actions across every pillar. Best first call of the day. |
+| `insights` | Cross-pillar analyst. Joins rank, traffic, AI referrals, and engagement into rules-based findings and prioritized recommendations. |
+| `alerts` | The "what changed and what to do" standup. Compares this period to the prior one and surfaces rank moves, traffic swings, and new AI engines, plus the top priority. |
+| `executive_summary` | The leadership one-glance report: headline numbers, top and top-converting channel, an SEO snapshot, AI visibility, a health line, and the single next action. |
+| `weekly_digest` | A week-in-review bundle: traffic, top entry pages, sessions per channel, AI-search sessions, and the keywords that moved most in rank. |
+| `page_scoreboard` | Joins per-page traffic with tracked keywords and rank. Flags content-gap pages and keywords whose target page got no traffic. |
+| `entry_pages` | Analyzes the ENTRY (landing) pages where sessions start, joining first-touch source split to tracked rank. |
+| `entry_page_report` | The entry-page acquisition lens: first-touch sessions per landing page by source channel, joined to the keywords/rank each page holds. |
+| `content_performance_report` | Ranks pages by pageviews, joining entries, optional goal conversions, and tracked keywords/rank per page. |
+| `conversion_attribution` | Attributes a goal's conversions and revenue by source (AI vs organic vs direct) and by tracked keyword, and names the money moves. |
+| `portfolio_summary` | Summarizes every domain on the account in one call: rank distribution, quick-win count, and human plus AI-referral sessions per site. |
 
 ### SEO
 
 | Tool | What it does | Arguments |
 |---|---|---|
 | `discover_pages` | Crawls a domain (sitemap first, then homepage links) and returns up to 25 pages for keyword-to-page mapping. | `domain` |
-| `list_keywords` | Lists a domain's keywords with current rank, ranking URL, target page, and last 7 days of rank history. | `domain` |
+| `list_keywords` | Lists a domain's keywords with current rank, ranking URL, target page, and recent rank history. | `domain` |
 | `add_keyword` | Adds a keyword to track. Queues a background SERP scrape. | `keyword`, `domain`, `country` (default `US`), `device` (`desktop` or `mobile`, default `desktop`), `target_page` (optional) |
 | `update_keyword` | Updates keywords by ID: set target page and/or toggle sticky. | `ids`, `target_page` and/or `sticky` |
 | `delete_keyword` | Permanently deletes one or more keywords by ID. | `ids` |
 | `refresh_keywords` | Triggers a fresh SERP scrape for specific keyword IDs or a whole domain. | `ids` (array of numbers) OR `domain` |
+| `striking_distance` | Returns near-miss keywords ranking just off page one (positions 4 to 30), the cheapest SEO wins, each with its position delta. | `domain`, `min`/`max` (optional) |
+| `seo_report` | A prebuilt one-call SEO snapshot: rank distribution, striking-distance quick wins, biggest movers, and keywords grouped by target page. | `domain` |
+| `site_audit` | Crawls a domain and returns a prioritized on-page / technical issue list (titles, metas, H1s, duplicates, thin content), each with a severity. | `domain` |
+| `cannibalization_detection` | Finds keyword cannibalization where two of your own pages compete for the same term and split the equity. | `domain` |
+| `content_gap` | Crawls a named competitor and your site and returns the topics the competitor covers that you do not. | `domain`, `competitor` |
+| `competitor_visibility` | Reads the stored SERP for every tracked keyword and tallies competitor share of voice, plus who outranks you per keyword. | `domain` |
 | `get_insight` | Reads Google Search Console insight (top pages, keywords, countries, stats). Requires GSC connected for that domain. | `domain` |
 
 ### AEO
@@ -34,24 +48,80 @@ The server registers 20 tools, grouped by pillar. The authoritative source is `s
 |---|---|---|
 | `ai_referrals` | Reports which AI engines send real visitors (per-engine visitors, page views, AI share of referred traffic). | `domain`, `period` (optional) |
 | `ai_crawlers` | Reports which AI and search crawlers are crawling a domain (per-bot hits, owners, AI-engine totals, recent sample). | `domain`, `period` (optional) |
+| `ai_visibility` | The AI-visibility funnel: joins crawls to referrals per engine and per page, flagging crawled-not-cited pages and aware-not-recommending engines. | `domain`, `period` (optional) |
+| `aeo_report` | A prebuilt one-call AEO snapshot: AI referrals per engine, AI crawlers per bot, and the crawl-vs-referral funnel per engine. | `domain`, `period` (optional) |
 
 ### Analytics
 
 | Tool | What it does | Arguments |
 |---|---|---|
 | `traffic_summary` | Site-wide totals: pageviews, visitors, visits, bounce rate, average duration, pages per visit. | `domain`, `period` (optional) |
+| `human_traffic` | Estimates likely-human vs likely-bot traffic via a bounce/duration heuristic with a known-human referrer floor. An estimate, not an exact count. | `domain`, `period` (optional) |
+| `human_analytics` | Human-only analytics from s33k's own first-party pageviews (datacenter bots excluded by IP), with exit and bounce rate the Umami view cannot produce. | `domain`, `period` (optional), `includeBots` (optional) |
+| `channel_report` | Maps every session to a clean marketing channel (Organic Search, AI Search, Referral, Direct) with sessions and share, plus conversions per channel with a goal. | `domain`, `period` (optional), `goalId` (optional) |
+| `campaign_report` | Groups every session by UTM campaign (with utm_source / utm_medium splits) and reports sessions and share, plus conversions per campaign with a goal. | `domain`, `period` (optional), `goalId` (optional) |
+| `live_view` | A polled real-time snapshot of who is on the site now: active visitors, pages being viewed, source and country splits, and recent events. | `domain`, `windowMinutes` (optional, default 5) |
+| `funnel_analysis` | An ordered, multi-step funnel from first-party sessions with per-step drop-off. | `domain`, `steps`, `period` (optional) |
+| `period_compare` | This period vs the immediately-preceding equal-length period, side by side, with delta and percent change per metric. | `domain`, `period` (optional), `goalId` (optional) |
 | `traffic_breakdown` | Breaks traffic down by a dimension (country, device, browser, os, plus Umami-only region/city/language/screen). | `domain`, `dimension`, `period` (optional) |
 | `traffic_timeseries` | Daily (or unit-grouped) time series of pageviews and visitors. | `domain`, `period` (optional), `unit` (optional) |
 | `top_events` | Custom/tracked events with their fire counts. | `domain`, `period` (optional) |
 | `engagement` | Session-quality engagement tiers (bounced / browsed / engaged) with counts, percentages, and averages. | `domain`, `period` (optional) |
-| `human_traffic` | Estimates likely-human vs likely-bot traffic via a bounce/duration heuristic with a known-human referrer floor. An estimate, not an exact count. | `domain`, `period` (optional) |
+| `top_clicks` | The most-clicked elements from s33k autocapture, by visible text and stable selector. Never any typed value. | `domain`, `period` (optional) |
+| `form_submissions` | Which forms get submitted, how often, and from which pages, from autocapture. Records the form id/name only, never field values. | `domain`, `period` (optional) |
+| `scroll_depth` | How far visitors scroll per page plus a site-wide depth histogram, from autocapture. | `domain`, `period` (optional) |
+| `page_engagement` | Active engagement (dwell) time per page from autocapture, paused when the tab is hidden or the visitor is idle. | `domain`, `period` (optional) |
+| `web_vitals` | Real-user Core Web Vitals (LCP, CLS, INP, FID, FCP, TTFB) at p75 scored against Google's field thresholds, with the slowest pages. | `domain`, `period` (optional) |
+| `conversions_by_source` | Attributes conversions (autocaptured form submits by default) to the first-touch source, with an approximate rate per source. | `domain`, `period` (optional), `eventType` (optional) |
 
-### Domains
+### Conversion goals and segments
+
+| Tool | What it does | Arguments |
+|---|---|---|
+| `create_goal` | Defines a named conversion goal: a destination page reached (`page_reached`) or an autocaptured event fired (`event`). | `domain`, `name`, `kind`, `matchValue`, `value` (optional) |
+| `list_goals` | Lists the named conversion goals defined for a domain and their match rules. | `domain` |
+| `delete_goal` | Deletes a named conversion goal by its id. | `domain`, `goalId` |
+| `goal_analytics` | Conversion rate and counts for a goal, filterable and groupable by source/landing page/device/country/engagement, with revenue when the goal has a value. | `domain`, `goalId`, `period` (optional), filter/groupBy (optional) |
+| `suggest_goals` | Proposes ready-to-create goals by spotting a site's likely conversions (thank-you, demo, contact, signup pages). | `domain` |
+| `segment_save` | Saves a named, reusable filter set built from the composable analytics filters. | `domain`, `name`, filters |
+| `segment_list` | Lists the named segments defined for a domain and the filters each stores. | `domain` |
+| `segment_delete` | Deletes a named segment by its id. | `domain`, `id` |
+| `segment_analytics` | Applies a saved segment by name (or id) and returns the human-analytics-style traffic summary with its filters applied. | `domain`, `segment` (name or id), `period` (optional) |
+
+### Domains and onboarding
 
 | Tool | What it does | Arguments |
 |---|---|---|
 | `list_domains` | Lists all domains tracked in s33k. | none |
 | `create_domain` | Adds one or more domains to track (bare hostnames, no protocol). | `domains` |
+| `onboard` | The one-call cold start: creates the domain, discovers and adds keywords with scrapes queued, provisions analytics, and returns the snippet plus guides. | `domain` |
+| `setup_status` | Reports a domain's setup progress as a checklist with the single next step and the exact tool to call. | `domain` |
+| `install_instructions` | Returns the tracking snippet and per-platform install steps (WordPress, Webflow, Shopify, GTM, Next.js, raw HTML, and more). | `domain`, `platform` (optional) |
+
+### Account, trust, and self-support
+
+| Tool | What it does | Arguments |
+|---|---|---|
+| `invite_external` | Sends an external invite that brings a new admin and their own account into s33k (quota-limited). Admin key. | `email` |
+| `invite_internal` | Adds a read-only member seat to your own account for a teammate (unlimited). Admin key. | `email` |
+| `list_invites` | Lists every invite you have sent, with status. Admin key. | none |
+| `list_waitlist` | Lists waitlist signups (root admin only). | none |
+| `security_facts` | Returns s33k's complete, source-cited trust facts: no model training, tenant isolation, encryption at rest, cookieless/no-PII. | none |
+| `export_data` | Downloads everything s33k holds about your account as one JSON bundle. Never includes a secret. | none |
+| `delete_account_data` | Permanently and irreversibly deletes your entire account and all its data. Requires the confirmation string `DELETE`. | `confirm` |
+| `help` | Answers any question about s33k from its single authoritative product-knowledge layer. Reads no account data and never queries an LLM. | `question`, `topic` (optional) |
+| `request_feature` | Submits a request for a capability s33k does not have (after `help` confirms it is genuinely missing). | `request` |
+| `list_feature_requests` | Lists submitted feature requests (root admin only). | `status` (optional) |
+
+The multi-tenant tools (`invite_*`, `list_invites`, `list_waitlist`) are active when `MULTI_TENANT` is on. Write tools require an admin key; read-only member keys are rejected.
+
+### Knowledge resources
+
+Five read-only MCP resources expose the same product-knowledge layer the `help` tool reads, so a client can pull a whole doc into context with `resources/read`: `knowledge://capabilities`, `knowledge://setup`, `knowledge://reasoning`, `knowledge://troubleshooting`, and `knowledge://trust`.
+
+## Trust property
+
+s33k makes no server-side LLM calls. The AI features (`briefing`, `insights`, `ai_visibility`, `alerts`, `entry_pages`, and the prebuilt reports) are rules-based: the server computes structured findings over your own data and hands them to your own LLM to narrate. There is no model-training path, tracking is cookieless with no PII, and s33k is self-hostable so you can verify all of it. See `SECURITY.md`, or ask via the `security_facts` tool.
 
 ## Requirements
 
@@ -65,7 +135,7 @@ The server registers 20 tools, grouped by pillar. The authoritative source is `s
 | `S33K_API_KEY` | yes | none | The value of `APIKEY` in the s33k root `.env` file. |
 | `S33K_BASE_URL` | no | `http://localhost:3000` | The base URL of the running s33k instance. Trailing slashes are trimmed. |
 
-The Bearer API key path is whitelisted in s33k's `utils/verifyUser.ts` for the routes these tools use: `GET /api/domains`, `POST /api/domains`, `GET /api/keywords`, `POST /api/keywords`, `PUT /api/keywords`, `DELETE /api/keywords`, `POST /api/refresh`, `GET /api/insight`, `GET /api/insights`, `GET /api/scoreboard`, `GET /api/ai-referrals`, `GET /api/ai-crawlers`, `GET /api/summary`, `GET /api/breakdown`, `GET /api/timeseries`, `GET /api/events`, `GET /api/engagement`, `GET /api/human-traffic`, `GET /api/discover`, and `GET /api/briefing`.
+The Bearer API key path is whitelisted in s33k's `utils/allowedApiRoutes.ts` for the routes these tools use. Any new authed route a tool calls must be added to that whitelist, or the call is rejected with "This Route cannot be accessed with API."
 
 ## Install and build
 
@@ -118,11 +188,11 @@ The server speaks stdio and waits for a client, so running it by hand will print
 S33K_API_KEY=... S33K_BASE_URL=http://localhost:3000 node dist/index.js
 ```
 
-A clean boot prints `s33k-mcp connected (base URL: ...). 20 tools registered.` to stderr. Press Ctrl-C to stop.
+A clean boot prints `s33k-mcp connected (base URL: ...). 70 tools and 5 resources registered.` to stderr. Press Ctrl-C to stop.
 
 ## End-to-end smoke test
 
-`smoke-test.mjs` spawns the BUILT server (`dist/index.js`) as a stdio child, drives it with the official MCP client SDK (real `initialize` handshake), and exercises all 20 tools against a live s33k instance. It asserts that exactly 20 tools are registered and that every tool returns a successful, non-empty result.
+`smoke-test.mjs` spawns the BUILT server (`dist/index.js`) as a stdio child, drives it with the official MCP client SDK (real `initialize` handshake), and exercises the tools against a live s33k instance. It asserts the registered tool count and that every tool it drives returns a successful, non-empty result.
 
 What it covers:
 
@@ -147,7 +217,7 @@ set -a; . ../.env; set +a    # exports APIKEY (and any S33K_BASE_URL override)
 npm run smoke                # or: node smoke-test.mjs
 ```
 
-Exit code is 0 when every assertion passes, non-zero otherwise. A clean run prints `Summary: 22/22 assertions passed.`
+Exit code is 0 when every assertion passes, non-zero otherwise. A clean run prints a `Summary: N/N assertions passed.` line with all assertions passing.
 
 ## Notes
 

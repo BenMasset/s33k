@@ -32,7 +32,7 @@ class S33kEvent extends Model {
    @Column({ type: DataType.INTEGER, allowNull: true })
    owner_id!: number;
 
-   // One of: 'click' | 'form_submit' | 'scroll' | 'engagement' | 'outbound'.
+   // One of: 'pageview' | 'click' | 'form_submit' | 'scroll' | 'engagement' | 'outbound' | 'webvital'.
    @Column({ type: DataType.STRING, allowNull: false })
    type!: string;
 

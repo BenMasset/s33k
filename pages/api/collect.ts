@@ -186,8 +186,13 @@ const collect = async (req: NextApiRequest, res: NextApiResponse<CollectResponse
       // path: sanitizeBatch drops them (webvital is not one of its six event types), so they are
       // extracted and validated here in parallel. The existing five-event path above is untouched.
       const rawEvents = Array.isArray(body.events) ? body.events : [];
+      // The session-level first-touch source is identical for every webvital row, so resolve it once.
+      const wvSource = sanitizeSource(body.source);
       const webvitals: CleanWebVital[] = [];
-      for (const raw of rawEvents) {
+      // Cap webvitals at the same 50-event process budget the main path uses (sanitizeBatch's default
+      // maxBatch), so the public ingest's abuse ceiling is symmetric across event types. The 413 brake
+      // above already rejects any batch over MAX_EVENTS_PER_BATCH raw events.
+      for (const raw of rawEvents.slice(0, 50)) {
          const wv = sanitizeWebVital(raw);
          if (wv) { webvitals.push(wv); }
       }
@@ -267,8 +272,8 @@ const collect = async (req: NextApiRequest, res: NextApiResponse<CollectResponse
                metric_value: wv.metricValue,
                session,
                // Same session-level first-touch source the clean events carry (sanitizeBatch applied
-               // it per-event from body.source; here we apply the identical sanitizeSource result).
-               source: sanitizeSource(body.source),
+               // it per-event from body.source; here we reuse the identical hoisted sanitizeSource result).
+               source: wvSource,
                ...utm,
                is_bot: isBot,
                device,

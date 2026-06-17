@@ -18,29 +18,54 @@ s33k is a fork of [`towfiqi/serpbear`](https://github.com/towfiqi/serpbear) (MIT
 
 The product is the unified MCP control plane that joins all three. The per-page scoreboard ties traffic to live rank and flags content gaps (pages with traffic but no tracked keyword) and dead keywords (target pages getting no traffic).
 
+## What you can ask (newer capabilities)
+
+Beyond rank tracking and traffic, s33k now has the higher-level capabilities a marketer actually asks for, all over MCP:
+
+- **Named conversion goals with revenue.** Define goals like "Demo Booked" (a destination page reached or an autocaptured event fired), then ask for the rate, segment it with composable filters (source, landing page, device, country, engagement), and get dollars when a goal carries a value.
+- **UTM / campaign attribution.** Group every session by `utm_campaign` (with source/medium splits) and see which campaign converts best.
+- **Saved segments.** Name a filter set once ("AI human converters") and re-run it by name instead of re-specifying filters every time.
+- **Multi-site portfolio rollup.** Summarize every domain on your account in one call: rank distribution, quick-win count, and human vs AI traffic per site, for the agency / multi-site view.
+- **Competitor share of voice.** Tally how often each rival domain ranks for the same terms you track, ranked by share of voice, plus who outranks you per keyword.
+- **Core Web Vitals.** Real-user p75 for LCP, CLS, INP, FID, FCP, TTFB scored against Google's field thresholds, with the slowest pages called out.
+- **Prebuilt one-call reports.** A weekly digest, an executive summary, a full SEO report, and a full AEO report, each bundling a whole pillar (or all three) into one structured response so you do not chain tools.
+
 ## MCP tools
 
-s33k is fully controllable from an LLM over MCP. The server exposes 40 tools and 5 knowledge resources (authoritative list from `mcp/src/index.ts`), grouped below by pillar with one example prompt each. The example prompts are what you would type into Claude or Cursor; the LLM picks the tool.
+s33k is fully controllable from an LLM over MCP. The server exposes 70 tools and 5 knowledge resources (authoritative list from `mcp/src/index.ts`), grouped below by pillar. The example prompts are what you would type into Claude or Cursor; the LLM picks the tool.
 
-### Start here (cross-pillar)
+### Cross-pillar (start here)
 
 | Tool | What it does | Example prompt |
 |---|---|---|
-| `briefing` | One proactive daily standup for a domain: what changed across every pillar and the top three things to do about it. The best first call of the day. | "Give me the s33k briefing for getmasset.com." |
-| `insights` | The cross-pillar analyst. Joins SEO rank, traffic, AI referrals, and the bot estimate into rules-based findings and prioritized recommendations. | "What does s33k recommend I work on for getmasset.com?" |
+| `briefing` | One proactive daily standup for a domain: a headline, sections, and the top three things to do, across every pillar. The best first call of the day. | "Give me the s33k briefing for getmasset.com." |
+| `insights` | The cross-pillar analyst. Joins SEO rank, traffic, AI referrals, and engagement into rules-based findings and prioritized recommendations. | "What does s33k recommend I work on for getmasset.com?" |
+| `alerts` | The "what changed and what to do" standup. Compares this period to the prior one and surfaces notable rank moves, traffic swings, and new AI engines as a prioritized list, plus the single top priority. | "What changed on getmasset.com this week and what should I do?" |
+| `executive_summary` | The leadership one-glance report: headline numbers, top and top-converting channel, an SEO snapshot, AI visibility, a plain-English health line, and the single most important next action. | "Give me the executive summary for getmasset.com." |
+| `weekly_digest` | A week-in-review bundle: traffic, top entry pages, sessions per channel, AI-search sessions, and the keywords that moved most in rank. | "Give me the weekly digest for getmasset.com." |
 | `page_scoreboard` | Joins per-page traffic with tracked keywords and rank. Surfaces content-gap pages and keywords whose target page got no traffic. | "Show me the per-page scoreboard for getmasset.com." |
-| `alerts` | The "what changed and what to do" standup. Compares this period to the prior one and surfaces the notable rank moves, traffic swings, and new AI engines as a prioritized list, plus the single top priority. | "What changed on getmasset.com this week and what should I do?" |
-| `entry_pages` | Analyzes only the ENTRY (landing) pages where sessions start, joining first-touch source split to tracked rank, and flags pages that rank but do not land traffic. | "Analyze the entry pages for getmasset.com." |
+| `entry_pages` | Analyzes the ENTRY (landing) pages where sessions start, joining first-touch source split to tracked rank, and flags pages that rank but do not land traffic. | "Analyze the entry pages for getmasset.com." |
+| `entry_page_report` | The entry-page acquisition lens: first-touch sessions per landing page broken down by source channel, with the keywords/rank each page holds, exposing ranking-without-landing and landing-without-ranking gaps. | "Show getmasset.com entry pages with their first-touch source and the keywords each ranks for." |
+| `content_performance_report` | Ranks pages by pageviews, joining entries, optional goal conversions, and tracked keywords/rank per page. The cross-pillar content scorecard. | "Which content actually performs on getmasset.com?" |
+| `conversion_attribution` | The merged-pillar view only s33k can produce: attributes a goal's conversions and revenue by source (AI vs organic vs direct) and by tracked keyword, and names the money moves. | "What actually drives demo bookings and revenue on getmasset.com, SEO, direct, or AI?" |
+| `portfolio_summary` | Summarizes every domain on your account in one call: rank distribution, striking-distance quick-win count, and human plus AI-referral sessions per site. The multi-site / agency view. | "Give me a portfolio rollup of all my sites." |
 
-### SEO (rank tracking)
+### SEO (rank tracking and on-page)
 
 | Tool | What it does | Example prompt |
 |---|---|---|
-| `list_keywords` | Lists a domain's keywords with current Google rank, ranking URL, target page, and the last seven days of rank history. | "List the keywords I'm tracking for getmasset.com and their ranks." |
+| `list_keywords` | Lists a domain's keywords with current Google rank, ranking URL, target page, and recent rank history. | "List the keywords I'm tracking for getmasset.com and their ranks." |
 | `add_keyword` | Adds a keyword to track for a domain and queues a background SERP scrape. | "Track 'AI-ready DAM' for getmasset.com, mapped to the /software page." |
-| `update_keyword` | Updates keywords by ID: sets the target page and/or toggles sticky. | "Set the target page for keyword 14 to /software." |
+| `update_keyword` | Updates keywords by ID: sets the target page and/or toggles the sticky pin. | "Set the target page for keyword 14 to /software." |
 | `delete_keyword` | Permanently deletes one or more keywords by ID. | "Delete keywords 14 and 15." |
-| `refresh_keywords` | Triggers a fresh SERP scrape for specific keyword IDs or a whole domain. | "Refresh all rankings for getmasset.com." |
+| `refresh_keywords` | Re-scrapes live Google rankings for specific keyword IDs or a whole domain. | "Refresh all rankings for getmasset.com." |
+| `striking_distance` | The highest-ROI to-do list: keywords ranking just off page one (positions 4 to 30), where a small push tends to win, each with its position delta over history. | "What are my striking distance keywords for getmasset.com?" |
+| `seo_report` | A prebuilt one-call SEO snapshot: rank distribution, striking-distance quick wins, the biggest movers, and tracked keywords grouped by target page. | "Give me the full SEO report for getmasset.com." |
+| `site_audit` | Crawls a domain and returns a prioritized on-page / technical issue list (missing or bad titles, metas, H1s, duplicate titles, thin content), each with a severity. | "Audit getmasset.com for on-page SEO issues." |
+| `cannibalization_detection` | Finds keyword cannibalization where two of your own pages compete for the same term and split the equity, with the consolidation work to do. | "Is any content cannibalizing itself on getmasset.com?" |
+| `content_gap` | Crawls a named competitor and your site and returns the topics the competitor has pages for that you do not. | "What topics does highspot.com cover that getmasset.com does not?" |
+| `competitor_visibility` | Reads the stored SERP for every tracked keyword and tallies competitor share of voice, plus who outranks you per keyword. | "Who are my top competitors in search for getmasset.com?" |
+| `discover_pages` | Crawls a domain (sitemap first, then homepage links) and returns up to 25 pages so the LLM can map keywords to real target pages. | "Discover the main pages on getmasset.com so we can map keywords." |
 | `get_insight` | Reads Google Search Console insight (top pages, keywords, countries, stats). Requires GSC connected. | "What does Search Console show for getmasset.com this month?" |
 
 ### AEO (AI visibility)
@@ -48,29 +73,51 @@ s33k is fully controllable from an LLM over MCP. The server exposes 40 tools and
 | Tool | What it does | Example prompt |
 |---|---|---|
 | `ai_referrals` | Reports which AI engines are sending real visitors (per-engine visitors and page views, plus the AI share of referred traffic). | "Which AI engines are sending traffic to getmasset.com?" |
-| `ai_crawlers` | Reports which AI and search crawlers (GPTBot, ClaudeBot, PerplexityBot, Google-Extended, Bingbot, etc.) are crawling a domain. The leading indicator of AEO: AI bots crawl a site before they cite it. | "Are any AI crawlers hitting getmasset.com yet?" |
-| `ai_visibility` | The AI-visibility funnel. Joins crawl (an AI engine is learning about you) to referral (an AI engine is recommending you), per engine and per page, and flags crawled-not-cited pages and aware-not-recommending engines as the work to do. Uses only first-party behavior, never queries an LLM. | "How visible is getmasset.com in AI search, and where is the gap?" |
+| `ai_crawlers` | Reports which AI and search crawlers (GPTBot, ClaudeBot, PerplexityBot, Google-Extended, Bingbot, and more) are crawling a domain. The leading indicator of AEO: AI bots crawl a site before they cite it. | "Are any AI crawlers hitting getmasset.com yet?" |
+| `ai_visibility` | The AI-visibility funnel. Joins crawl (an AI engine is learning about you) to referral (an AI engine is recommending you), per engine and per page, and flags crawled-not-cited pages and aware-not-recommending engines. Uses only first-party behavior, never queries an LLM. | "How visible is getmasset.com in AI search, and where is the gap?" |
+| `aeo_report` | A prebuilt one-call AEO snapshot: AI referrals per engine, AI crawlers per bot, and the crawl-vs-referral funnel per engine. | "Give me the full AEO snapshot for getmasset.com." |
 
 ### Analytics (owned traffic, plus autocapture)
 
 | Tool | What it does | Example prompt |
 |---|---|---|
 | `traffic_summary` | Site-wide totals: pageviews, visitors, visits, bounce rate, average duration, pages per visit. | "How was traffic to getmasset.com over the last 30 days?" |
+| `human_traffic` | Estimates how much of a domain's traffic is likely human vs likely bot, using a bounce/duration heuristic with a known-human referrer floor. An estimate, not an exact count. | "How much of getmasset.com traffic is real humans vs bots?" |
+| `human_analytics` | Human-only analytics computed from s33k's own first-party pageviews (datacenter bots excluded by IP at ingest), with the exit and bounce rate the Umami view cannot produce. | "Show getmasset.com analytics for humans only, with bounce and exit rate." |
+| `channel_report` | Maps every session to a clean marketing channel (Organic Search, AI Search, Referral, Direct) with sessions and share per channel, and conversions per channel when you pass a goal. | "Break getmasset.com traffic down by marketing channel." |
+| `campaign_report` | Groups every session by UTM campaign (with utm_source / utm_medium splits) and reports sessions and share per campaign, plus conversions per campaign with a goal. | "Break getmasset.com traffic down by UTM campaign." |
+| `live_view` | A polled real-time snapshot of who is on the site right now: active visitors, the pages being viewed, source and country splits, and the most recent events. | "Who is on getmasset.com right now?" |
+| `funnel_analysis` | An ordered, multi-step funnel from first-party sessions with per-step drop-off, so you see WHERE people fall out. | "Build a funnel for getmasset.com from /pricing to /cart to checkout." |
+| `period_compare` | This period vs the immediately-preceding equal-length period, side by side, with delta and percent change per metric. | "Compare getmasset.com this 30 days vs the previous 30 days." |
 | `traffic_breakdown` | Breaks traffic down by a dimension: country, device, browser, os (every provider) or region, city, language, screen (Umami extras). | "Break getmasset.com traffic down by country." |
 | `traffic_timeseries` | Daily (or unit-grouped) time series of pageviews and visitors. | "Show me daily pageviews for getmasset.com this month." |
 | `top_events` | Custom/tracked events with their fire counts. | "What are the top tracked events on getmasset.com?" |
 | `engagement` | Session-quality engagement tiers (bounced / browsed / engaged) with session counts, percentages, and averages. | "How engaged are visitors to getmasset.com?" |
-| `human_traffic` | Estimates how much of a domain's traffic is likely human vs likely bot, using a bounce/duration heuristic with a known-human referrer floor. An estimate, not an exact per-session count. | "How much of getmasset.com traffic is real humans vs bots?" |
 
-The next five read from s33k's own autocapture event store (one script tag, zero per-element setup, cookieless and no PII). They do not need Umami:
+The next six read from s33k's own autocapture event store (one script tag, zero per-element setup, cookieless and no PII). They do not need Umami:
 
 | Tool | What it does | Example prompt |
 |---|---|---|
 | `top_clicks` | The most-clicked buttons and links by visible text and stable selector, with a per-page breakdown. Records that an element was clicked, never any typed value. | "What gets clicked most on getmasset.com?" |
 | `form_submissions` | Which forms get submitted, how often, and from which pages. Records that a form was submitted (its id/name), never field values. | "How many form submissions did getmasset.com get?" |
-| `scroll_depth` | How far visitors scroll per page (avg and max percent) plus a site-wide depth histogram. | "Which getmasset.com pages get read deeply vs abandoned at the top?" |
+| `scroll_depth` | How far visitors scroll per page plus a site-wide depth histogram. | "Which getmasset.com pages get read deeply vs abandoned at the top?" |
 | `page_engagement` | Active engagement (dwell) time per page, with the timer paused when the tab is hidden or the visitor goes idle, so it is real attention. | "Which getmasset.com pages actually hold attention?" |
+| `web_vitals` | Real-user Core Web Vitals (LCP, CLS, INP, FID, FCP, TTFB) at p75 scored against Google's field thresholds, with the slowest pages called out. | "How are getmasset.com's Core Web Vitals, and which pages are slowest?" |
 | `conversions_by_source` | Attributes conversions (autocaptured form submits by default) to the first-touch source: direct, organic-search, ai, or referral, with an approximate conversion rate per source. | "Which traffic sources drive conversions on getmasset.com?" |
+
+### Conversion goals and segments
+
+| Tool | What it does | Example prompt |
+|---|---|---|
+| `create_goal` | Defines a named conversion goal: a destination page reached (`page_reached`) or an autocaptured event fired (`event`, e.g. form_submit). | "Create a goal called Demo Booked when someone reaches /demo/thanks." |
+| `list_goals` | Lists the named conversion goals defined for a domain and their match rules. | "What conversion goals are set up for getmasset.com?" |
+| `delete_goal` | Deletes a named conversion goal by its id. | "Delete the Newsletter Signup goal." |
+| `goal_analytics` | Conversion rate and counts for a goal, filterable and groupable by source, landing page, device, country, or engagement, with revenue when the goal has a value. Human-only by default. | "What is my Demo Booked rate and revenue from organic search?" |
+| `suggest_goals` | Proposes ready-to-create goals by spotting a site's likely conversions (thank-you pages, demo / contact / signup pages). | "Suggest conversion goals for getmasset.com." |
+| `segment_save` | Saves a named, reusable filter set built from the composable analytics filters (channel, device, country, landing page, page, engagement, humanOnly). | "Save a segment called 'AI human converters' for AI traffic, humans only." |
+| `segment_list` | Lists the named segments defined for a domain and the filters each stores. | "What saved segments do I have for getmasset.com?" |
+| `segment_delete` | Deletes a named segment by its id. | "Delete the 'Mobile organic' segment." |
+| `segment_analytics` | Applies a saved segment by name and returns the human-analytics-style traffic summary with its filters applied. | "Show me the 'AI human converters' segment for getmasset.com." |
 
 ### Domains
 
@@ -83,8 +130,8 @@ The next five read from s33k's own autocapture event store (one script tag, zero
 
 | Tool | What it does | Example prompt |
 |---|---|---|
-| `discover_pages` | Crawls a domain (sitemap first, then homepage links) and returns up to 25 pages so the LLM can map keywords to real target pages in one shot. | "Discover the main pages on getmasset.com so we can map keywords." |
 | `onboard` | The one-call cold start: creates the domain, discovers and adds candidate keywords with rank scrapes queued, provisions a per-domain analytics website, and returns the tracking snippet plus per-platform install guides. | "Onboard getmasset.com from scratch." |
+| `setup_status` | Reports a domain's setup progress as a checklist (site added, keywords tracked, script live, goals defined, first report ready) with the single next step and the exact tool to call. | "Walk me through setting up s33k for getmasset.com." |
 | `install_instructions` | Returns the analytics tracking snippet and step-by-step install steps for the user's platform (WordPress, Webflow, Shopify, GTM, Next.js, raw HTML, and more) for an already-onboarded domain. | "How do I add the s33k tracking code on Webflow?" |
 
 ### Account, invites, and waitlist (multi-tenant mode)
@@ -102,7 +149,7 @@ These manage the invite-only multi-tenant system and are active when `MULTI_TENA
 
 | Tool | What it does | Example prompt |
 |---|---|---|
-| `security_facts` | Returns s33k's complete, source-cited trust facts: no model training, tenant isolation, encryption at rest, data ownership, cookieless/no-PII, and sub-processors. | "Is s33k safe? Does it train on my data?" |
+| `security_facts` | Returns s33k's complete, source-cited trust facts: no model training, tenant isolation, encryption at rest, data ownership, and cookieless/no-PII tracking. | "Is s33k safe? Does it train on my data?" |
 | `export_data` | Downloads everything s33k holds about your account as one JSON bundle. Never includes a secret. | "Export all of my s33k data." |
 | `delete_account_data` | Permanently and irreversibly deletes your entire account and all of its data. Requires the exact confirmation string. | "Delete my s33k account and all its data." |
 | `help` | Answers any question about s33k from its single authoritative product-knowledge layer. Reads no account data and never queries an LLM. | "What does ai_visibility do?" |
