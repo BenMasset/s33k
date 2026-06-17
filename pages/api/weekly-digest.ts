@@ -14,6 +14,7 @@ import {
 } from '../../utils/sessionize';
 import { attributeConversions, AttribKeyword, Opportunity } from '../../utils/conversion-attribution';
 import { computeRankMovers, MoverInput, RankMover } from '../../utils/rank-movers';
+import * as reportCache from '../../utils/report-cache';
 
 /*
  * ============================================================================
@@ -82,6 +83,15 @@ const getWeeklyDigest = async (req: NextApiRequest, res: NextApiResponse<WeeklyD
    // by-domain scoping below cannot leak across tenants).
    const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
    if (!owned) { return res.status(403).json({ error: 'Domain not found for this account' }); }
+
+   // Cache only AFTER the ownership check: the key is tenant-scoped (begins with the resolved
+   // account ID), so a HIT can only ever return this caller's own prior result. fresh=1 / nocache=1
+   // skip the read and recompute, then refill the slot.
+   const cacheKey = reportCache.buildReportCacheKey('weekly-digest', req, account);
+   if (!reportCache.wantsFresh(req)) {
+      const hit = reportCache.get(cacheKey) as WeeklyDigestResponse | undefined;
+      if (hit) { return res.status(200).json(hit); }
+   }
 
    try {
       const nowMs = Date.now();
@@ -202,7 +212,7 @@ const getWeeklyDigest = async (req: NextApiRequest, res: NextApiResponse<WeeklyD
          : `Week in review for ${domain} over ${period}. Human-only by default (${botVisitors} bot visitor(s) excluded; `
             + `pass includeBots=true for raw). ${goalRow ? `Conversions for "${goalRow.name}" included.` : 'Pass a goal to add conversions.'}`;
 
-      return res.status(200).json({
+      const payload: WeeklyDigestResponse = {
          domain,
          period,
          traffic: {
@@ -219,7 +229,10 @@ const getWeeklyDigest = async (req: NextApiRequest, res: NextApiResponse<WeeklyD
          topOpportunity,
          note,
          error: null,
-      });
+      };
+      // Only successful reports are cached (error/empty responses return before here).
+      reportCache.set(cacheKey, payload);
+      return res.status(200).json(payload);
    } catch (error) {
       console.log('[ERROR] Building Weekly Digest for ', domain, error);
       return res.status(400).json({ error: 'Error Building Weekly Digest for this Domain.' });

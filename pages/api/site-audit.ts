@@ -6,6 +6,7 @@ import { scopeWhere } from '../../utils/scope';
 import type Account from '../../database/models/account';
 import { crawlSite } from '../../utils/site-crawl';
 import { auditSite, SiteAuditResult } from '../../utils/site-audit';
+import * as reportCache from '../../utils/report-cache';
 
 // GET /api/site-audit?domain=...
 //
@@ -34,6 +35,15 @@ const getSiteAudit = async (req: NextApiRequest, res: NextApiResponse<Resp>, acc
    const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
    if (!owned) { return res.status(403).json({ error: 'Domain not found for this account' }); }
 
+   // Tenant-scoped cache (key begins with the resolved account ID), built only after the ownership
+   // gate so a HIT only ever returns this caller's own report. site-audit is the most expensive of
+   // these reports (a live crawl), so it benefits most. fresh=1 / nocache=1 bypass + refill.
+   const cacheKey = reportCache.buildReportCacheKey('site-audit', req, account);
+   if (!reportCache.wantsFresh(req)) {
+      const hit = reportCache.get(cacheKey) as Resp | undefined;
+      if (hit) { return res.status(200).json(hit); }
+   }
+
    try {
       const crawl = await crawlSite(domain);
       const report = auditSite(crawl.pages || []);
@@ -44,7 +54,11 @@ const getSiteAudit = async (req: NextApiRequest, res: NextApiResponse<Resp>, acc
             + `${report.bySeverity.high} high, ${report.bySeverity.medium} medium, ${report.bySeverity.low} low. `
             + 'Work the high-severity items (missing titles and H1s) first.';
       // crawl.error is surfaced (not thrown) so a partial/blocked crawl still returns a usable answer.
-      return res.status(200).json({ domain, report, note, error: crawl.error || null });
+      const payload: Resp = { domain, report, note, error: crawl.error || null };
+      // Do NOT cache a blocked/partial crawl: caching crawl.error for the TTL would pin a transient
+      // failure. Only a clean crawl (error null) is cached so a one-off block self-heals next call.
+      if (!crawl.error) { reportCache.set(cacheKey, payload); }
+      return res.status(200).json(payload);
    } catch (error) {
       console.log('[ERROR] Auditing site for ', domain, error);
       return res.status(400).json({ error: 'Error Auditing this Domain.' });

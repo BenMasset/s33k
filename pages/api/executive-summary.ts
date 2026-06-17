@@ -13,6 +13,7 @@ import { sessionize, applyFilters, EventLike, GoalDef, SessionAgg } from '../../
 import { attributeConversions, AttribKeyword, ChannelRow } from '../../utils/conversion-attribution';
 import { summarizeSeo, SeoKeywordInput, SeoSummary } from '../../utils/executive-summary-seo';
 import { getAnalyticsProvider, ReferralSource } from '../../utils/analytics';
+import * as reportCache from '../../utils/report-cache';
 
 /*
  * ============================================================================
@@ -104,6 +105,14 @@ const getExecutiveSummary = async (
    // only summarize a domain they own, and every read below inherits that scope.
    const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
    if (!owned) { return res.status(403).json({ error: 'Domain not found for this account' }); }
+
+   // Tenant-scoped cache (key begins with the resolved account ID), built only after ownership
+   // passes so a HIT only ever returns this caller's own report. fresh=1 / nocache=1 bypass + refill.
+   const cacheKey = reportCache.buildReportCacheKey('executive-summary', req, account);
+   if (!reportCache.wantsFresh(req)) {
+      const hit = reportCache.get(cacheKey) as ExecutiveSummaryResponse | undefined;
+      if (hit) { return res.status(200).json(hit); }
+   }
 
    try {
       // A goal is OPTIONAL for this report (the spec marks goal as goal?). When the caller names one
@@ -260,7 +269,7 @@ const getExecutiveSummary = async (
          note = `Traffic and SEO are accurate; AI-referral data was unavailable this run (${referralResult.error}).`;
       }
 
-      return res.status(200).json({
+      const payload: ExecutiveSummaryResponse = {
          domain,
          period,
          goal: goalMeta,
@@ -273,7 +282,10 @@ const getExecutiveSummary = async (
          nextAction,
          note,
          error: null,
-      });
+      };
+      // Only successful reports are cached (error paths return before here).
+      reportCache.set(cacheKey, payload);
+      return res.status(200).json(payload);
    } catch (error) {
       console.log('[ERROR] Building Executive Summary for ', domain, error);
       return res.status(400).json({ error: 'Error Building Executive Summary for this Domain.' });

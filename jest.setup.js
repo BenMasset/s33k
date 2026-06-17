@@ -64,3 +64,14 @@ jest.mock('dns/promises', () => ({
 
 // Enable Fetch Mocking
 enableFetchMocks();
+
+// The prebuilt-report routes (weekly-digest, executive-summary, seo-report, aeo-report,
+// site-audit) share a module-level in-memory TTL cache (utils/report-cache). Tests call a
+// handler many times with the SAME tenant + domain + params in one process and expect each
+// call to recompute, so without this a second case would receive the first case's cached
+// payload. Clearing before every test restores the cold-start behavior the route tests assume.
+// This is harness-only: production behavior is unchanged, and report-cache imports only the
+// dependency-free scope helper, so requiring it here drags no DB/ESM into the setup file.
+// eslint-disable-next-line global-require
+const reportCache = require('./utils/report-cache');
+beforeEach(() => { reportCache.clear(); });

@@ -8,6 +8,7 @@ import { scopeWhere } from '../../utils/scope';
 import type Account from '../../database/models/account';
 import { getAnalyticsProvider, ReferralSource } from '../../utils/analytics';
 import { periodStartMs } from '../../utils/period';
+import * as reportCache from '../../utils/report-cache';
 
 /*
  * ============================================================================
@@ -164,6 +165,15 @@ const getAeoReport = async (req: NextApiRequest, res: NextApiResponse<AeoReportR
          return res.status(403).json({ error: 'Domain not found for this account' });
       }
 
+      // Tenant-scoped cache (key begins with the resolved account ID), checked only after the
+      // ownership gate so a HIT only ever returns this caller's own report. fresh=1 / nocache=1
+      // bypass the read and refill below.
+      const cacheKey = reportCache.buildReportCacheKey('aeo-report', req, account);
+      if (!reportCache.wantsFresh(req)) {
+         const hit = reportCache.get(cacheKey) as AeoReportResponse | undefined;
+         if (hit) { return res.status(200).json(hit); }
+      }
+
       // --- Section 1: AI REFERRALS (the outcome). Same read as ai-referrals.ts.
       // The provider has already run classifyReferrer, so ReferralSource carries
       // isAI and the normalized engine label. We keep AI sources and aggregate by
@@ -286,7 +296,7 @@ const getAeoReport = async (req: NextApiRequest, res: NextApiResponse<AeoReportR
             + 'crawl is the leading indicator, referrals are the outcome. The gap is citation, not access.';
       }
 
-      return res.status(200).json({
+      const payload: AeoReportResponse = {
          domain,
          period,
          aiReferrals: {
@@ -302,7 +312,10 @@ const getAeoReport = async (req: NextApiRequest, res: NextApiResponse<AeoReportR
          crawlerError,
          note,
          error: null,
-      });
+      };
+      // Only successful reports are cached (the catch below returns its own 400 payload).
+      reportCache.set(cacheKey, payload);
+      return res.status(200).json(payload);
    } catch (error) {
       console.log('[ERROR] Building AEO Report for ', domain, error);
       return res.status(400).json({ error: 'Error Building AEO Report for this Domain.' });

@@ -6,6 +6,7 @@ import Domain from '../../database/models/domain';
 import Keyword from '../../database/models/keyword';
 import type Account from '../../database/models/account';
 import { findStrikingDistance, StrikingInput, StrikingKeyword } from '../../utils/striking-distance';
+import * as reportCache from '../../utils/report-cache';
 
 // GET /api/seo-report?domain=&min=4&max=30&moversLimit=5
 //
@@ -136,6 +137,14 @@ const getSeoReport = async (req: NextApiRequest, res: NextApiResponse<SeoReportR
    const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
    if (!owned) { return res.status(403).json({ error: 'Domain not found for this account' }); }
 
+   // Tenant-scoped cache (key begins with the resolved account ID), built only after the ownership
+   // gate so a HIT only ever returns this caller's own report. fresh=1 / nocache=1 bypass + refill.
+   const cacheKey = reportCache.buildReportCacheKey('seo-report', req, account);
+   if (!reportCache.wantsFresh(req)) {
+      const hit = reportCache.get(cacheKey) as SeoReportResponse | undefined;
+      if (hit) { return res.status(200).json(hit); }
+   }
+
    const min = parseBound(q.min, 4);
    const max = Math.max(min, parseBound(q.max, 30));
    // How many movers to show per side (improvements / drops). Bounded so a huge keyword set cannot
@@ -231,7 +240,7 @@ const getSeoReport = async (req: NextApiRequest, res: NextApiResponse<SeoReportR
             + `${strikingDistance.length} in striking distance (positions ${min} to ${max}), ${notInTop100} not in the top 100. `
             + 'Work strikingDistance first, then read topMovers for what changed and rankingPages for per-page coverage.';
 
-      return res.status(200).json({
+      const payload: SeoReportResponse = {
          domain,
          summary,
          strikingDistance,
@@ -239,7 +248,10 @@ const getSeoReport = async (req: NextApiRequest, res: NextApiResponse<SeoReportR
          rankingPages,
          note,
          error: null,
-      });
+      };
+      // Only successful reports are cached (error paths return before here).
+      reportCache.set(cacheKey, payload);
+      return res.status(200).json(payload);
    } catch (error) {
       console.log('[ERROR] Building SEO Report for ', domain, error);
       return res.status(400).json({ error: 'Error Building SEO Report for this Domain.' });

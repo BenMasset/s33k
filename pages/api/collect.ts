@@ -2,10 +2,36 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import db from '../../database/database';
 import Domain from '../../database/models/domain';
 import S33kEvent from '../../database/models/s33kEvent';
-import { sanitizeBatch, sanitizeSession } from '../../utils/event-sanitize';
+import { sanitizeBatch, sanitizeSession, sanitizeText } from '../../utils/event-sanitize';
 import { isLikelyBotUA, clientIp, rateLimitCollect } from '../../utils/collect-guards';
 import { isDatacenterIp } from '../../utils/datacenter-ip';
 import { deviceFromUA, countryFromHeaders } from '../../utils/request-segments';
+import { rateLimit } from '../../utils/rate-limit';
+import { MAX_EVENTS_PER_BATCH } from '../../utils/limits';
+
+// Per-IP request-rate brake for this PUBLIC endpoint, layered ON TOP of the existing
+// per-(ip+domain) EVENT-count limiter in collect-guards. The two guard different things:
+//   - rateLimitCollect (existing): bounds how many event ROWS one (ip+domain) can add per minute
+//     and swallows an over-cap batch as a no-op 200 so the client does not retry-storm.
+//   - this limiter (new): bounds how many REQUESTS one IP can make per minute, across all domains,
+//     and answers 429 so an abuser hammering the open endpoint gets an explicit back-off signal.
+// It counts REQUESTS, not events, on purpose: the existing resilience test deliberately floods the
+// EVENT limiter with ~650 events across ~13 requests from one IP, and counting events here at the
+// 600 default would wrongly 429 that test. Counting requests (~13) keeps it green while still
+// blunting a real flood. Both defaults are high enough that a normal busy site never trips either.
+const COLLECT_RATE_LIMIT = (() => {
+   const raw = parseInt(process.env.COLLECT_RATE_LIMIT || '', 10);
+   return Number.isFinite(raw) && raw > 0 ? raw : 600;
+})();
+const COLLECT_RATE_WINDOW_MS = (() => {
+   const raw = parseInt(process.env.COLLECT_RATE_WINDOW_MS || '', 10);
+   return Number.isFinite(raw) && raw > 0 ? raw : 60 * 1000;
+})();
+
+// Hard cap on the stored domain string. A domain name is short; anything longer is junk and must
+// never reach a TEXT column or a Domain lookup. Bounds the one route-level free-text field the
+// event sanitizer does not own.
+const MAX_DOMAIN_LEN = 255;
 
 // POST /api/collect  (PUBLIC, no API key)
 //
@@ -56,12 +82,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
 
 const collect = async (req: NextApiRequest, res: NextApiResponse<CollectResponse>) => {
    try {
+      // Per-IP request-rate brake FIRST, before any parsing/DB work, so a flood is cheapest to
+      // reject. x-forwarded-for first hop, falling back to the socket (clientIp handles both).
+      const ip = clientIp(req.headers as Record<string, string | string[] | undefined>, req.socket?.remoteAddress);
+      const rl = rateLimit(`collect:${ip}`, { limit: COLLECT_RATE_LIMIT, windowMs: COLLECT_RATE_WINDOW_MS });
+      if (!rl.allowed) {
+         res.setHeader('Retry-After', Math.ceil(rl.retryAfterMs / 1000));
+         return res.status(429).json({ error: 'Too many requests. Please slow down.' });
+      }
+
       const body = (req.body && typeof req.body === 'object') ? req.body : {};
-      const domain = typeof body.domain === 'string' ? body.domain.trim().toLowerCase() : '';
+      const domain = typeof body.domain === 'string'
+         ? sanitizeText(body.domain, MAX_DOMAIN_LEN).toLowerCase()
+         : '';
       const session = sanitizeSession(body.session);
 
       if (!domain) {
          return res.status(400).json({ error: 'Domain is Required!' });
+      }
+
+      // Payload-size brake: reject an oversized events array outright (413) before sanitizing or
+      // looping. This is distinct from the sanitizer's 50-event PROCESS cap; it stops a giant
+      // array from being walked at all. A normal client never approaches this ceiling.
+      const rawEventCount = Array.isArray(body.events) ? body.events.length : 0;
+      if (rawEventCount > MAX_EVENTS_PER_BATCH) {
+         return res.status(413).json({ error: 'Event batch too large.' });
       }
 
       // 2. Bot filtering: drop crawler / non-browser traffic up front.
@@ -82,8 +127,8 @@ const collect = async (req: NextApiRequest, res: NextApiResponse<CollectResponse
       }
 
       // 3. Rate limit per (ip + domain). A flood is silently accepted-as-zero (200) so the
-      // client does not retry-storm; it just stops being recorded for the window.
-      const ip = clientIp(req.headers as Record<string, string | string[] | undefined>, req.socket?.remoteAddress);
+      // client does not retry-storm; it just stops being recorded for the window. (`ip` is
+      // already derived at the top of this function for the per-IP request brake.)
       if (!rateLimitCollect(ip, domain, clean.length)) {
          return res.status(200).json({ recorded: 0, skipped: submitted, error: null });
       }
