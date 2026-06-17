@@ -2328,6 +2328,184 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// campaign_report
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'campaign_report',
+   {
+      title: 'Sessions by UTM campaign (with utm_source / utm_medium breakdown)',
+      description:
+         'Groups every first-party session by its UTM campaign (utm_campaign) and reports sessions '
+         + '(and the share of total) per campaign, plus a breakdown of sessions by utm_source and '
+         + 'utm_medium. This answers "how is each marketing campaign performing". When a goal is '
+         + 'supplied (by name or id), it also adds conversions and conversion rate PER campaign, so you '
+         + 'see in one view which campaign sends traffic AND which campaign actually converts. Sessions '
+         + 'with no utm_campaign roll into a single "(none)" bucket (always listed last) so untagged '
+         + 'traffic stays visible and totals reconcile. Human-only by default; set includeBots=true to '
+         + 'fold datacenter/bot sessions back in. Requires the s33k.js tracking script installed and '
+         + 'UTM-tagged landing URLs.',
+      inputSchema: {
+         domain: z.string().describe('The domain, e.g. "getmasset.com".'),
+         period: z.string().optional().describe('Reporting window, e.g. "30d", "7d". Defaults to "30d".'),
+         goal: z.string().optional().describe('Optional goal NAME (or pass goalId) to add per-campaign conversions, e.g. "Demo Booked".'),
+         goalId: z.number().optional().describe('Optional goal id (alternative to goal name).'),
+         includeBots: z.boolean().optional().describe('Include datacenter/bot sessions. Defaults to human-only.'),
+      },
+   },
+   async ({ domain, period, goal, goalId, includeBots }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         if (goal) { query.goal = goal; }
+         if (goalId !== undefined) { query.goalId = String(goalId); }
+         if (includeBots) { query.includeBots = 'true'; }
+         const data = await s33kFetch('/api/campaign-report', { query });
+         return jsonResult({
+            domain: data.domain,
+            period: data.period,
+            goal: data.goal,
+            report: data.report,
+            botSessionsExcluded: data.botSessionsExcluded,
+            note: data.note,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// segment_save
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'segment_save',
+   {
+      title: 'Save a named, reusable analytics segment',
+      description:
+         'Save a NAMED, reusable filter set, e.g. "AI human converters" or "Mobile organic", so it can '
+         + 'be applied by name with segment_analytics instead of re-specifying the same filters on every '
+         + 'call. Pass any of the composable filters: channel (direct|referral|organic-search|ai; aliases '
+         + 'seo/aio accepted), device (mobile|tablet|desktop), country (ISO), landingPage (exact path), '
+         + 'page (a path the session viewed), engagement (engaged|bounced), and humanOnly (exclude '
+         + 'datacenter bots). At least one filter is required. Unknown keys are ignored.',
+      inputSchema: {
+         domain: z.string().describe('The domain the segment belongs to, e.g. "getmasset.com".'),
+         name: z.string().describe('The segment name used in questions, e.g. "AI human converters".'),
+         channel: z.string().optional().describe('Traffic channel: direct, referral, organic-search/seo, ai/aio.'),
+         device: z.string().optional().describe('Device: mobile, tablet, or desktop.'),
+         country: z.string().optional().describe('ISO country code (where geo data is available).'),
+         landingPage: z.string().optional().describe('Restrict to sessions whose landing page is this exact path.'),
+         page: z.string().optional().describe('Restrict to sessions that viewed this path.'),
+         engagement: z.enum(['engaged', 'bounced']).optional().describe('Restrict by engagement quality.'),
+         humanOnly: z.boolean().optional().describe('Exclude datacenter/bot sessions. Defaults to human-only when applied.'),
+      },
+   },
+   async ({ domain, name, channel, device, country, landingPage, page, engagement, humanOnly }) => {
+      try {
+         const filters: Record<string, unknown> = {};
+         if (channel) { filters.channel = channel; }
+         if (device) { filters.device = device; }
+         if (country) { filters.country = country; }
+         if (landingPage) { filters.landingPage = landingPage; }
+         if (page) { filters.page = page; }
+         if (engagement) { filters.engagement = engagement; }
+         if (humanOnly !== undefined) { filters.humanOnly = humanOnly; }
+         const data = await s33kFetch('/api/segments', { method: 'POST', body: { domain, name, filters } });
+         return jsonResult({ segment: data.segment, error: data.error });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// segment_list
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'segment_list',
+   {
+      title: 'List saved analytics segments',
+      description: 'List the named, reusable segments defined for a domain, with their stored filter rules.',
+      inputSchema: {
+         domain: z.string().describe('The domain whose segments to list, e.g. "getmasset.com".'),
+      },
+   },
+   async ({ domain }) => {
+      try {
+         const data = await s33kFetch('/api/segments', { query: { domain } });
+         return jsonResult({ segments: data.segments, error: data.error });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// segment_delete
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'segment_delete',
+   {
+      title: 'Delete a saved segment',
+      description: 'Delete a named segment by its id (get ids from segment_list).',
+      inputSchema: {
+         id: z.number().describe('The segment id to delete.'),
+      },
+   },
+   async ({ id }) => {
+      try {
+         const data = await s33kFetch('/api/segments', { method: 'DELETE', query: { id: String(id) } });
+         return jsonResult({ removed: data.removed, error: data.error });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// segment_analytics
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'segment_analytics',
+   {
+      title: 'Traffic analytics for a saved segment (applied by name)',
+      description:
+         'Apply a SAVED segment by name (or id) and get the same human-analytics-style traffic summary, '
+         + 'so you do not re-specify the filters each time. Returns visitors, pageviews, bounceRatePct, '
+         + 'pagesPerSession, entryPages, and exitPages for the saved cut, plus bot transparency. The '
+         + 'segment\'s stored filters are the only filters applied; human-only unless the segment saved '
+         + 'humanOnly=false. Use segment_save to create one first, or segment_list to see the names.',
+      inputSchema: {
+         domain: z.string().describe('The domain, e.g. "getmasset.com".'),
+         segment: z.string().optional().describe('The segment NAME (or pass segmentId), e.g. "AI human converters".'),
+         segmentId: z.number().optional().describe('The segment id (alternative to segment name).'),
+         period: z.string().optional().describe('Reporting window, e.g. "30d", "7d". Defaults to "30d".'),
+      },
+   },
+   async ({ domain, segment, segmentId, period }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (segment) { query.segment = segment; }
+         if (segmentId !== undefined) { query.segmentId = String(segmentId); }
+         if (period) { query.period = period; }
+         const data = await s33kFetch('/api/segment-analytics', { query });
+         return jsonResult({
+            segment: data.segment,
+            filters: data.filters,
+            summary: data.summary,
+            entryPages: data.entryPages,
+            exitPages: data.exitPages,
+            note: data.note,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // MCP resources: listable/readable knowledge docs.
 //
 // These expose the SAME single product-knowledge source the `help` tool reads, so a client can
@@ -2410,7 +2588,7 @@ async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
    process.stderr.write(
-      `s33k-mcp connected (base URL: ${BASE_URL}). 62 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
+      `s33k-mcp connected (base URL: ${BASE_URL}). 67 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
    );
 }
 

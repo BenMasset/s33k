@@ -22,7 +22,7 @@ import { attributeConversions, AttribKeyword } from '../../utils/conversion-attr
 type Resp = {
    domain?: string,
    period?: string,
-   goal?: { id: number, name: string },
+   goal?: { id: number, name: string, value: number | null },
    attribution?: ReturnType<typeof attributeConversions>,
    note?: string,
    error?: string | null,
@@ -68,6 +68,10 @@ const getAttribution = async (req: NextApiRequest, res: NextApiResponse<Resp>, a
          matchPage: (g.match_page as string) || null,
          matchMode: g.match_mode === 'exact' ? 'exact' : 'prefix',
       };
+      // When the goal carries a monetary value, attributeConversions adds revenue fields; a value-less
+      // goal (null) keeps the prior shape. Number(null/undefined/non-numeric) is filtered to null.
+      const rawValue = g.value;
+      const goalValue = typeof rawValue === 'number' && Number.isFinite(rawValue) && rawValue >= 0 ? rawValue : null;
 
       const includeBots = q.includeBots === 'true';
       const filters = { humanOnly: !includeBots, ...parseSegmentFilters(q as Record<string, unknown>) };
@@ -89,18 +93,21 @@ const getAttribution = async (req: NextApiRequest, res: NextApiResponse<Resp>, a
          return { keyword: String(p.keyword), position: Number(p.position) || 0, targetPage: String(p.target_page || '') };
       });
 
-      const attribution = attributeConversions(sessions, goal, keywords);
+      const attribution = attributeConversions(sessions, goal, keywords, goalValue);
       // The filter note must match what actually ran: only claim "Human-only" when bots were filtered.
       const filterNote = filters.humanOnly ? 'Human-only by default' : 'Bots included';
+      const revenueNote = attribution.totalRevenue !== null
+         ? ` Worth ~${attribution.totalRevenue} at ${attribution.goalValue} per conversion.`
+         : '';
       const note = attribution.totalSessions === 0
          ? 'No first-party sessions in this window/filter yet. Install the s33k.js tracking script so traffic and conversions flow in.'
          : `${attribution.conversions} conversion(s) attributed across ${attribution.byChannel.length} channel(s) and `
-            + `${attribution.byKeyword.length} keyword-bearing page(s). ${filterNote}.`;
+            + `${attribution.byKeyword.length} keyword-bearing page(s). ${filterNote}.${revenueNote}`;
 
       return res.status(200).json({
          domain,
          period,
-         goal: { id: g.ID as number, name: String(g.name) },
+         goal: { id: g.ID as number, name: String(g.name), value: goalValue },
          attribution,
          note,
          error: null,

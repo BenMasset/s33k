@@ -144,6 +144,33 @@
       }
       var sessionSource = classifySource();
 
+      // ===================== Campaign tags (UTM), computed once ============================
+      // Parse the five standard UTM params from THIS page's querystring once at session start and
+      // carry them at the top level of every batch so the server can attribute traffic and
+      // conversions to a campaign without any GA4-style setup. Read once: the landing URL is the
+      // campaign-bearing one, and a later in-site navigation without UTMs must not blank them out.
+      //
+      // PRIVACY: only these five fixed campaign keys are read. We never copy the whole querystring
+      // (which can carry PII like ?email=...), only the named utm_* values, each trimmed/truncated
+      // exactly like every other label. The server re-sanitizes and length-caps them again.
+      var UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'];
+      function readUtm() {
+         var out = {};
+         try {
+            var params = new URLSearchParams(window.location.search || '');
+            for (var i = 0; i < UTM_KEYS.length; i++) {
+               var key = UTM_KEYS[i];
+               var val = params.get(key);
+               if (val) {
+                  var cleaned = clean(val, MAX_LABEL);
+                  if (cleaned) { out[key] = cleaned; }
+               }
+            }
+         } catch (e) { /* swallow: a missing URLSearchParams just means no campaign tags */ }
+         return out;
+      }
+      var sessionUtm = readUtm();
+
       // ===================== Text + selector helpers (PII-safe) ============================
       function clean(text, max) {
          if (text == null) { return ''; }
@@ -228,7 +255,15 @@
       function payload(events) {
          // source is a top-level, session-level classification (or bare host). The server
          // re-sanitizes it and stamps it on every stored event.
-         return JSON.stringify({ domain: domain, session: session, source: sessionSource, events: events });
+         var body = { domain: domain, session: session, source: sessionSource, events: events };
+         // Campaign tags are top-level and session-level too. Each utm_* key is included only when
+         // the landing URL carried it, so an untagged visit sends nothing extra (keeps the payload
+         // tiny and the server stores null for absent tags).
+         for (var i = 0; i < UTM_KEYS.length; i++) {
+            var key = UTM_KEYS[i];
+            if (sessionUtm[key]) { body[key] = sessionUtm[key]; }
+         }
+         return JSON.stringify(body);
       }
       function flush(useBeacon) {
          try {

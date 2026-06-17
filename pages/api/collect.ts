@@ -33,6 +33,30 @@ const COLLECT_RATE_WINDOW_MS = (() => {
 // event sanitizer does not own.
 const MAX_DOMAIN_LEN = 255;
 
+// Hard cap on each stored UTM / campaign value. A campaign tag is short by convention; anything
+// longer is junk or a smuggled blob. Sanitized with the same sanitizeText (control-char strip +
+// whitespace collapse) used for every other free-text field so a UTM value can never carry a
+// newline-injected payload into storage. The UTM tags are session-level (parsed once from the
+// landing URL by the client), so they are sanitized ONCE per request and stamped on every row.
+const MAX_UTM_LEN = 150;
+
+// The five standard UTM keys, batch-level. Order is fixed so the read surface and the model line up.
+const UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'] as const;
+type UtmKey = typeof UTM_KEYS[number];
+
+// Extract + sanitize the five session-level UTM tags from the request body. Each value is
+// sanitized and length-capped like the other string fields; a missing/blank/non-string value
+// becomes null (untagged). Returns a record keyed by the exact model column names. Never throws.
+const utmFromBody = (body: Record<string, unknown>): Record<UtmKey, string | null> => {
+   const out = {} as Record<UtmKey, string | null>;
+   for (const key of UTM_KEYS) {
+      const raw = body[key];
+      const value = typeof raw === 'string' ? sanitizeText(raw, MAX_UTM_LEN) : '';
+      out[key] = value || null;
+   }
+   return out;
+};
+
 // POST /api/collect  (PUBLIC, no API key)
 //
 // This is the autocapture ingest. The s33k.js client on a customer's website posts batches of
@@ -96,6 +120,9 @@ const collect = async (req: NextApiRequest, res: NextApiResponse<CollectResponse
          ? sanitizeText(body.domain, MAX_DOMAIN_LEN).toLowerCase()
          : '';
       const session = sanitizeSession(body.session);
+      // Session-level UTM / campaign tags, sanitized once and stamped on every row below. Absent
+      // tags are null, so behavior is byte-identical for the existing UTM-less clients and tests.
+      const utm = utmFromBody(body);
 
       if (!domain) {
          return res.status(400).json({ error: 'Domain is Required!' });
@@ -165,6 +192,9 @@ const collect = async (req: NextApiRequest, res: NextApiResponse<CollectResponse
                value: ev.value,
                session,
                source: ev.source,
+               // Session-level UTM tags spread onto every row (utm_source ... utm_content),
+               // each already null when the landing URL carried no UTM params.
+               ...utm,
                is_bot: isBot,
                device,
                country,

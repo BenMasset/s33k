@@ -177,7 +177,12 @@ describe('request_feature safety net (crossCheckCapability)', () => {
       const novel = [
          'export my keyword rank history as a downloadable CSV file',
          'monitor my Core Web Vitals LCP and CLS over time',
-         'post my analytics summary into a Slack channel automatically',
+         // Was "post my analytics summary into a Slack channel automatically", but segment_analytics
+         // and campaign_report now legitimately own "analytics summary" vocabulary, so the only novel
+         // part of that phrase was the Slack/automation integration. Swapped for an unambiguously
+         // novel request (CRM integration, which no tool provides) so the test still proves a genuinely
+         // new feature ask stays stored rather than pushed back.
+         'integrate s33k with my CRM like Salesforce or HubSpot to sync conversions',
       ];
       for (const request of novel) {
          const match = crossCheckCapability(request);

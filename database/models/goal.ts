@@ -52,6 +52,11 @@ class Goal extends Model {
    @Column({ type: DataType.STRING, allowNull: false, defaultValue: 'prefix' })
    match_mode!: string;
 
+   // Optional money worth of one completion of this goal (e.g. 250 for a Demo Booked). NULL = no
+   // value set, in which case conversion reads omit revenue. When set, revenue = conversions * value.
+   @Column({ type: DataType.FLOAT, allowNull: true, defaultValue: null })
+   value!: number | null;
+
    @Column({ type: DataType.STRING, allowNull: false })
    created!: string;
 }

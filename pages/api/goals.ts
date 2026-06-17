@@ -8,11 +8,17 @@ import type Account from '../../database/models/account';
 
 // /api/goals  -  CRUD for NAMED conversion goals (see database/models/goal.ts).
 //   GET    ?domain=            list a domain's goals
-//   POST   { domain, name, kind, matchValue, matchPage?, matchMode? }   create a goal
+//   POST   { domain, name, kind, matchValue, matchPage?, matchMode?, value? }   create a goal
+//   PUT    ?id=  { value }     update a goal's monetary value (set, or clear with null)
 //   DELETE ?id=                delete a goal
 // Every operation is ownership-gated (scopeWhere) so a tenant only ever touches its own goals.
+// value is the optional money one completion is worth: it powers the revenue fields on the
+// conversion reads (totalRevenue, revenue per channel / per keyword). Omit it and behavior is
+// unchanged.
 
-type GoalsResponse = { goals?: Record<string, unknown>[], goal?: Record<string, unknown>, removed?: number, error?: string | null };
+type GoalsResponse = {
+   goals?: Record<string, unknown>[], goal?: Record<string, unknown>, removed?: number, updated?: number, error?: string | null,
+};
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<GoalsResponse>) {
    await db.sync();
@@ -20,6 +26,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
    if (!authorized) { return res.status(401).json({ error }); }
    if (req.method === 'GET') { return listGoals(req, res, account); }
    if (req.method === 'POST') { return createGoal(req, res, account); }
+   if (req.method === 'PUT') { return updateGoal(req, res, account); }
    if (req.method === 'DELETE') { return deleteGoal(req, res, account); }
    return res.status(405).json({ error: 'Method Not Allowed.' });
 }
@@ -36,6 +43,17 @@ const listGoals = async (req: NextApiRequest, res: NextApiResponse<GoalsResponse
    }
 };
 
+// Parse an optional monetary goal value. Returns { ok, value } where value is a finite number >= 0
+// or null when omitted. A present-but-invalid value (non-numeric, negative, NaN, Infinity) is a
+// hard error so a bad value never silently becomes null and skews revenue math.
+const parseGoalValue = (raw: unknown): { ok: boolean, value: number | null } => {
+   if (raw === undefined || raw === null || raw === '') { return { ok: true, value: null }; }
+   let n = NaN;
+   if (typeof raw === 'number') { n = raw; } else if (typeof raw === 'string') { n = Number(raw.trim()); }
+   if (!Number.isFinite(n) || n < 0) { return { ok: false, value: null }; }
+   return { ok: true, value: n };
+};
+
 const createGoal = async (req: NextApiRequest, res: NextApiResponse<GoalsResponse>, account?: Account | null) => {
    const body = (req.body && typeof req.body === 'object') ? req.body : {};
    const domain = typeof body.domain === 'string' ? body.domain.trim() : '';
@@ -44,9 +62,13 @@ const createGoal = async (req: NextApiRequest, res: NextApiResponse<GoalsRespons
    const matchValue = typeof body.matchValue === 'string' ? body.matchValue.trim() : '';
    const matchPage = typeof body.matchPage === 'string' && body.matchPage.trim() ? body.matchPage.trim() : null;
    const matchMode = body.matchMode === 'exact' ? 'exact' : 'prefix';
+   const parsedValue = parseGoalValue(body.value);
 
    if (!domain || !name || !matchValue) {
       return res.status(400).json({ error: 'domain, name, and matchValue are required.' });
+   }
+   if (!parsedValue.ok) {
+      return res.status(400).json({ error: 'value must be a finite number >= 0 if provided.' });
    }
    try {
       // Ownership gate: the caller must own the domain before defining a goal on it.
@@ -61,12 +83,32 @@ const createGoal = async (req: NextApiRequest, res: NextApiResponse<GoalsRespons
          match_value: matchValue,
          match_page: kind === 'event' ? matchPage : null,
          match_mode: matchMode,
+         value: parsedValue.value,
          created: new Date().toJSON(),
       });
       return res.status(201).json({ goal: goal.get({ plain: true }) as Record<string, unknown> });
    } catch (error) {
       console.log('[ERROR] Creating goal: ', error);
       return res.status(400).json({ error: 'Error Creating Goal.' });
+   }
+};
+
+// Update a goal's monetary value (the only mutable field today). Ownership-gated via scopeWhere, so
+// a tenant can only update its own goals. Pass value=null (or omit) to clear it.
+const updateGoal = async (req: NextApiRequest, res: NextApiResponse<GoalsResponse>, account?: Account | null) => {
+   const id = typeof req.query.id === 'string' ? parseInt(req.query.id, 10) : NaN;
+   if (!Number.isFinite(id)) { return res.status(400).json({ error: 'Goal id is required.' }); }
+   const body = (req.body && typeof req.body === 'object') ? req.body : {};
+   const parsedValue = parseGoalValue(body.value);
+   if (!parsedValue.ok) {
+      return res.status(400).json({ error: 'value must be a finite number >= 0 if provided.' });
+   }
+   try {
+      const [updated] = await Goal.update({ value: parsedValue.value }, { where: { ID: id, ...scopeWhere(account) } });
+      return res.status(200).json({ updated });
+   } catch (error) {
+      console.log('[ERROR] Updating goal: ', error);
+      return res.status(400).json({ error: 'Error Updating Goal.' });
    }
 };
 

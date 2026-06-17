@@ -334,10 +334,12 @@ const capabilities: CapabilityEntry[] = [
       category: 'analytics',
       title: 'Conversion analytics for a goal',
       description: 'Conversion rate and counts for a named goal, computed from first-party sessions. Filter by traffic source, landing page, device, '
-         + 'country, or engagement, and group the rate by any of those. Human-only by default; datacenter bots excluded.',
+         + 'country, or engagement, and group the rate by any of those. Human-only by default; datacenter bots excluded. When the goal carries a '
+         + 'monetary value, it also reports revenue (conversions times value) overall and per group, so you get dollars next to the rate.',
       whenToUse: 'Use for any conversion-rate question: the rate for a goal, the rate for one segment, how many converters came from a given source, '
-         + 'or a comparison of the rate across sources. It also answers "of converters, the most common landing page" by grouping on landing page.',
-      examplePrompt: 'What is my Demo Booked conversion rate from organic search, human only?',
+         + 'or a comparison of the rate across sources. It also answers "of converters, the most common landing page" by grouping on landing page, and '
+         + '"what is this conversion worth" once the goal has a value set.',
+      examplePrompt: 'What is my Demo Booked conversion rate and revenue from organic search, human only?',
    },
    {
       id: 'conversion_attribution',
@@ -347,10 +349,13 @@ const capabilities: CapabilityEntry[] = [
       description: 'The merged-pillar view only s33k can produce: attributes a goal\'s conversions by acquisition source (including AI search '
          + 'versus organic versus direct), by tracked keyword (each keyword credited with the conversions its target page drove, with its Google '
          + 'rank, so keywords are ranked by conversions not clicks), and into the money moves (pages that rank but do not convert, pages that convert '
-         + 'but do not rank, and where AI out-converts organic).',
-      whenToUse: 'Use to connect effort to outcomes: which keywords, pages, and sources actually drive conversions, whether AI search converts, and '
-         + 'the single highest-value move. This is the join across SEO rank, analytics sources, and conversion goals that no standalone tool has.',
-      examplePrompt: 'For getmasset.com, what actually drives demo bookings, SEO, direct, or AI, and what should I fix?',
+         + 'but do not rank, and where AI out-converts organic). When the goal carries a monetary value, it also reports revenue (conversions times '
+         + 'value) overall, per channel, and per keyword-bearing page, so you can see which sources and pages drive the most money, not just the most '
+         + 'conversions.',
+      whenToUse: 'Use to connect effort to outcomes: which keywords, pages, and sources actually drive conversions and revenue, whether AI search '
+         + 'converts, and the single highest-value move. This is the join across SEO rank, analytics sources, and conversion goals that no standalone '
+         + 'tool has.',
+      examplePrompt: 'For getmasset.com, what actually drives demo bookings and revenue, SEO, direct, or AI, and what should I fix?',
    },
    {
       id: 'suggest_goals',
@@ -784,6 +789,61 @@ const capabilities: CapabilityEntry[] = [
          + 'open-source/self-hostable, and cookieless/no-PII tracking.',
       whenToUse: 'Use whenever a user asks whether s33k is safe, private, or trustworthy, or whether it trains on or shares their data.',
       examplePrompt: 'Is s33k safe? Do you train on my data?',
+   },
+   {
+      id: 'campaign_report',
+      toolName: 'campaign_report',
+      category: 'analytics',
+      title: 'Sessions by UTM campaign',
+      description: 'Groups every first-party session by its UTM campaign (utm_campaign) and reports sessions and share of total per campaign, with a '
+         + 'breakdown of sessions by utm_source and utm_medium. With an optional goal, it adds conversions and conversion rate per campaign. Untagged '
+         + 'sessions roll into a single "(none)" bucket (listed last) so totals reconcile. Human-only by default; datacenter bots excluded.',
+      whenToUse: 'Use for the "how is each marketing campaign performing" question and its follow-ups: which campaign sends the most traffic, which '
+         + 'converts best (pass a goal), and how source/medium split. It is the UTM-campaign rollup of acquisition, distinct from channel_report (clean '
+         + 'channel buckets) and conversion_attribution (the keyword/page join). Requires UTM-tagged landing URLs.',
+      examplePrompt: 'Break getmasset.com traffic down by UTM campaign for the last 30 days, and show which campaign converts my Demo Booked goal best.',
+   },
+   {
+      id: 'segment_save',
+      toolName: 'segment_save',
+      category: 'analytics',
+      title: 'Save a named, reusable segment',
+      description: 'Save a named filter set (e.g. "AI human converters") once, built from the composable analytics filters: channel '
+         + '(direct|referral|organic-search|ai; aliases seo/aio), device, country, landingPage, page, engagement, and humanOnly. At least one '
+         + 'filter is required; unknown keys are ignored.',
+      whenToUse: 'Use to name a filter combination you ask for repeatedly, so you can apply it by name with segment_analytics instead of '
+         + 're-specifying every filter.',
+      examplePrompt: 'Save a segment called "AI human converters" for AI traffic, humans only.',
+   },
+   {
+      id: 'segment_list',
+      toolName: 'segment_list',
+      category: 'analytics',
+      title: 'List saved segments',
+      description: 'List the named, reusable segments defined for a domain and the filter rules each one stores.',
+      whenToUse: 'Use to see which saved segments exist before applying or deleting one.',
+      examplePrompt: 'What saved segments do I have for getmasset.com?',
+   },
+   {
+      id: 'segment_delete',
+      toolName: 'segment_delete',
+      category: 'analytics',
+      title: 'Delete a saved segment',
+      description: 'Delete a named segment by its id (get ids from segment_list).',
+      whenToUse: 'Use to remove a saved segment you no longer need.',
+      examplePrompt: 'Delete the "Mobile organic" segment.',
+   },
+   {
+      id: 'segment_analytics',
+      toolName: 'segment_analytics',
+      category: 'analytics',
+      title: 'Traffic analytics for a saved segment',
+      description: 'Apply a saved segment by name (or id) and get the same human-analytics-style traffic summary (visitors, pageviews, bounce '
+         + 'rate, pages per session, entry and exit pages) with the segment\'s stored filters applied. Human-only unless the segment saved '
+         + 'humanOnly=false.',
+      whenToUse: 'Use to pull a reusable filtered traffic view by name, instead of re-specifying channel/device/country/engagement/humanOnly on '
+         + 'every call.',
+      examplePrompt: 'Show me the "AI human converters" segment for getmasset.com over the last 30 days.',
    },
 ];
 

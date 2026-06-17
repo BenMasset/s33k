@@ -22,7 +22,10 @@ import { SessionAgg, GoalDef, sessionConverted } from './sessionize';
 
 export type AttribKeyword = { keyword: string, position: number, targetPage: string };
 
-export type ChannelRow = { channel: string, sessions: number, conversions: number, conversionRatePct: number };
+// revenue is OPTIONAL on every row: present only when the goal carries a monetary value, and equal
+// to that row's conversions * goal value. A value-less goal omits revenue everywhere, so the shape
+// is byte-for-byte unchanged for goals that have no value.
+export type ChannelRow = { channel: string, sessions: number, conversions: number, conversionRatePct: number, revenue?: number };
 export type KeywordRow = {
    keyword: string,
    position: number,
@@ -30,6 +33,7 @@ export type KeywordRow = {
    conversions: number,
    landingSessions: number,
    conversionRatePct: number,
+   revenue?: number,
 };
 export type Opportunity = {
    type: 'rank-not-converting' | 'converting-not-ranking' | 'ai-outconverts-search',
@@ -43,6 +47,12 @@ export type ConversionAttribution = {
    totalSessions: number,
    conversions: number,
    conversionRatePct: number,
+   // The money worth of one conversion of this goal, when set (else null). When set, totalRevenue is
+   // conversions * goalValue and every byChannel / byKeyword row carries its own revenue. When null,
+   // totalRevenue is null and the revenue fields are omitted from the rows, so a value-less goal
+   // reports exactly as before.
+   goalValue: number | null,
+   totalRevenue: number | null,
    byChannel: ChannelRow[],
    byKeyword: KeywordRow[],
    // Each keyword is credited with the FULL conversions of its target PAGE, so two keywords sharing
@@ -53,6 +63,9 @@ export type ConversionAttribution = {
 };
 
 const rate = (c: number, s: number): number => (s > 0 ? Math.round((1000 * c) / s) / 10 : 0);
+
+// Round money to cents so conversions * a fractional value never reports a long float tail.
+const money = (n: number): number => Math.round(n * 100) / 100;
 
 // Normalize a path for comparison: strip trailing slash, lowercase, drop the origin if a full URL.
 const normPath = (p: string): string => {
@@ -67,13 +80,18 @@ const normPath = (p: string): string => {
  * @param {SessionAgg[]} sessions - Already filtered (e.g. human-only) sessionized traffic.
  * @param {GoalDef} goal - The conversion goal to attribute.
  * @param {AttribKeyword[]} keywords - The domain's tracked keywords with target page + rank.
+ * @param {number|null} [goalValue] - Optional money worth of one conversion. When a finite number
+ *   >= 0, revenue fields (totalRevenue + per-channel + per-keyword revenue) are added; when null or
+ *   omitted, revenue is null/omitted and the result is byte-for-byte the value-less shape.
  * @returns {ConversionAttribution}
  */
 export const attributeConversions = (
    sessions: SessionAgg[],
    goal: GoalDef,
    keywords: AttribKeyword[],
+   goalValue: number | null = null,
 ): ConversionAttribution => {
+   const hasValue = typeof goalValue === 'number' && Number.isFinite(goalValue) && goalValue >= 0;
    const totalSessions = sessions.length;
    const converters = sessions.filter((s) => sessionConverted(s, goal));
    const conversions = converters.length;
@@ -87,7 +105,11 @@ export const attributeConversions = (
       if (sessionConverted(s, goal)) { b.conversions += 1; }
    }
    const byChannel: ChannelRow[] = Array.from(chBucket.entries())
-      .map(([channel, v]) => ({ channel, sessions: v.sessions, conversions: v.conversions, conversionRatePct: rate(v.conversions, v.sessions) }))
+      .map(([channel, v]) => {
+         const r: ChannelRow = { channel, sessions: v.sessions, conversions: v.conversions, conversionRatePct: rate(v.conversions, v.sessions) };
+         if (hasValue) { r.revenue = money(v.conversions * (goalValue as number)); }
+         return r;
+      })
       .sort((a, b) => b.conversions - a.conversions || b.sessions - a.sessions);
 
    // By keyword (the SEO merge: credit each keyword's target page with the conversions of sessions
@@ -99,7 +121,7 @@ export const attributeConversions = (
          const target = normPath(k.targetPage);
          const landed = sessions.filter((s) => normPath(s.landingPage) === target);
          const conv = landed.filter((s) => sessionConverted(s, goal)).length;
-         return {
+         const r: KeywordRow = {
             keyword: k.keyword,
             position: k.position,
             targetPage: k.targetPage,
@@ -107,6 +129,8 @@ export const attributeConversions = (
             landingSessions: landed.length,
             conversionRatePct: rate(conv, landed.length),
          };
+         if (hasValue) { r.revenue = money(conv * (goalValue as number)); }
+         return r;
       })
       .sort((a, b) => b.conversions - a.conversions || a.position - b.position);
 
@@ -159,6 +183,8 @@ export const attributeConversions = (
       totalSessions,
       conversions,
       conversionRatePct: rate(conversions, totalSessions),
+      goalValue: hasValue ? (goalValue as number) : null,
+      totalRevenue: hasValue ? money(conversions * (goalValue as number)) : null,
       byChannel,
       byKeyword: byKeyword.filter((k) => k.landingSessions > 0),
       byKeywordNote: 'Per-keyword conversions are per-page credits and may overlap when keywords share a target page. '

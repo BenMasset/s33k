@@ -28,6 +28,9 @@ const mockEvent = S33kEventModel as unknown as { findAll: jest.Mock };
 const mockAuthorize = authorizeFn as unknown as jest.Mock;
 
 const row = (data: Record<string, unknown>) => ({ get: () => data, ...data });
+// Build a goal row, defaulting the match fields, so each mock only states what it varies (esp. value).
+const goalRow = (over: Record<string, unknown> = {}) =>
+   row({ ID: 1, name: 'Demo', kind: 'page_reached', match_value: '/thanks', match_page: null, match_mode: 'prefix', ...over });
 const pv = (session: string, source: string, is_bot: boolean, page: string, created: string) =>
    row({ session, source, is_bot, device: 'desktop', country: 'US', page, type: 'pageview', created });
 
@@ -44,7 +47,7 @@ beforeEach(() => {
    jest.clearAllMocks();
    mockAuthorize.mockResolvedValue({ authorized: true, account: null, error: undefined });
    mockDomain.findOne.mockResolvedValue(row({ ID: 1, domain: 'getmasset.com' }));
-   mockGoal.findOne.mockResolvedValue(row({ ID: 1, name: 'Demo', kind: 'page_reached', match_value: '/thanks', match_page: null, match_mode: 'prefix' }));
+   mockGoal.findOne.mockResolvedValue(goalRow());
    // A organic-search human -> converts; B ai human -> no; C direct human -> converts; D organic BOT -> converts.
    mockEvent.findAll.mockResolvedValue([
       pv('A', 'organic-search', false, '/', '2026-06-16T10:00:00Z'),
@@ -70,7 +73,7 @@ describe('GET /api/goal-analytics', () => {
    it('groupBy=channel breaks the rate down by source', async () => {
       const res = makeRes();
       await handler(makeReq({ domain: 'getmasset.com', goal: 'Demo', groupBy: 'channel' }), res);
-      const groups: any[] = res.payload.groups;
+      const { groups }: { groups: any[] } = res.payload;
       expect(groups.find((g) => g.key === 'organic-search').conversionRatePct).toBe(100);
       expect(groups.find((g) => g.key === 'ai').conversionRatePct).toBe(0);
       expect(groups.find((g) => g.key === 'direct').conversionRatePct).toBe(100);
@@ -95,5 +98,32 @@ describe('GET /api/goal-analytics', () => {
       const res = makeRes();
       await handler(makeReq({ domain: 'getmasset.com', goal: 'Nope' }), res);
       expect(res.statusCode).toBe(404);
+   });
+
+   it('omits revenue when the goal has no value (unchanged shape)', async () => {
+      const res = makeRes();
+      await handler(makeReq({ domain: 'getmasset.com', goal: 'Demo' }), res);
+      expect(res.payload.goalValue).toBeNull();
+      expect(res.payload.totalRevenue).toBeNull();
+      expect(res.payload.goal.value).toBeNull();
+   });
+
+   it('reports revenue (conversions * value) when the goal has a value', async () => {
+      mockGoal.findOne.mockResolvedValue(goalRow({ value: 250 }));
+      const res = makeRes();
+      await handler(makeReq({ domain: 'getmasset.com', goal: 'Demo' }), res);
+      expect(res.payload.conversions).toBe(2);
+      expect(res.payload.goalValue).toBe(250);
+      expect(res.payload.totalRevenue).toBe(500); // 2 conversions * 250
+      expect(res.payload.goal.value).toBe(250);
+   });
+
+   it('adds per-group revenue with groupBy when the goal has a value', async () => {
+      mockGoal.findOne.mockResolvedValue(goalRow({ value: 100 }));
+      const res = makeRes();
+      await handler(makeReq({ domain: 'getmasset.com', goal: 'Demo', groupBy: 'channel' }), res);
+      const { groups }: { groups: any[] } = res.payload;
+      expect(groups.find((g) => g.key === 'organic-search').revenue).toBe(100); // 1 conversion * 100
+      expect(groups.find((g) => g.key === 'ai').revenue).toBe(0); // 0 conversions
    });
 });

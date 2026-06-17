@@ -1,7 +1,9 @@
 /** goals route: create (ownership-gated), list, delete. */
 jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
 jest.mock('../../database/models/domain', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
-jest.mock('../../database/models/goal', () => ({ __esModule: true, default: { create: jest.fn(), findAll: jest.fn(), destroy: jest.fn() } }));
+jest.mock('../../database/models/goal', () => ({
+   __esModule: true, default: { create: jest.fn(), findAll: jest.fn(), destroy: jest.fn(), update: jest.fn() },
+}));
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
 
 // eslint-disable-next-line import/first
@@ -16,7 +18,7 @@ import GoalModel from '../../database/models/goal';
 import authorizeFn from '../../utils/authorize';
 
 const mockDomain = DomainModel as unknown as { findOne: jest.Mock };
-const mockGoal = GoalModel as unknown as { create: jest.Mock, findAll: jest.Mock, destroy: jest.Mock };
+const mockGoal = GoalModel as unknown as { create: jest.Mock, findAll: jest.Mock, destroy: jest.Mock, update: jest.Mock };
 const mockAuthorize = authorizeFn as unknown as jest.Mock;
 
 const row = (data: Record<string, unknown>) => ({ get: () => data, ...data });
@@ -72,5 +74,49 @@ describe('/api/goals', () => {
       const res = makeRes();
       await handler(makeReq({ method: 'DELETE', query: { id: '5' } }), res);
       expect(res.payload.removed).toBe(1);
+   });
+
+   it('persists a numeric value on create', async () => {
+      mockDomain.findOne.mockResolvedValue(row({ ID: 1, domain: 'getmasset.com' }));
+      mockGoal.create.mockResolvedValue(row({ ID: 5, name: 'Demo', value: 250 }));
+      const res = makeRes();
+      const body = { domain: 'getmasset.com', name: 'Demo', kind: 'page_reached', matchValue: '/thanks', value: 250 };
+      await handler(makeReq({ method: 'POST', body }), res);
+      expect(res.statusCode).toBe(201);
+      expect(mockGoal.create).toHaveBeenCalledWith(expect.objectContaining({ value: 250 }));
+   });
+
+   it('persists value null when value is omitted on create (unchanged behavior)', async () => {
+      mockDomain.findOne.mockResolvedValue(row({ ID: 1, domain: 'getmasset.com' }));
+      mockGoal.create.mockResolvedValue(row({ ID: 5, name: 'Demo' }));
+      const res = makeRes();
+      await handler(makeReq({ method: 'POST', body: { domain: 'getmasset.com', name: 'Demo', kind: 'page_reached', matchValue: '/thanks' } }), res);
+      expect(res.statusCode).toBe(201);
+      expect(mockGoal.create).toHaveBeenCalledWith(expect.objectContaining({ value: null }));
+   });
+
+   it('400s on a negative or non-numeric value (no create)', async () => {
+      mockDomain.findOne.mockResolvedValue(row({ ID: 1, domain: 'getmasset.com' }));
+      const res = makeRes();
+      const body = { domain: 'getmasset.com', name: 'Demo', kind: 'page_reached', matchValue: '/thanks', value: -5 };
+      await handler(makeReq({ method: 'POST', body }), res);
+      expect(res.statusCode).toBe(400);
+      expect(mockGoal.create).not.toHaveBeenCalled();
+   });
+
+   it('updates a goal value via PUT', async () => {
+      mockGoal.update.mockResolvedValue([1]);
+      const res = makeRes();
+      await handler(makeReq({ method: 'PUT', query: { id: '5' }, body: { value: 99 } }), res);
+      expect(res.payload.updated).toBe(1);
+      expect(mockGoal.update).toHaveBeenCalledWith(expect.objectContaining({ value: 99 }), expect.anything());
+   });
+
+   it('clears a goal value via PUT with null', async () => {
+      mockGoal.update.mockResolvedValue([1]);
+      const res = makeRes();
+      await handler(makeReq({ method: 'PUT', query: { id: '5' }, body: { value: null } }), res);
+      expect(res.payload.updated).toBe(1);
+      expect(mockGoal.update).toHaveBeenCalledWith(expect.objectContaining({ value: null }), expect.anything());
    });
 });

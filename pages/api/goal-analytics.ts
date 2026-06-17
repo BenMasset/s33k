@@ -27,15 +27,22 @@ import {
 // (default TRUE, set includeBots=true to fold bots back in). groupBy: channel | landingPage |
 // exitPage | device | country (default none).
 
-type Group = { key: string, sessions: number, conversions: number, conversionRatePct: number };
+// revenue is OPTIONAL per group: present only when the goal carries a value, and equal to that
+// group's conversions * goal value. A value-less goal omits revenue and the shape is unchanged.
+type Group = { key: string, sessions: number, conversions: number, conversionRatePct: number, revenue?: number };
 type GoalAnalyticsResponse = {
    domain?: string,
    period?: string,
-   goal?: { id: number, name: string, kind: string, match: string },
+   goal?: { id: number, name: string, kind: string, match: string, value: number | null },
    filters?: Record<string, unknown>,
    totalSessions?: number,
    conversions?: number,
    conversionRatePct?: number,
+   // When the goal carries a monetary value: goalValue echoes it and totalRevenue is
+   // conversions * goalValue. When the goal has no value, both are null and the per-group revenue
+   // field is omitted, so existing value-less responses are byte-for-byte unchanged.
+   goalValue?: number | null,
+   totalRevenue?: number | null,
    botSessionsExcluded?: number,
    groupBy?: string,
    groups?: Group[],
@@ -52,6 +59,8 @@ const GROUP_KEYS: Record<string, (s: SessionAgg) => string> = {
 };
 
 const rate = (conversions: number, sessions: number): number => (sessions > 0 ? Math.round((1000 * conversions) / sessions) / 10 : 0);
+// Round money to cents so conversions * a fractional value never reports a long float tail.
+const money = (n: number): number => Math.round(n * 100) / 100;
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<GoalAnalyticsResponse>) {
    await db.sync();
@@ -96,6 +105,11 @@ const getGoalAnalytics = async (req: NextApiRequest, res: NextApiResponse<GoalAn
          matchPage: (g.match_page as string) || null,
          matchMode: g.match_mode === 'exact' ? 'exact' : 'prefix',
       };
+      // When the goal carries a value, ALSO report revenue (conversions * value). A value-less goal
+      // (null) keeps the prior shape: no goalValue/totalRevenue and no per-group revenue.
+      const rawValue = g.value;
+      const goalValue = typeof rawValue === 'number' && Number.isFinite(rawValue) && rawValue >= 0 ? rawValue : null;
+      const hasValue = goalValue !== null;
 
       // Build filters from the query (composable; unset = no-op). humanOnly defaults TRUE.
       const includeBots = q.includeBots === 'true';
@@ -131,7 +145,11 @@ const getGoalAnalytics = async (req: NextApiRequest, res: NextApiResponse<GoalAn
             if (sessionConverted(s, goal)) { b.conversions += 1; }
          }
          groups = Array.from(bucket.entries())
-            .map(([key, v]) => ({ key, sessions: v.sessions, conversions: v.conversions, conversionRatePct: rate(v.conversions, v.sessions) }))
+            .map(([key, v]) => {
+               const grp: Group = { key, sessions: v.sessions, conversions: v.conversions, conversionRatePct: rate(v.conversions, v.sessions) };
+               if (hasValue) { grp.revenue = money(v.conversions * (goalValue as number)); }
+               return grp;
+            })
             .sort((a, b) => b.conversions - a.conversions || b.sessions - a.sessions)
             .slice(0, 50);
       }
@@ -140,9 +158,11 @@ const getGoalAnalytics = async (req: NextApiRequest, res: NextApiResponse<GoalAn
       const filterNote = filters.humanOnly
          ? `Human-only by default${botSessionsExcluded ? ` (${botSessionsExcluded} bot session(s) excluded)` : ''}`
          : 'Bots included';
+      const totalRevenue = hasValue ? money(conversions * (goalValue as number)) : null;
+      const revenueNote = totalRevenue !== null ? ` Worth ~${totalRevenue} at ${goalValue} per conversion.` : '';
       const note = totalSessions === 0
          ? 'No first-party sessions in this window/filter yet. Install the s33k.js tracking script so pageviews and events flow in.'
-         : `${conversions} of ${totalSessions} session(s) completed "${g.name}". ${filterNote}.`;
+         : `${conversions} of ${totalSessions} session(s) completed "${g.name}". ${filterNote}.${revenueNote}`;
 
       const matchDesc = goal.kind === 'event'
          ? `${goal.matchValue}${goal.matchPage ? ` on ${goal.matchPage}` : ''}`
@@ -151,11 +171,13 @@ const getGoalAnalytics = async (req: NextApiRequest, res: NextApiResponse<GoalAn
       return res.status(200).json({
          domain,
          period,
-         goal: { id: g.ID as number, name: String(g.name), kind: goal.kind, match: matchDesc },
+         goal: { id: g.ID as number, name: String(g.name), kind: goal.kind, match: matchDesc, value: goalValue },
          filters,
          totalSessions,
          conversions,
          conversionRatePct: rate(conversions, totalSessions),
+         goalValue,
+         totalRevenue,
          botSessionsExcluded,
          groupBy,
          groups,

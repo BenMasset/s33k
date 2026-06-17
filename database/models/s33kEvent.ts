@@ -87,6 +87,26 @@ class S33kEvent extends Model {
    @Column({ type: DataType.STRING, allowNull: true, defaultValue: null })
    source!: string | null;
 
+   // Standard UTM / campaign tags parsed from the landing page URL's querystring once per session
+   // by the client and carried on the batch, then sanitized + length-capped at ingest and stamped
+   // on every event row. Campaign labels, never PII. NULL when the landing URL had no UTM tags.
+   // TEXT (not STRING) to match the migration columns and avoid VARCHAR(255) overflow on Postgres
+   // from a long tagged URL. Column names byte-match the migration (utm_source ... utm_content).
+   @Column({ type: DataType.TEXT, allowNull: true, defaultValue: null })
+   utm_source!: string | null;
+
+   @Column({ type: DataType.TEXT, allowNull: true, defaultValue: null })
+   utm_medium!: string | null;
+
+   @Column({ type: DataType.TEXT, allowNull: true, defaultValue: null })
+   utm_campaign!: string | null;
+
+   @Column({ type: DataType.TEXT, allowNull: true, defaultValue: null })
+   utm_term!: string | null;
+
+   @Column({ type: DataType.TEXT, allowNull: true, defaultValue: null })
+   utm_content!: string | null;
+
    @Column({ type: DataType.STRING, allowNull: false })
    created!: string;
 }
