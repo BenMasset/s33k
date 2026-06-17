@@ -19,8 +19,11 @@ import { Table, Model, Column, DataType, PrimaryKey } from 'sequelize-typescript
 })
 
 class Goal extends Model {
+   // Column is "ID" (matching the create-goal-table migration, which keys the column "ID"). Do NOT
+   // add field: 'id': on Postgres "id" != "ID" (case-sensitive), so a lowercase mapping queries a
+   // column that does not exist and every Goal read throws. SQLite hides this (case-insensitive).
    @PrimaryKey
-   @Column({ type: DataType.INTEGER, allowNull: false, primaryKey: true, autoIncrement: true, field: 'id' })
+   @Column({ type: DataType.INTEGER, allowNull: false, primaryKey: true, autoIncrement: true })
    ID!: number;
 
    @Column({ type: DataType.STRING, allowNull: false })

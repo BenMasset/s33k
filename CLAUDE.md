@@ -90,6 +90,15 @@ hard-won lesson, so the next session never relearns it.
   DEPENDENCY-FREE: no DB-model imports. Importing a model drags sequelize/uuid ESM into jest and
   breaks suites. That exact regression happened and was fixed. Do not reintroduce it.
 
+### Model column names must match the migration EXACTLY (Postgres is case-sensitive)
+- A new model used `field: 'id'` (lowercase) while its create-table migration keyed the column `ID`.
+  On SQLite (case-insensitive) it worked; on Postgres `"id"` != `"ID"`, so every read of that model
+  threw "column does not exist" and the route returned a generic 400. Rule: the model attribute's
+  column name (the `field:` if set, else the attribute name) must byte-match the column the
+  migration creates. Also register every new model in `database/database.ts`'s `models` array, and
+  remember migrations run on boot via `entrypoint.sh` (`sequelize-cli db:migrate`), which does NOT
+  exit on failure, so a broken migration lets the server boot with a missing/mismatched table.
+
 ### Import provider/util classes STATICALLY, never via runtime `require('./x').Named`
 - A dynamic `const { UmamiProvider } = require('./umami')` resolved to `undefined` in the Next
   STANDALONE production bundle (`new UmamiProvider()` threw "is not a constructor"), even though
