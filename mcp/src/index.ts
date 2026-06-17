@@ -1014,6 +1014,198 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// period_compare
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'period_compare',
+   {
+      title: 'This period vs last period, side by side, with delta and percent change',
+      description:
+         'Compares the key analytics metrics for a window against the immediately-preceding '
+         + 'equal-length window: humanVisitors, pageviews, bounceRatePct, and (when a goal is '
+         + 'supplied) conversions and conversionRatePct. For each metric it returns both windows\' '
+         + 'values plus the absolute delta and the percent change, so you see in one view whether this '
+         + 'period is better or worse than last period and by how much. The prior window is derived '
+         + 'automatically from the period (a 30d window compares against the 30 days before it). '
+         + 'pctChange is null when the prior window had zero (growth from zero is undefined; render it '
+         + 'as "new"). Human-only by default; set includeBots=true to fold datacenter/bot sessions '
+         + 'back in. Requires the s33k.js tracking script installed.',
+      inputSchema: {
+         domain: z.string().describe('The domain, e.g. "getmasset.com".'),
+         period: z.string().optional().describe('Reporting window, e.g. "30d", "7d". Defaults to "30d". The prior equal-length window is derived from it.'),
+         goal: z.string().optional().describe('Optional goal NAME (or pass goalId) to add conversions and conversion rate to the comparison.'),
+         goalId: z.number().optional().describe('Optional goal id (alternative to goal name).'),
+         includeBots: z.boolean().optional().describe('Include datacenter/bot sessions. Defaults to human-only.'),
+      },
+   },
+   async ({ domain, period, goal, goalId, includeBots }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         if (goal) { query.goal = goal; }
+         if (goalId !== undefined) { query.goalId = String(goalId); }
+         if (includeBots) { query.includeBots = 'true'; }
+         const data = await s33kFetch('/api/period-compare', { query });
+         return jsonResult({
+            domain: data.domain,
+            period: data.period,
+            goal: data.goal,
+            report: data.report,
+            botSessionsExcluded: data.botSessionsExcluded,
+            note: data.note,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// site_audit
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'site_audit',
+   {
+      title: 'Prioritized on-page SEO issue list',
+      description:
+         'Crawls a domain and returns a prioritized on-page / technical SEO issue list. Runs pure rules over '
+         + 'every crawled page: missing title, title too long (over 60) or too short (under 20), missing meta '
+         + 'description, meta too long (over 160) or too short (under 50), missing H1, multiple H1s, duplicate '
+         + 'titles shared across pages, and thin content. Each issue returns the page, the issue, a severity '
+         + '(high / medium / low), and a detail line with the fix. Sorted by severity so the most damaging '
+         + 'items (missing titles and H1s) surface first. Pure rules over the crawl. Never queries an LLM.',
+      inputSchema: {
+         domain: z.string().describe('The domain to audit, e.g. "getmasset.com".'),
+      },
+   },
+   async ({ domain }) => {
+      try {
+         const data = await s33kFetch('/api/site-audit', { query: { domain } });
+         return jsonResult({ domain: data.domain, report: data.report, note: data.note, error: data.error });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// cannibalization_detection
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'cannibalization_detection',
+   {
+      title: 'Keyword cannibalization detection',
+      description:
+         'Find keyword cannibalization for a domain: the cases where Google cannot decide which of your pages should rank for a term, so the pages '
+         + 'compete and split the equity instead of one ranking well. Pure join over tracked keywords, conservative on purpose (only clear cases). '
+         + 'Flags three signals: (a) intent split, a keyword ranks on a url that is not its target page; (b) shared ranking url, distinct keywords '
+         + 'ranking on the SAME url while targeting different pages; (c) near-duplicate terms ranking on DIFFERENT urls. Returns flagged groups, each '
+         + 'with the conflict type, the competing keywords/urls, and a one-line why. Never queries an LLM.',
+      inputSchema: {
+         domain: z.string().describe('The domain to scan for keyword cannibalization, e.g. "getmasset.com".'),
+      },
+   },
+   async ({ domain }) => {
+      try {
+         const data = await s33kFetch('/api/cannibalization', { query: { domain } });
+         return jsonResult({
+            domain: data.domain,
+            total: data.total,
+            groups: data.groups,
+            note: data.note,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// content_gap
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'content_gap',
+   {
+      title: 'Content gap vs a competitor',
+      description:
+         'Finds the topics a COMPETITOR covers on its site that YOU do not, so you know what to write next. Crawls the competitor to derive their '
+         + 'topics (a topic = the page slug as a phrase, or the title head before a separator), crawls your domain (plus your tracked keywords and '
+         + 'target pages as extra covered topics) to derive what you already cover, and returns the competitor topics with NO close match in yours: '
+         + 'the gaps. Each gap carries the competitor url, the derived topic phrase, and the page path/title, sorted by how content-rich the '
+         + 'competitor page looks (excerpt length), richest first. Pure crawl-based string comparison. Never queries an LLM and uses no external API.',
+      inputSchema: {
+         domain: z.string().describe('Your domain, the one you want gaps found FOR, e.g. "getmasset.com". Must be tracked in s33k.'),
+         competitor: z.string().describe('The competitor domain to compare against, e.g. "highspot.com". Only crawled, does not need to be tracked.'),
+      },
+   },
+   async ({ domain, competitor }) => {
+      try {
+         const data = await s33kFetch('/api/content-gap', { query: { domain, competitor } });
+         return jsonResult({
+            domain: data.domain,
+            competitor: data.competitor,
+            total: data.total,
+            gaps: data.gaps,
+            note: data.note,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// content_performance_report
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'content_performance_report',
+   {
+      title: 'Which content actually performs (pages ranked by pageviews, with acquisition + conversion + SEO)',
+      description:
+         'A prebuilt report that ranks a domain\'s pages by pageviews and, per page, joins the signals that say whether the page is doing real '
+         + 'work: pageviews (the rank), entries (sessions that LANDED on the page, the acquisition signal), optional goal conversions and rate '
+         + '(view-attributed over the sessions that SAW the page), and the tracked keywords whose target page is that page (what the page ranks for, '
+         + 'with current Google position). This is the cross-pillar content scorecard, traffic + acquisition + conversion + SEO, per page, in one '
+         + 'view. A tracked page that gets zero traffic still appears (ranking-without-traffic) with empty entries. Human-only by default; set '
+         + 'includeBots=true to fold datacenter/bot sessions back in. Sorted by pageviews, capped by limit. Never queries an LLM; returns structured '
+         + 'data for your own LLM to narrate. Requires the s33k.js tracking script installed.',
+      inputSchema: {
+         domain: z.string().describe('The domain, e.g. "getmasset.com".'),
+         period: z.string().optional().describe('Reporting window, e.g. "30d", "7d". Defaults to "30d".'),
+         goal: z.string().optional().describe('Optional goal NAME (or pass goalId) to add view-attributed conversions per page, e.g. "Demo Booked".'),
+         goalId: z.number().optional().describe('Optional goal id (alternative to goal name).'),
+         includeBots: z.boolean().optional().describe('Include datacenter/bot sessions. Defaults to human-only.'),
+         limit: z.number().optional().describe('Max pages to return (top N by pageviews). Defaults to 25, clamped to 1..200.'),
+      },
+   },
+   async ({ domain, period, goal, goalId, includeBots, limit }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         if (goal) { query.goal = goal; }
+         if (goalId !== undefined) { query.goalId = String(goalId); }
+         if (includeBots) { query.includeBots = 'true'; }
+         if (limit !== undefined) { query.limit = String(limit); }
+         const data = await s33kFetch('/api/content-performance', { query });
+         return jsonResult({
+            domain: data.domain,
+            period: data.period,
+            goal: data.goal,
+            report: data.report,
+            botSessionsExcluded: data.botSessionsExcluded,
+            note: data.note,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // traffic_breakdown
 // ---------------------------------------------------------------------------
 server.registerTool(
@@ -2039,7 +2231,7 @@ async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
    process.stderr.write(
-      `s33k-mcp connected (base URL: ${BASE_URL}). 53 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
+      `s33k-mcp connected (base URL: ${BASE_URL}). 58 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
    );
 }
 

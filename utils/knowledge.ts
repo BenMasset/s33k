@@ -442,6 +442,72 @@ const capabilities: CapabilityEntry[] = [
       examplePrompt: 'For getmasset.com, show my entry pages with where their first-touch traffic comes from and the keywords each one ranks for.',
    },
    {
+      id: 'period_compare',
+      toolName: 'period_compare',
+      category: 'analytics',
+      title: 'This period vs last period, side by side',
+      description: 'Compares the key analytics metrics for a window against the immediately-preceding equal-length window: humanVisitors, pageviews, '
+         + 'bounceRatePct, and (with an optional goal) conversions and conversion rate. For each metric it returns both windows plus the delta and percent '
+         + 'change. The prior window is derived automatically from the period (30d compares against the 30 days before it). Human-only by default.',
+      whenToUse: 'Use for any "is this period better or worse than last period, and by how much" question: traffic up or down week over week, did bounce '
+         + 'rate improve, did conversions grow. pctChange is null when the prior window had zero, which means "new" (growth from zero is undefined). For a '
+         + 'time series of one metric use timeseries; for a single window snapshot use human_analytics.',
+      examplePrompt: 'Compare getmasset.com this 30 days vs the previous 30 days. Are visitors, pageviews, and my Demo Booked conversions up or down?',
+   },
+   {
+      id: 'site_audit',
+      toolName: 'site_audit',
+      category: 'seo',
+      title: 'Prioritized on-page SEO issue list',
+      description: 'Crawls a domain and returns a prioritized on-page / technical SEO issue list from pure rules: missing title, title too long (over '
+         + '60) or short (under 20), missing meta description, meta too long (over 160) or short (under 50), missing H1, multiple H1s, duplicate titles '
+         + 'across pages, and thin content. Each issue carries a severity (high / medium / low) and a detail line, sorted by severity. No LLM.',
+      whenToUse: 'Use to get a ranked on-page SEO to-do list for a site: the missing-title and missing-H1 high-severity items first, then meta and '
+         + 'length issues. Reach for this when someone asks what is wrong with their pages or how to improve their on-page SEO.',
+      examplePrompt: 'Audit getmasset.com for on-page SEO issues and tell me what to fix first.',
+   },
+   {
+      id: 'cannibalization_detection',
+      toolName: 'cannibalization_detection',
+      category: 'seo',
+      title: 'Keyword cannibalization: pages competing for the same term',
+      description: 'Finds keyword cannibalization, where Google cannot decide which of your pages should rank for a term so they compete and split '
+         + 'the equity. Pure conservative join over tracked keywords. Flags three clear signals: a keyword ranking on a url that is not its target '
+         + 'page (intent split), distinct keywords ranking on the same url but targeting different pages (shared url), and near-duplicate terms '
+         + 'ranking on different urls (duplicate term). Each group returns the competing keywords/urls and a one-line why. No LLM.',
+      whenToUse: 'Use when rankings underperform or feel unstable and you suspect two of your own pages are fighting for the same intent. It surfaces '
+         + 'the consolidation work: merge, redirect, or de-target one page so a single page owns each term. Detection is deliberately strict, so a '
+         + 'hit is a real conflict, not noise.',
+      examplePrompt: 'Is any of my content cannibalizing itself on getmasset.com, where two pages compete for the same keyword?',
+   },
+   {
+      id: 'content_gap',
+      toolName: 'content_gap',
+      category: 'seo',
+      title: 'Topics a competitor covers that you do not',
+      description: 'Finds content gaps against a competitor: crawls the competitor to derive their per-page topics (slug-as-phrase or the title head '
+         + 'before a separator), crawls your site plus your tracked keywords/target pages to derive what you already cover, and returns the competitor '
+         + 'topics with no close match in yours. Each gap has the competitor url and derived topic, sorted by how content-rich the competitor page '
+         + 'looks (excerpt length). Pure crawl-based string comparison, no LLM, no external API.',
+      whenToUse: 'Use to decide what to write next: surface the topics a named competitor has pages for and you do not, prioritized by how substantial '
+         + 'the competitor page looks. Reach for this for "what content am I missing vs X" or "what is competitor X ranking on that I am not covering".',
+      examplePrompt: 'What topics does highspot.com cover that getmasset.com does not?',
+   },
+   {
+      id: 'content_performance_report',
+      toolName: 'content_performance_report',
+      category: 'cross-pillar',
+      title: 'Which content actually performs',
+      description: 'A prebuilt report ranking a domain\'s pages by pageviews, joining per page: entries (sessions that landed there), optional '
+         + 'view-attributed goal conversions and rate (over sessions that saw the page), and the tracked keywords whose target page is that page '
+         + '(with current Google rank). The cross-pillar content scorecard: traffic + acquisition + conversion + SEO, per page. A tracked page with '
+         + 'zero traffic still appears (ranking-without-traffic). Human-only by default; no LLM, returns structured data to narrate.',
+      whenToUse: 'Use for the "which of my pages actually perform" question: see top pages by traffic, then whether each one acquires (entries), '
+         + 'converts (pass a goal), and what it ranks for, all in one report. Distinct from entry_pages (focused only on landing pages) and '
+         + 'page_scoreboard, this ranks by pageviews and view-attributes conversions to every page a converting session saw.',
+      examplePrompt: 'Show me which content actually performs on getmasset.com over the last 30 days: top pages by traffic, how many sessions they land, what they rank for, and which convert my Demo Booked goal.',
+   },
+   {
       id: 'top_clicks',
       toolName: 'top_clicks',
       category: 'analytics',
@@ -466,9 +532,11 @@ const capabilities: CapabilityEntry[] = [
       toolName: 'scroll_depth',
       category: 'analytics',
       title: 'Scroll depth',
-      description: 'Reports how far visitors scroll on a domain\'s pages from s33k autocapture, with a site-wide distribution histogram.',
-      whenToUse: 'Use to find which pages get read deeply versus abandoned at the top. Cookieless, no PII.',
-      examplePrompt: 'Which pages on getmasset.com do people actually scroll through?',
+      description: 'Reports how far down each of a domain\'s pages visitors scroll, from s33k autocapture, with a site-wide scroll-depth '
+         + 'distribution histogram.',
+      whenToUse: 'Use to find how far down each page visitors actually scroll, which pages get read deeply versus abandoned at the top. '
+         + 'Cookieless, no PII.',
+      examplePrompt: 'How far down each page do visitors scroll on getmasset.com?',
    },
    {
       id: 'page_engagement',
