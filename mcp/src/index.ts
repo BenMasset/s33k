@@ -2550,6 +2550,48 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// dashboard
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'dashboard',
+   {
+      title: 'Dashboard: the one-call overview (start here)',
+      description:
+         'THE starting point. Returns the default "show me an overview" for a domain: the key numbers across all three s33k pillars '
+         + '(SEO rank, AI search, analytics) in ONE call, plus a curated list of next questions the user can ask. Reach for this whenever the '
+         + 'user says "show me an overview", "show me my dashboard", "how is my site doing", or simply does not know what to ask. It composes a '
+         + 'compact set of sections (headline with human visitors / AI-referred visitors / top opportunity / top action; top pages; top sources; '
+         + 'best-ranked keywords; rank distribution; AI referrals per engine; Core Web Vitals p75; per-goal conversions when goals exist; and the '
+         + 'biggest rank movers) and a CONTEXTUAL set of suggestedQuestions chosen from the actual data. Every section is empty-safe: a brand-new '
+         + 'domain still returns a coherent, honest overview. The response also includes `rendered`, a ready-to-show monospace ASCII view of the '
+         + 'whole dashboard. RULES-BASED: the server does NOT call any LLM. You can narrate the structured `dashboard` richly OR show the raw '
+         + '`rendered` block, then offer the suggestedQuestions so the user always knows what to ask next.',
+      inputSchema: {
+         domain: z.string().describe('The domain to show the overview for, e.g. "getmasset.com".'),
+         period: z.string().optional().describe('Reporting window, e.g. "30d", "7d", "90d". Defaults to "30d".'),
+      },
+   },
+   async ({ domain, period }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         const data = await s33kFetch('/api/dashboard', { query });
+         return jsonResult({
+            domain: data.domain,
+            period: data.period,
+            dashboard: data.dashboard,
+            suggestedQuestions: data.suggestedQuestions,
+            rendered: data.rendered,
+            note: data.note,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // portfolio_summary
 // ---------------------------------------------------------------------------
 server.registerTool(
@@ -2698,7 +2740,7 @@ async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
    process.stderr.write(
-      `s33k-mcp connected (base URL: ${BASE_URL}). 70 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
+      `s33k-mcp connected (base URL: ${BASE_URL}). 71 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
    );
 }
 

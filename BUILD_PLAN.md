@@ -246,3 +246,79 @@ Strategic, winnable, on-positioning picks. These are intent + winnability + alig
 | how to make website AI readable | /resources/blog/how-to-make-website-ai-readable | Strong existing pillar article; GEO-aligned, very winnable long-tail; proves content ranking. |
 
 Expand once the scraper is confirmed free and the per-page view exists.
+
+---
+
+## Multi-tenant build (decisions LOCKED with Ben 2026-06-17)
+
+The foundation is already shipped and flag-gated: `MULTI_TENANT` env (default off), `scopeWhere(account)`,
+`ownerIdFor(account)`, `owner_id` columns, and GET-only member API keys. This section records the
+product-shape decisions that turn the foundation into a real friends-sign-up product. Build in progress.
+
+**The four locked decisions (Ben chose all recommended options):**
+1. **Signup: invite-only.** No public self-serve signup. Ben/admin creates accounts or sends invite links
+   (the existing Invite/Waitlist models are the substrate). Keeps SERP/COGS and abuse risk near zero early.
+2. **Login: email magic link** (passwordless, via Resend, which is already wired). No password storage.
+   Each verified email maps to an Account. Web login is for managing the account + getting the API key +
+   managing domains/sharing; MCP/API access stays on per-account API keys (pasted as `S33K_API_KEY`).
+3. **Sharing: per-domain, read-only.** A domain owner invites a collaborator (by email) to ONE site; the
+   collaborator gets read-only access to that domain (reuses the GET-only member-key semantics). Like
+   sharing a single Google Analytics property, matching Ben's "set it up for a site and share it" wording.
+   Implication: reads must resolve "owned OR shared-to-me" domains, not just `owner_id = me`; writes stay
+   owner-only. A new per-domain access/share table is the additive layer on top of `owner_id`.
+4. **Scope: isolation + sharing + safety caps. Billing DEFERRED.** Wire tenant isolation, the sharing flow,
+   and sane per-tenant keyword + refresh-cadence caps to bound the shared Serper cost. No Stripe/plans yet.
+
+**Defaults Ben delegated (not separately asked):** shared Postgres + `owner_id` scoping (the built design);
+each tenant = an Account with its own API key; Resend for invite + magic-link emails; the `domain` column
+stays globally unique (one owner per domain, shared collaborators read via the share table).
+
+**Security bar:** a cross-tenant read/write leak is the one unforgivable bug. This build gets a dedicated
+isolation-focused adversarial review before deploy, on top of the normal gate.
+
+### What already exists (foundation map, 2026-06-17) and what is left
+
+ALREADY BUILT + FUNCTIONAL (do not rebuild): `MULTI_TENANT` flag (default off, exact `=== 'true'`),
+`resolveAccount`/`authorize` (legacy global APIKEY always resolves to admin ID 1; per-account keys behind
+the flag with role admin/member; member = GET-only enforced in authorize), `scopeWhere`/`ownerIdFor`
+(tested), `owner_id` on domain/keyword/s33kEvent/goal/segment/featureRequest (CrawlerHit scoped by the
+globally-unique domain, no owner_id), and the Account/ApiKey/Invite/Waitlist models. Functional routes:
+`account` (admin create/list), `account-key` (mint/revoke), `invite` (external quota-gated + internal
+member, atomic single-use accept, rate-limited), `waitlist`, `me`, `export` (scoped, secret-stripped),
+`account-data` (scoped irreversible hard-delete). `utils/send-invite.ts` sends via Resend (best-effort).
+Tests: `scope.test.ts`, `resolveAccount.test.ts`. NO frontend account/key/team UI. Web login is still
+legacy single-admin JWT (USER/PASSWORD/SECRET).
+
+EXECUTION PLAN (sequenced; route-heavy waves run AFTER the dashboard wave to avoid file collisions):
+
+- **M1 Isolation completeness (security-critical, do first).** Audit EVERY `pages/api/*` data route. Wire
+  `scopeWhere(account)` into every Keyword/Goal/Segment/S33kEvent query and `ownerIdFor(account)` on every
+  create. For per-domain routes adopt the access-helper (see M2): verify the caller can reach the named
+  domain before any pillar read. Close the gaps the map flagged (keywords, goals, segments, and any
+  analytics route lacking the `Domain.findOne({domain, ...scopeWhere})` gate). Add isolation tests:
+  member-key write rejection, and two-account cross-tenant leak (account A cannot read/mutate B's domain,
+  keywords, goals, segments, events). This is what makes flipping the flag safe.
+- **M2 Per-domain read-only sharing (the share feature).** New `DomainShare` model + fail-loud idempotent
+  migration: { id, domain (matches Domain.domain), owner_account_id, shared_with_account_id, role 'viewer',
+  created }. Add `utils/domain-access.ts`: `resolveDomainAccess(account, domain, {write})` returning the
+  domain when accessible else null. READ access = owned (owner_id) OR a DomainShare to this account. WRITE
+  access = owned only (independent of the caller key's own admin role). Domain LIST = owned ∪ shared. The
+  domain column is globally @Unique, so once access is granted, scoping a single domain's pillar data BY
+  DOMAIN is leak-safe (do NOT also require owner_id for a shared read, or the viewer sees nothing).
+  Refactor analytics/data routes to use `resolveDomainAccess` instead of the raw `Domain.findOne(scopeWhere)`
+  so shared viewers can read. Share flow: owner invites a collaborator by email to ONE domain (reuse the
+  Invite machinery + a domain-scoped invite type, or a direct share when the email already has an account);
+  on accept, create the DomainShare. MCP tools: `share_domain`, `list_domain_shares`, `revoke_domain_share`.
+  Tests: a viewer can READ the shared domain, CANNOT write it, CANNOT see the owner's OTHER domains.
+- **M3 Per-tenant safety caps.** Per-account keyword cap (e.g. default 50, from Account.plan or a constant)
+  enforced on add_keyword; refresh-cadence cap enforced on the refresh path. Honest 4xx with the limit when
+  exceeded. Admin (ID 1) is uncapped. Bounds the shared Serper COGS.
+- **M4 Magic-link login + minimal account UI.** Email -> signed one-time token (SECRET) -> session cookie ->
+  resolveAccount maps the session to that email's Account (extend the cookie path which today only yields
+  admin). Resend sends the link. A login page, and an account page (see your domains, copy your API key +
+  MCP config, mint/revoke keys, share a domain + see who it is shared with). The invite->key->MCP path
+  already works without this, so M4 is the management layer, lower priority than M1/M2.
+- **Then:** dedicated isolation adversarial review across M1-M4, full gate, deploy. FLAG FLIP (`MULTI_TENANT=true`
+  on prod) is the launch switch: do it only AFTER the isolation review is clean, ideally verified with a
+  throwaway second test account proving it cannot see getmasset.com. Leaning toward leaving the actual prod
+  flip for Ben to greenlight, or doing it with a test-tenant verification and immediate rollback path.

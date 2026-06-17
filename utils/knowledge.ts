@@ -374,10 +374,12 @@ const capabilities: CapabilityEntry[] = [
       category: 'onboarding',
       title: 'Onboarding walkthrough: where you are and the next step',
       description: 'Reports a domain\'s setup progress as a checklist (site added, keywords tracked, tracking script live, conversion goals '
-         + 'defined, first report ready) with percentComplete, and returns the single next step plus the exact tool to call.',
+         + 'defined, first report ready) with percentComplete, and returns the single next step plus the exact tool to call. It also returns a '
+         + 'firstRunHint that points at the dashboard as the place to start: even before setup is finished it tells a brand-new user they can ask '
+         + '"show me my dashboard" for the full overview, and once setup is complete the dashboard is the headline next move.',
       whenToUse: 'Use to walk a new user from zero to value step by step, or whenever someone asks what to set up next or whether s33k is '
-         + 'configured for their site.',
-      examplePrompt: 'Walk me through setting up s33k for getmasset.com.',
+         + 'configured for their site. When they are set up (or just want the big picture), point them at the dashboard tool for the full overview.',
+      examplePrompt: 'Walk me through setting up s33k for getmasset.com, then show me my dashboard.',
    },
    {
       id: 'striking_distance',
@@ -722,9 +724,11 @@ const capabilities: CapabilityEntry[] = [
       category: 'onboarding',
       title: 'Onboard a domain',
       description: 'One call from nothing to live data: creates the domain, discovers keywords, adds up to 20 and queues rank scrapes, provisions an '
-         + 'analytics website, and returns the tracking snippet plus install guides.',
-      whenToUse: 'Use as the first thing you do for a brand new site. The only input is the bare domain.',
-      examplePrompt: 'Set up everything in s33k for example.com.',
+         + 'analytics website, and returns the tracking snippet plus install guides. It also returns a firstRunHint that hands the user off to the '
+         + 'dashboard, so right after onboarding they can ask "show me my dashboard" or "show me an overview" to see everything in one place.',
+      whenToUse: 'Use as the first thing you do for a brand new site. The only input is the bare domain. After it returns, point the user at the '
+         + 'dashboard tool ("show me my dashboard") so they start from the full overview instead of a blank slate.',
+      examplePrompt: 'Set up everything in s33k for example.com, then show me my dashboard.',
    },
    {
       id: 'install_instructions',
@@ -884,6 +888,20 @@ const capabilities: CapabilityEntry[] = [
       whenToUse: 'Use to see who you compete with in search and where rivals outrank you, once your tracked keywords have been refreshed at least once '
          + 'so their SERP results are on disk.',
       examplePrompt: 'Who are my top competitors in search for getmasset.com, and which keywords do they outrank me on?',
+   },
+   {
+      id: 'dashboard',
+      toolName: 'dashboard',
+      category: 'cross-pillar',
+      title: 'The one-call overview (start here)',
+      description: 'The default "show me an overview" experience: the key numbers across SEO rank, AI search, and analytics in ONE call, plus a '
+         + 'contextual list of next questions to ask. Composes a headline (human visitors, AI-referred visitors, top opportunity, top action), top '
+         + 'pages, top sources, best keywords, rank distribution, AI referrals per engine, Core Web Vitals, per-goal conversions, and the biggest rank '
+         + 'movers. Every section is empty-safe, so a brand-new domain still gets a coherent, honest overview. Returns a rendered ASCII view too. '
+         + 'Rules-based: reads only your scoped data and never queries an LLM.',
+      whenToUse: 'The FIRST thing to reach for when the user says "show me an overview" or "show me my dashboard", asks how their site is doing, or '
+         + 'does not know what to ask. Use it to orient, then offer the suggestedQuestions it returns.',
+      examplePrompt: 'Show me an overview of getmasset.com',
    },
 ];
 

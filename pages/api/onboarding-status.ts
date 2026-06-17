@@ -17,11 +17,17 @@ import type Account from '../../database/models/account';
 // from zero to value conversationally, so onboarding is a guided walkthrough, not a blank slate.
 
 type Step = { key: string, title: string, done: boolean, detail: string, nextTool: string };
+// The first-run pointer. Always returned so a brand-new user (or someone a domain was just shared
+// with) is immediately told the dashboard exists and what to ask for the full picture. It is a
+// pointer, NOT a counted setup step, so it never moves percentComplete (the existing setup test
+// asserts 100% / null nextStep when the real steps are done).
+type FirstRunHint = { title: string, detail: string, nextTool: string };
 type Resp = {
    domain?: string,
    percentComplete?: number,
    steps?: Step[],
    nextStep?: Step | null,
+   firstRunHint?: FirstRunHint,
    message?: string,
    error?: string | null,
 };
@@ -93,11 +99,31 @@ const getStatus = async (req: NextApiRequest, res: NextApiResponse<Resp>, accoun
       const doneCount = steps.filter((s) => s.done).length;
       const percentComplete = Math.round((100 * doneCount) / steps.length);
       const nextStep = steps.find((s) => !s.done) || null;
-      const message = nextStep
-         ? `Setup is ${percentComplete}% done. Next: ${nextStep.title}. ${nextStep.detail} Use ${nextStep.nextTool}.`
-         : `Setup is complete for ${domain}. Ask for a briefing to see what to work on.`;
 
-      return res.status(200).json({ domain, percentComplete, steps, nextStep, message, error: null });
+      // Always point at the dashboard as the place to start. When setup is complete this is the
+      // headline next move; when it is not, it is the closing hint so a brand-new user always
+      // knows the one-shot overview exists and the plain-language questions they can ask.
+      const firstRunHint: FirstRunHint = nextStep
+         ? {
+            title: 'See your dashboard any time',
+            detail: `Finish setup above, then ask "show me my dashboard" for the full overview of ${domain}, `
+               + 'or just ask plain questions like "what should I do next?".',
+            nextTool: 'dashboard',
+         }
+         : {
+            title: 'See your dashboard',
+            detail: 'You are set up. Ask "show me my dashboard" any time for the full overview, '
+               + 'or "what should I do next?".',
+            nextTool: 'dashboard',
+         };
+
+      const message = nextStep
+         ? `Setup is ${percentComplete}% done. Next: ${nextStep.title}. ${nextStep.detail} Use ${nextStep.nextTool}. `
+            + `When you are ready, ask "show me my dashboard" for the full overview of ${domain}.`
+         : `Setup is complete for ${domain}. Ask "show me my dashboard" for the full overview, `
+            + 'or "what should I do next?" any time.';
+
+      return res.status(200).json({ domain, percentComplete, steps, nextStep, firstRunHint, message, error: null });
    } catch (error) {
       console.log('[ERROR] Building onboarding status for ', domain, error);
       return res.status(400).json({ error: 'Error Building Onboarding Status for this Domain.' });

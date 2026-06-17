@@ -39,6 +39,11 @@ import { getInstallGuides, InstallGuides } from '../../utils/install-guides';
 // starting set focused and bounds the per-onboard SERP cost. The user can prune or extend.
 const MAX_ONBOARD_KEYWORDS = 20;
 
+// A friendly pointer, returned on every successful onboard, that the dashboard is now the place
+// to start. A brand-new user (or someone a domain was just shared with) is told in plain language
+// what to ask next, so they never face a blank slate after setup.
+type FirstRunHint = { title: string, detail: string, nextTool: string };
+
 type OnboardResponse = {
    domain?: string,
    discoveredKeywords?: string[],
@@ -47,6 +52,8 @@ type OnboardResponse = {
    umamiWebsiteId?: string | null,
    installSnippet?: string,
    installGuides?: InstallGuides,
+   firstRunHint?: FirstRunHint,
+   nextStepMessage?: string,
    note?: string | null,
    error?: string | null,
 };
@@ -165,6 +172,16 @@ const onboardDomain = async (req: NextApiRequest, res: NextApiResponse<OnboardRe
       //    so the customer still sees the shape even if provisioning was deferred).
       const installGuides = getInstallGuides(domain, umamiWebsiteId || '');
 
+      // 6. Hand the user off to the dashboard so they never face a blank slate after setup.
+      const firstRunHint: FirstRunHint = {
+         title: 'See your dashboard',
+         detail: `${domain} is set up. Ask "show me my dashboard" or "show me an overview" to see everything in one place, `
+            + 'and you can always ask plain-language questions like "what should I do next?" or "how is my SEO?".',
+         nextTool: 'dashboard',
+      };
+      const nextStepMessage = `${domain} is onboarded. Install the tracking snippet, then ask "show me my dashboard" for the full overview. `
+         + 'You can ask plain-language questions any time.';
+
       return res.status(201).json({
          domain,
          discoveredKeywords: selected.map((item) => item.keyword),
@@ -173,6 +190,8 @@ const onboardDomain = async (req: NextApiRequest, res: NextApiResponse<OnboardRe
          umamiWebsiteId,
          installSnippet: installGuides.snippet,
          installGuides,
+         firstRunHint,
+         nextStepMessage,
          note: note || discovery.error || null,
       });
    } catch (error) {
