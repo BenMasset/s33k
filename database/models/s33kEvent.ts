@@ -68,6 +68,17 @@ class S33kEvent extends Model {
    @Column({ type: DataType.BOOLEAN, allowNull: false, defaultValue: false })
    is_bot!: boolean;
 
+   // Device class derived from the User-Agent at ingest: 'mobile' | 'tablet' | 'desktop' | ''.
+   // A coarse, non-identifying segment (not a fingerprint). Powers the device filter.
+   @Column({ type: DataType.STRING, allowNull: true, defaultValue: '' })
+   device!: string;
+
+   // ISO country code from a geo header at ingest (cf-ipcountry / x-vercel-ip-country / etc.), or
+   // '' when the host provides none (e.g. Railway-direct). Country-level only, never the IP, never
+   // finer geo. Powers the geography filter where geo data is available.
+   @Column({ type: DataType.STRING, allowNull: true, defaultValue: '' })
+   country!: string;
+
    // The session's first-touch source: a CLASSIFICATION ('direct' | 'referral' |
    // 'organic-search' | 'ai') or at most the bare referrer HOST. NEVER a full referrer URL
    // with a path or query (those can carry PII), enforced by sanitizeSource at ingest. The

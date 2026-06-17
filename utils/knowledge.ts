@@ -300,6 +300,46 @@ const capabilities: CapabilityEntry[] = [
       examplePrompt: 'Show me getmasset.com analytics for humans only, with bounce and exit rate.',
    },
    {
+      id: 'create_goal',
+      toolName: 'create_goal',
+      category: 'analytics',
+      title: 'Create a named conversion goal',
+      description: 'Define a named conversion to track: a thank-you / destination page reached (kind page_reached, matchValue is a path) or an '
+         + 'autocaptured event fired (kind event, e.g. form_submit, optionally constrained to a page). Goals are the unit conversion rates are '
+         + 'measured against.',
+      whenToUse: 'Use to set up a conversion you want to measure, like "Demo Booked" or "Signup", before asking for its rate.',
+      examplePrompt: 'Create a goal called Demo Booked when someone reaches /demo/thanks.',
+   },
+   {
+      id: 'list_goals',
+      toolName: 'list_goals',
+      category: 'analytics',
+      title: 'List conversion goals',
+      description: 'List the named conversion goals defined for a domain and their match rules.',
+      whenToUse: 'Use to see which conversions are defined before reporting on them.',
+      examplePrompt: 'What conversion goals are set up for getmasset.com?',
+   },
+   {
+      id: 'delete_goal',
+      toolName: 'delete_goal',
+      category: 'analytics',
+      title: 'Delete a conversion goal',
+      description: 'Delete a named conversion goal by its id.',
+      whenToUse: 'Use to remove a conversion goal you no longer track.',
+      examplePrompt: 'Delete the Newsletter Signup goal.',
+   },
+   {
+      id: 'goal_analytics',
+      toolName: 'goal_analytics',
+      category: 'analytics',
+      title: 'Conversion analytics for a goal',
+      description: 'Conversion rate and counts for a named goal, computed from first-party sessions. Filter by traffic source, landing page, device, '
+         + 'country, or engagement, and group the rate by any of those. Human-only by default; datacenter bots excluded.',
+      whenToUse: 'Use for any conversion-rate question: the rate for a goal, the rate for one segment, how many converters came from a given source, '
+         + 'or a comparison of the rate across sources. It also answers "of converters, the most common landing page" by grouping on landing page.',
+      examplePrompt: 'What is my Demo Booked conversion rate from organic search, human only?',
+   },
+   {
       id: 'top_clicks',
       toolName: 'top_clicks',
       category: 'analytics',

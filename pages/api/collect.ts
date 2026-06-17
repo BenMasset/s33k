@@ -5,6 +5,7 @@ import S33kEvent from '../../database/models/s33kEvent';
 import { sanitizeBatch, sanitizeSession } from '../../utils/event-sanitize';
 import { isLikelyBotUA, clientIp, rateLimitCollect } from '../../utils/collect-guards';
 import { isDatacenterIp } from '../../utils/datacenter-ip';
+import { deviceFromUA, countryFromHeaders } from '../../utils/request-segments';
 
 // POST /api/collect  (PUBLIC, no API key)
 //
@@ -91,6 +92,9 @@ const collect = async (req: NextApiRequest, res: NextApiResponse<CollectResponse
       // stamp it on every row in this batch. The IP itself is never stored (cookieless, no PII);
       // only this derived boolean survives, and human-only analytics filter is_bot = false.
       const isBot = isDatacenterIp(ip);
+      // Coarse, non-identifying segments for the device and geography filters (never the raw UA/IP).
+      const device = deviceFromUA(typeof userAgent === 'string' ? userAgent : undefined);
+      const country = countryFromHeaders(req.headers as Record<string, string | string[] | undefined>);
 
       // 1. Domain allow-listing: the domain must be a known s33k Domain. Unknown -> 403.
       // owner_id is read here so it can be stamped on every event row for tenant-scoped reads.
@@ -117,6 +121,8 @@ const collect = async (req: NextApiRequest, res: NextApiResponse<CollectResponse
                session,
                source: ev.source,
                is_bot: isBot,
+               device,
+               country,
                created,
             });
             recorded += 1;

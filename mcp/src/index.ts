@@ -530,6 +530,151 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// create_goal
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'create_goal',
+   {
+      title: 'Create a named conversion goal',
+      description:
+         'Define a NAMED conversion to track, e.g. "Demo Booked" or "Newsletter Signup". Two kinds: '
+         + 'kind="page_reached" fires when a session views a page whose path matches matchValue (a '
+         + 'thank-you / destination page, e.g. "/demo/thanks"; prefix match by default, set '
+         + 'matchMode="exact" for an exact path); kind="event" fires when a session triggers an '
+         + 'autocaptured event of type matchValue (e.g. "form_submit"), optionally constrained to a '
+         + 'page via matchPage. Once a goal exists, goal_analytics reports its conversion rate, filtered '
+         + 'and grouped any way.',
+      inputSchema: {
+         domain: z.string().describe('The domain the goal belongs to, e.g. "getmasset.com".'),
+         name: z.string().describe('The goal name used in questions, e.g. "Demo Booked".'),
+         kind: z.enum(['page_reached', 'event']).describe('"page_reached" (a path was viewed) or "event" (an event fired).'),
+         matchValue: z.string().describe('page_reached: the path/prefix (e.g. "/demo/thanks"). event: the event type (e.g. "form_submit").'),
+         matchPage: z.string().optional().describe('event kind only: restrict the event to a page path (prefix).'),
+         matchMode: z.enum(['prefix', 'exact']).optional().describe('page_reached only: path match mode. Defaults to "prefix".'),
+      },
+   },
+   async ({ domain, name, kind, matchValue, matchPage, matchMode }) => {
+      try {
+         const body: Record<string, unknown> = { domain, name, kind, matchValue };
+         if (matchPage) { body.matchPage = matchPage; }
+         if (matchMode) { body.matchMode = matchMode; }
+         const data = await s33kFetch('/api/goals', { method: 'POST', body });
+         return jsonResult({ goal: data.goal, error: data.error });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// list_goals
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'list_goals',
+   {
+      title: 'List conversion goals',
+      description: 'List the named conversion goals defined for a domain, with their match rules.',
+      inputSchema: {
+         domain: z.string().describe('The domain whose goals to list, e.g. "getmasset.com".'),
+      },
+   },
+   async ({ domain }) => {
+      try {
+         const data = await s33kFetch('/api/goals', { query: { domain } });
+         return jsonResult({ goals: data.goals, error: data.error });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// delete_goal
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'delete_goal',
+   {
+      title: 'Delete a conversion goal',
+      description: 'Delete a named conversion goal by its id (get ids from list_goals).',
+      inputSchema: {
+         id: z.number().describe('The goal id to delete.'),
+      },
+   },
+   async ({ id }) => {
+      try {
+         const data = await s33kFetch('/api/goals', { method: 'DELETE', query: { id: String(id) } });
+         return jsonResult({ removed: data.removed, error: data.error });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// goal_analytics
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'goal_analytics',
+   {
+      title: 'Conversion analytics for a goal (filtered + grouped)',
+      description:
+         'Conversion rate and counts for a named goal, computed from first-party sessions, with a '
+         + 'composable filter and groupBy vocabulary. This answers the real questions: '
+         + '"conversion rate for <goal> human-only" (default), "how many AI referrals converted" '
+         + '(channel="ai"), "compare conversion rate by source" (groupBy="channel"), and "of '
+         + 'converters, the most common landing page" (groupBy="landingPage", read the top group). '
+         + 'Filters: channel (direct|referral|organic-search|ai; aliases seo/aio accepted), '
+         + 'landingPage, page, device (mobile|tablet|desktop), country (ISO), engagement '
+         + '(engaged|bounced). Human-only by default; includeBots=true to fold bots in. Returns '
+         + 'totalSessions, conversions, conversionRatePct, and (with groupBy) per-group rates.',
+      inputSchema: {
+         domain: z.string().describe('The domain, e.g. "getmasset.com".'),
+         goal: z.string().optional().describe('The goal NAME (or pass goalId). e.g. "Demo Booked".'),
+         goalId: z.number().optional().describe('The goal id (alternative to goal name).'),
+         period: z.string().optional().describe('Reporting window, e.g. "30d", "7d". Defaults to "30d".'),
+         groupBy: z.enum(['channel', 'landingPage', 'exitPage', 'device', 'country']).optional()
+            .describe('Break the conversion rate down by this dimension.'),
+         channel: z.string().optional().describe('Filter to a traffic channel: direct, referral, organic-search/seo, ai/aio.'),
+         landingPage: z.string().optional().describe('Filter to sessions whose landing page is this exact path.'),
+         page: z.string().optional().describe('Filter to sessions that viewed this path.'),
+         device: z.string().optional().describe('Filter by device: mobile, tablet, or desktop.'),
+         country: z.string().optional().describe('Filter by ISO country code (where geo data is available).'),
+         engagement: z.enum(['engaged', 'bounced']).optional().describe('Filter by engagement quality.'),
+         includeBots: z.boolean().optional().describe('Include datacenter/bot sessions. Defaults to human-only.'),
+      },
+   },
+   async ({ domain, goal, goalId, period, groupBy, channel, landingPage, page, device, country, engagement, includeBots }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (goal) { query.goal = goal; }
+         if (goalId !== undefined) { query.goalId = String(goalId); }
+         if (period) { query.period = period; }
+         if (groupBy) { query.groupBy = groupBy; }
+         if (channel) { query.channel = channel; }
+         if (landingPage) { query.landingPage = landingPage; }
+         if (page) { query.page = page; }
+         if (device) { query.device = device; }
+         if (country) { query.country = country; }
+         if (engagement) { query.engagement = engagement; }
+         if (includeBots) { query.includeBots = 'true'; }
+         const data = await s33kFetch('/api/goal-analytics', { query });
+         return jsonResult({
+            goal: data.goal,
+            totalSessions: data.totalSessions,
+            conversions: data.conversions,
+            conversionRatePct: data.conversionRatePct,
+            groupBy: data.groupBy,
+            groups: data.groups,
+            note: data.note,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // traffic_breakdown
 // ---------------------------------------------------------------------------
 server.registerTool(
@@ -1555,7 +1700,7 @@ async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
    process.stderr.write(
-      `s33k-mcp connected (base URL: ${BASE_URL}). 41 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
+      `s33k-mcp connected (base URL: ${BASE_URL}). 45 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
    );
 }
 

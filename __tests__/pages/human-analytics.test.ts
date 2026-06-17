@@ -25,7 +25,8 @@ const mockEvent = S33kEventModel as unknown as { findAll: jest.Mock };
 const mockAuthorize = authorizeFn as unknown as jest.Mock;
 
 const row = (data: Record<string, unknown>) => ({ get: () => data, ...data });
-const pv = (session: string, page: string, is_bot: boolean, created: string) => row({ session, page, is_bot, created });
+const pv = (session: string, page: string, is_bot: boolean, created: string) =>
+   row({ session, page, is_bot, created, type: 'pageview', source: 'direct', device: 'desktop', country: 'US' });
 
 const makeReq = (query: Record<string, string>): NextApiRequest => ({
    method: 'GET', query, body: {}, headers: {},
