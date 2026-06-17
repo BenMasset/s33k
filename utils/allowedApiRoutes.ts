@@ -33,6 +33,7 @@ export const allowedApiRoutes = [
    'DELETE:/api/goals',
    'GET:/api/goal-analytics',
    'GET:/api/conversion-attribution',
+   'GET:/api/suggest-goals',
    'GET:/api/breakdown',
    'GET:/api/timeseries',
    'GET:/api/events',

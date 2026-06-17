@@ -353,6 +353,17 @@ const capabilities: CapabilityEntry[] = [
       examplePrompt: 'For getmasset.com, what actually drives demo bookings, SEO, direct, or AI, and what should I fix?',
    },
    {
+      id: 'suggest_goals',
+      toolName: 'suggest_goals',
+      category: 'onboarding',
+      title: 'Suggest conversion goals from the site',
+      description: 'Proposes ready-to-create conversion goals by spotting a domain\'s likely conversions: thank-you / destination pages (a '
+         + 'page_reached goal) and intent pages like demo, contact, or signup (a form_submit goal). It only suggests; you confirm and create with '
+         + 'create_goal.',
+      whenToUse: 'Use right after onboarding so a user gets conversion tracking proposed for them instead of inventing goals from scratch.',
+      examplePrompt: 'Suggest conversion goals for getmasset.com.',
+   },
+   {
       id: 'top_clicks',
       toolName: 'top_clicks',
       category: 'analytics',

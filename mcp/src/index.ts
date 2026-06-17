@@ -723,6 +723,33 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// suggest_goals
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'suggest_goals',
+   {
+      title: 'Suggest conversion goals from the site',
+      description:
+         'Crawls a domain and proposes ready-to-create conversion goals by spotting its likely '
+         + 'conversions: thank-you / destination pages (a page_reached goal) and intent / form pages '
+         + 'like demo, contact, or signup (a form_submit goal). It only SUGGESTS; review the list and '
+         + 'create the ones you want with create_goal. Use this right after onboarding so a user gets '
+         + 'conversion tracking without having to think up their own goals.',
+      inputSchema: {
+         domain: z.string().describe('The domain to suggest goals for, e.g. "getmasset.com".'),
+      },
+   },
+   async ({ domain }) => {
+      try {
+         const data = await s33kFetch('/api/suggest-goals', { query: { domain } });
+         return jsonResult({ suggestions: data.suggestions, note: data.note, error: data.error });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // traffic_breakdown
 // ---------------------------------------------------------------------------
 server.registerTool(
@@ -1748,7 +1775,7 @@ async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
    process.stderr.write(
-      `s33k-mcp connected (base URL: ${BASE_URL}). 46 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
+      `s33k-mcp connected (base URL: ${BASE_URL}). 47 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
    );
 }
 
