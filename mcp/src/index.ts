@@ -777,6 +777,243 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// striking_distance
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'striking_distance',
+   {
+      title: 'Striking distance keywords',
+      description:
+         'The highest-ROI SEO to-do list for a domain. Scans tracked keyword ranks and returns the near-miss "quick win" keywords currently '
+         + 'ranking just off page one (default positions 4 to 30, the striking distance), the cheapest wins because the page already ranks and a '
+         + 'small push tends to move it onto page one. For each it returns the keyword, current Google position, the ranking url, and the position '
+         + 'delta over the tracked history (negative means it is IMPROVING, climbing toward page one; positive means it is slipping), plus the start '
+         + 'and recent positions and how many history points backed the delta. Sorted by closeness to page one then by recent improvement, so the '
+         + 'easiest, most upward-moving wins are on top. Pure query over tracked keywords. Never queries an LLM.',
+      inputSchema: {
+         domain: z.string().describe('The domain to scan for striking distance keywords, e.g. "getmasset.com".'),
+         min: z
+            .number()
+            .optional()
+            .describe('Inclusive lower bound of the striking window (Google rank position). Defaults to 4 (just off page one).'),
+         max: z
+            .number()
+            .optional()
+            .describe('Inclusive upper bound of the striking window (Google rank position). Defaults to 30.'),
+      },
+   },
+   async ({ domain, min, max }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (min !== undefined) { query.min = String(min); }
+         if (max !== undefined) { query.max = String(max); }
+         const data = await s33kFetch('/api/striking-distance', { query });
+         return jsonResult({
+            domain: data.domain,
+            window: data.window,
+            total: data.total,
+            keywords: data.keywords,
+            note: data.note,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// channel_report
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'channel_report',
+   {
+      title: 'Sessions by marketing channel (Organic Search / AI Search / Referral / Direct)',
+      description:
+         'Maps every first-party session to a clean marketing channel a marketer thinks in, then '
+         + 'reports sessions (and the share of total) per channel: Organic Search, AI Search, '
+         + 'Referral, and Direct. This answers "where is my traffic coming from, by channel". When a '
+         + 'goal is supplied (by name or id), it also adds conversions and conversion rate PER '
+         + 'channel, so you see in one view which channel sends traffic AND which channel actually '
+         + 'converts. It also surfaces the top referring sources WITHIN the Referral channel (which '
+         + 'sites send you referral traffic). Human-only by default; set includeBots=true to fold '
+         + 'datacenter/bot sessions back in. Requires the s33k.js tracking script installed.',
+      inputSchema: {
+         domain: z.string().describe('The domain, e.g. "getmasset.com".'),
+         period: z.string().optional().describe('Reporting window, e.g. "30d", "7d". Defaults to "30d".'),
+         goal: z.string().optional().describe('Optional goal NAME (or pass goalId) to add per-channel conversions, e.g. "Demo Booked".'),
+         goalId: z.number().optional().describe('Optional goal id (alternative to goal name).'),
+         includeBots: z.boolean().optional().describe('Include datacenter/bot sessions. Defaults to human-only.'),
+      },
+   },
+   async ({ domain, period, goal, goalId, includeBots }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         if (goal) { query.goal = goal; }
+         if (goalId !== undefined) { query.goalId = String(goalId); }
+         if (includeBots) { query.includeBots = 'true'; }
+         const data = await s33kFetch('/api/channel-report', { query });
+         return jsonResult({
+            domain: data.domain,
+            period: data.period,
+            goal: data.goal,
+            report: data.report,
+            botSessionsExcluded: data.botSessionsExcluded,
+            note: data.note,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// live_view
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'live_view',
+   {
+      title: 'Real-time snapshot of who is on the site right now (poll repeatedly)',
+      description:
+         'A polled real-time snapshot of first-party activity in the last few minutes: who is on the '
+         + 'site RIGHT NOW. There is no websocket or stream. Call this repeatedly (every few seconds) '
+         + 'to watch a live view. Each call reads the last windowMinutes (default 5) of events and '
+         + 'returns activeVisitors (distinct human sessions), pageviewsInWindow, activePages (the pages '
+         + 'currently being viewed, with counts), sources and countries breakdowns, and recentEvents '
+         + '(the most recent events, newest first) so you can narrate what just happened. Human-only by '
+         + 'default; datacenter/bot events are excluded and reported as botEventsExcluded. Requires the '
+         + 's33k.js tracking script installed so events flow in.',
+      inputSchema: {
+         domain: z.string().describe('The domain, e.g. "getmasset.com".'),
+         windowMinutes: z.number().optional().describe('How many minutes back to look. Defaults to 5, clamped to 1..60.'),
+      },
+   },
+   async ({ domain, windowMinutes }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (windowMinutes !== undefined) { query.windowMinutes = String(windowMinutes); }
+         const data = await s33kFetch('/api/live-view', { query });
+         return jsonResult({
+            windowMinutes: data.windowMinutes,
+            asOf: data.asOf,
+            activeVisitors: data.activeVisitors,
+            pageviewsInWindow: data.pageviewsInWindow,
+            eventsInWindow: data.eventsInWindow,
+            botEventsExcluded: data.botEventsExcluded,
+            activePages: data.activePages,
+            sources: data.sources,
+            countries: data.countries,
+            recentEvents: data.recentEvents,
+            note: data.note,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// funnel_analysis
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'funnel_analysis',
+   {
+      title: 'Multi-step funnel with per-step drop-off',
+      description:
+         'Where in an ordered, multi-step path do sessions fall out? Given a funnel of ordered steps, '
+         + 'computed from first-party sessions, it reports for each step how many sessions reached it '
+         + '(counting a session for step N only if it also reached steps 1..N-1), the conversion from '
+         + 'the previous step, and the drop-off there. Steps is an ORDERED array of '
+         + '{type:"page"|"event", match}: a "page" step is reached when the session viewed a path '
+         + 'starting with match (prefix), an "event" step when it fired an event of that type, '
+         + 'optionally constrained to a page. Answers "of visitors who hit /pricing, how many reached '
+         + 'checkout, and where do they drop?". Human-only by default; includeBots=true folds bots in. '
+         + 'The same composable segment filters apply. Deterministic, no LLM.',
+      inputSchema: {
+         domain: z.string().describe('The domain, e.g. "getmasset.com".'),
+         steps: z.array(z.object({
+            type: z.enum(['page', 'event']).describe('"page" matches a viewed path prefix; "event" matches a fired event type.'),
+            match: z.string().describe('A path prefix (page step) or an event type (event step), e.g. "/pricing" or "checkout".'),
+            page: z.string().optional().describe('Event steps only: constrain the event to a page prefix, e.g. "/demo".'),
+         })).describe('The ordered funnel steps (at least one). Order matters: each step is checked only after the prior step is reached.'),
+         period: z.string().optional().describe('Reporting window, e.g. "30d", "7d". Defaults to "30d".'),
+         channel: z.string().optional().describe('Filter to a traffic channel: direct, referral, organic-search/seo, ai/aio.'),
+         landingPage: z.string().optional().describe('Filter to sessions whose landing page is this exact path.'),
+         page: z.string().optional().describe('Filter to sessions that viewed this path.'),
+         device: z.string().optional().describe('Filter by device: mobile, tablet, or desktop.'),
+         country: z.string().optional().describe('Filter by ISO country code (where geo data is available).'),
+         engagement: z.enum(['engaged', 'bounced']).optional().describe('Filter by engagement quality.'),
+         includeBots: z.boolean().optional().describe('Include datacenter/bot sessions. Defaults to human-only.'),
+      },
+   },
+   async ({ domain, steps, period, channel, landingPage, page, device, country, engagement, includeBots }) => {
+      try {
+         // steps is an ordered array, which the flat query layer cannot carry, so it travels as a JSON string.
+         const query: Record<string, string> = { domain, steps: JSON.stringify(steps) };
+         if (period) { query.period = period; }
+         if (channel) { query.channel = channel; }
+         if (landingPage) { query.landingPage = landingPage; }
+         if (page) { query.page = page; }
+         if (device) { query.device = device; }
+         if (country) { query.country = country; }
+         if (engagement) { query.engagement = engagement; }
+         if (includeBots) { query.includeBots = 'true'; }
+         const data = await s33kFetch('/api/funnel', { query });
+         return jsonResult({
+            funnel: data.funnel,
+            botSessionsExcluded: data.botSessionsExcluded,
+            note: data.note,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// entry_page_report
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'entry_page_report',
+   {
+      title: 'The entry-page acquisition lens (which landing pages bring people in, from where)',
+      description:
+         'Segments first-party traffic by the LANDING (entry) page where each session STARTS, not by raw '
+         + 'pageviews, because entry pages are the acquisition surface. For each entry page it returns: entries '
+         + '(first-touch sessions), a source breakdown (direct / referral / organic-search / ai counts), optional '
+         + 'goal conversions+rate when a goal is given, and trackedKeywords (the keywords/rank whose target page is '
+         + 'that entry page). This connects "we rank for X" to "X actually lands people", the missing attribution '
+         + 'link most analytics tools never make. Two gaps fall out of the data: a ranking page with zero entries '
+         + '(ranking-without-landing, fix the funnel) and an entry page that pulls sessions but holds no tracked '
+         + 'keywords (landing-without-ranking, brand/direct driven). Human-only by default; the goal is optional.',
+      inputSchema: {
+         domain: z.string().describe('The domain, e.g. "getmasset.com".'),
+         period: z.string().optional().describe('Reporting window, e.g. "30d". Defaults to "30d".'),
+         goal: z.string().optional().describe('Optional goal NAME (or pass goalId) to add per-page conversions+rate, e.g. "Demo Booked".'),
+         goalId: z.number().optional().describe('Optional goal id (alternative to goal name).'),
+         includeBots: z.boolean().optional().describe('Include datacenter/bot sessions. Defaults to human-only.'),
+      },
+   },
+   async ({ domain, period, goal, goalId, includeBots }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         if (goal) { query.goal = goal; }
+         if (goalId !== undefined) { query.goalId = String(goalId); }
+         if (includeBots) { query.includeBots = 'true'; }
+         const data = await s33kFetch('/api/entry-page-report', { query });
+         return jsonResult({ goal: data.goal, report: data.report, botSessionsExcluded: data.botSessionsExcluded, note: data.note, error: data.error });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // traffic_breakdown
 // ---------------------------------------------------------------------------
 server.registerTool(
@@ -1802,7 +2039,7 @@ async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
    process.stderr.write(
-      `s33k-mcp connected (base URL: ${BASE_URL}). 48 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
+      `s33k-mcp connected (base URL: ${BASE_URL}). 53 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
    );
 }
 

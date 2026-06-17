@@ -375,6 +375,73 @@ const capabilities: CapabilityEntry[] = [
       examplePrompt: 'Walk me through setting up s33k for getmasset.com.',
    },
    {
+      id: 'striking_distance',
+      toolName: 'striking_distance',
+      category: 'seo',
+      title: 'Quick-win keywords ranking just off page one',
+      description: 'The highest-ROI SEO to-do list: scans tracked keyword ranks and returns the near-miss "striking distance" keywords currently '
+         + 'ranking in positions 4 to 30 (configurable), where a small push tends to win page one because the page already ranks. Each returns the '
+         + 'keyword, current position, the ranking url, and the position delta over tracked history (negative means improving, positive means '
+         + 'slipping). Sorted by closeness to page one then by recent improvement. Pure query over tracked keywords, no LLM.',
+      whenToUse: 'Use to get the cheapest, fastest SEO wins first: keywords already close to page one that only need a small push, prioritized so '
+         + 'the closest and most-improving show up on top. Reach for this before chasing brand new keywords.',
+      examplePrompt: 'What are my striking distance keywords for getmasset.com, the ones closest to page one I should work first?',
+   },
+   {
+      id: 'channel_report',
+      toolName: 'channel_report',
+      category: 'analytics',
+      title: 'Sessions by marketing channel',
+      description: 'Maps every first-party session to a clean marketing channel (Organic Search, AI Search, Referral, Direct) and reports sessions and '
+         + 'share of total per channel. With an optional goal, it adds conversions and conversion rate per channel, and it surfaces the top referring '
+         + 'sources within the Referral channel. Human-only by default; datacenter bots excluded.',
+      whenToUse: 'Use for the "where is my traffic coming from, by channel" question, and the follow-ups: which channel converts best (pass a goal) and '
+         + 'which sites send referral traffic. It is the channel-level rollup of acquisition, distinct from goal_analytics (one goal, deep filters) and '
+         + 'conversion_attribution (the keyword/page join).',
+      examplePrompt: 'Break getmasset.com traffic down by marketing channel for the last 30 days, and show which channel converts my Demo Booked goal best.',
+   },
+   {
+      id: 'live_view',
+      toolName: 'live_view',
+      category: 'analytics',
+      title: 'Real-time snapshot of who is on the site right now',
+      description: 'A polled real-time snapshot of first-party activity in the last few minutes (windowMinutes, default 5): active visitors (distinct '
+         + 'human sessions), pageviews, the pages currently being viewed with counts, source and country breakdowns, and the most recent events newest '
+         + 'first. Human-only by default; datacenter/bot events are excluded and reported separately. There is no websocket: the user\'s LLM polls it '
+         + 'repeatedly for a live view.',
+      whenToUse: 'Use for "who is on the site right now" or any live/real-time question. Call it repeatedly (every few seconds) to watch activity as it '
+         + 'happens. Requires the s33k.js tracking script installed so events flow in. For historical traffic over days/weeks use human_analytics or the '
+         + 'traffic summary instead.',
+      examplePrompt: 'Who is on getmasset.com right now and what pages are they on?',
+   },
+   {
+      id: 'funnel_analysis',
+      toolName: 'funnel_analysis',
+      category: 'analytics',
+      title: 'Multi-step funnel with per-step drop-off',
+      description: 'An ordered, multi-step funnel computed from first-party sessions. Define steps as an array of {type:"page"|"event", match}; for '
+         + 'each step it reports how many sessions reached it (a session counts for step N only if it also reached every step before it), the '
+         + 'conversion from the previous step, and the drop-off there. Human-only by default; the same composable segment filters apply.',
+      whenToUse: 'Use for any ordered path question where you care about WHERE people fall out, not just whether one goal fired: a pricing to cart to '
+         + 'checkout flow, a signup wizard, a docs to trial to activation path. Reach for it instead of goal_analytics when the order of steps and the '
+         + 'per-step drop-off matter.',
+      examplePrompt: 'For getmasset.com, build a funnel from /pricing to /cart to the checkout event and show me where people drop off.',
+   },
+   {
+      id: 'entry_page_report',
+      toolName: 'entry_page_report',
+      category: 'cross-pillar',
+      title: 'The entry-page acquisition lens',
+      description: 'Segments first-party traffic by the landing (entry) page where each session starts, not by raw pageviews. Per entry page it returns '
+         + 'first-touch sessions broken down by source channel (direct / referral / organic-search / ai), optional goal conversions and rate, and the '
+         + 'tracked keywords/rank whose target page is that entry page. The join surfaces two gaps in the data: pages that rank but never land '
+         + '(ranking-without-landing) and pages that land but rank for nothing (landing-without-ranking). Human-only by default; the goal is optional.',
+      whenToUse: 'Use to connect rankings and AI citations to real acquisition: which pages actually bring people in, where that first touch comes from, '
+         + 'and whether the pages you rank for are the pages people land on. It answers "which landing pages drive entries, from which source" and, with '
+         + 'a goal, "which entry pages convert", and exposes ranking-without-landing and landing-without-ranking gaps to fix.',
+      examplePrompt: 'For getmasset.com, show my entry pages with where their first-touch traffic comes from and the keywords each one ranks for.',
+   },
+   {
       id: 'top_clicks',
       toolName: 'top_clicks',
       category: 'analytics',
