@@ -628,6 +628,21 @@ const capabilities: CapabilityEntry[] = [
          + 'to invest. Where form_submissions counts conversions by form/page, this splits them by acquisition source.',
       examplePrompt: 'Which traffic sources drive the most conversions on getmasset.com?',
    },
+   {
+      id: 'web_vitals',
+      toolName: 'web_vitals',
+      category: 'analytics',
+      title: 'Core Web Vitals',
+      description: 'Reports real-user Core Web Vitals for a domain from s33k autocapture. For each metric (LCP, CLS, INP, FID, FCP, '
+         + 'TTFB) it computes the p75 (the 75th-percentile value Google uses to score CWV) and classifies it against Google\'s field '
+         + 'thresholds into good, needs-improvement, or poor, with the sample count behind each. It also returns the worst pages by '
+         + 'LCP p75 (or the most-sampled metric) so you see WHICH pages are slow. Field data from real visitors, not a lab test; '
+         + 'cookieless, no PII. Returns a clear note when no samples exist yet.',
+      whenToUse: 'Use to judge a site\'s real-world loading, interactivity, and visual-stability performance the way Google ranks it, '
+         + 'and to find the specific slow pages to fix. The web-vital samples flow from the same s33k.js script as the other analytics, '
+         + 'so no extra setup is needed beyond an up-to-date tracking tag.',
+      examplePrompt: 'How are getmasset.com\'s Core Web Vitals, and which pages are slowest?',
+   },
    // --- Cross-pillar analyst ---
    {
       id: 'page_scoreboard',

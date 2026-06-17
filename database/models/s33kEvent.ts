@@ -107,6 +107,15 @@ class S33kEvent extends Model {
    @Column({ type: DataType.TEXT, allowNull: true, defaultValue: null })
    utm_content!: string | null;
 
+   // Numeric value of a Core Web Vital field measurement, set only on type:'webvital' rows. The
+   // metric name lives in `label` (LCP / FCP / TTFB / INP / FID / CLS); this holds its number:
+   // milliseconds for the timing metrics, a unitless score for CLS. FLOAT (not INTEGER) because
+   // CLS is fractional and timing metrics carry sub-ms precision. NULL for every other event type.
+   // Column name byte-matches the migration (metric_value). FLOAT, never STRING (no VARCHAR(255)
+   // overflow class on a number).
+   @Column({ type: DataType.FLOAT, allowNull: true, defaultValue: null })
+   metric_value!: number | null;
+
    @Column({ type: DataType.STRING, allowNull: false })
    created!: string;
 }

@@ -2,7 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import db from '../../database/database';
 import Domain from '../../database/models/domain';
 import S33kEvent from '../../database/models/s33kEvent';
-import { sanitizeBatch, sanitizeSession, sanitizeText, looksLikePII } from '../../utils/event-sanitize';
+import { sanitizeBatch, sanitizeSession, sanitizeText, looksLikePII, cleanEventPath, sanitizeSource } from '../../utils/event-sanitize';
 import { isLikelyBotUA, clientIp, rateLimitCollect } from '../../utils/collect-guards';
 import { isDatacenterIp } from '../../utils/datacenter-ip';
 import { deviceFromUA, countryFromHeaders } from '../../utils/request-segments';
@@ -43,6 +43,36 @@ const MAX_UTM_LEN = 150;
 // The five standard UTM keys, batch-level. Order is fixed so the read surface and the model line up.
 const UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'] as const;
 type UtmKey = typeof UTM_KEYS[number];
+
+// Core Web Vitals (real-user field data) arrive as a NEW additive event type:'webvital' from
+// s33k.js. They carry a numeric metric_value and a metric-name label. They are handled on their
+// own path below (not through sanitizeBatch, whose CleanEvent shape stays byte-identical for the
+// existing five event types and every existing test). The known metric names: LCP / FCP / TTFB
+// (timing, ms), INP / FID (interaction latency, ms), CLS (unitless layout-shift score).
+const WEBVITAL_LABELS = new Set(['LCP', 'CLS', 'INP', 'FID', 'FCP', 'TTFB']);
+
+// Sane upper bound on any stored web-vital number. CLS is a small fraction and the timing metrics
+// are milliseconds; a single page-life metric beyond ~10 minutes (600000 ms) is junk or tampering
+// and is rejected. Bounds storage and keeps a poisoned client from skewing percentile aggregates.
+const MAX_WEBVITAL_VALUE = 600000;
+
+// A validated, ready-to-store web-vital extracted from one raw event. metric_value is a finite,
+// non-negative, bounded number; label is one of the six known metric names; page is a clean path.
+type CleanWebVital = { page: string, label: string, metricValue: number };
+
+// Validate one raw event as a web-vital. Returns null (skip-and-continue) when it is not a
+// well-formed webvital: wrong type, unknown metric label, or a metric_value that is not a finite,
+// non-negative, in-range number. Never throws.
+const sanitizeWebVital = (raw: unknown): CleanWebVital | null => {
+   if (!raw || typeof raw !== 'object') { return null; }
+   const ev = raw as Record<string, unknown>;
+   if (ev.type !== 'webvital') { return null; }
+   const label = typeof ev.label === 'string' ? ev.label : '';
+   if (!WEBVITAL_LABELS.has(label)) { return null; }
+   const value = Number(ev.metric_value);
+   if (!Number.isFinite(value) || value < 0 || value > MAX_WEBVITAL_VALUE) { return null; }
+   return { page: cleanEventPath(ev.page), label, metricValue: value };
+};
 
 // Extract + sanitize the five session-level UTM tags from the request body. Each value is
 // sanitized and length-capped like the other string fields; a missing/blank/non-string value
@@ -151,15 +181,27 @@ const collect = async (req: NextApiRequest, res: NextApiResponse<CollectResponse
       // referrer URL with PII in its query can never reach a row. Absent source -> 'direct'.
       const clean = sanitizeBatch(Array.isArray(body.events) ? body.events : [], undefined, body.source);
       const submitted = Array.isArray(body.events) ? body.events.length : 0;
-      if (clean.length === 0) {
+
+      // 4b. Web-vitals (real-user Core Web Vitals) are an ADDITIVE event type handled on their own
+      // path: sanitizeBatch drops them (webvital is not one of its six event types), so they are
+      // extracted and validated here in parallel. The existing five-event path above is untouched.
+      const rawEvents = Array.isArray(body.events) ? body.events : [];
+      const webvitals: CleanWebVital[] = [];
+      for (const raw of rawEvents) {
+         const wv = sanitizeWebVital(raw);
+         if (wv) { webvitals.push(wv); }
+      }
+
+      if (clean.length === 0 && webvitals.length === 0) {
          // Nothing valid to store. Not an error from the client's point of view.
          return res.status(200).json({ recorded: 0, skipped: submitted, error: null });
       }
 
       // 3. Rate limit per (ip + domain). A flood is silently accepted-as-zero (200) so the
       // client does not retry-storm; it just stops being recorded for the window. (`ip` is
-      // already derived at the top of this function for the per-IP request brake.)
-      if (!rateLimitCollect(ip, domain, clean.length)) {
+      // already derived at the top of this function for the per-IP request brake.) Web-vitals
+      // count toward the same per-(ip+domain) row budget so the open endpoint stays bounded.
+      if (!rateLimitCollect(ip, domain, clean.length + webvitals.length)) {
          return res.status(200).json({ recorded: 0, skipped: submitted, error: null });
       }
 
@@ -210,11 +252,40 @@ const collect = async (req: NextApiRequest, res: NextApiResponse<CollectResponse
          }
       }
 
-      // Total-failure honesty: reaching this loop guarantees clean.length > 0 (the empty
-      // case already returned a clean 200 above). If NOT ONE clean row stored, this is not
-      // a partial skip, it is a systemic write failure (schema drift, DB down) that the
-      // per-row skip-and-continue would otherwise mask as a healthy 200 recorded:0. Surface
-      // it as a 500 with a non-null error so monitoring sees the outage instead of "fine".
+      // Web-vital rows, same skip-and-continue discipline. type:'webvital', the numeric value in
+      // metric_value, the metric name in label, value/selector left null/empty. Stamped with the
+      // same owner_id / session / source / segments so they scope and attribute like every other row.
+      for (const wv of webvitals) {
+         try {
+            // eslint-disable-next-line no-await-in-loop
+            await S33kEvent.create({
+               domain,
+               owner_id: ownerId,
+               type: 'webvital',
+               page: wv.page,
+               label: wv.label,
+               metric_value: wv.metricValue,
+               session,
+               // Same session-level first-touch source the clean events carry (sanitizeBatch applied
+               // it per-event from body.source; here we apply the identical sanitizeSource result).
+               source: sanitizeSource(body.source),
+               ...utm,
+               is_bot: isBot,
+               device,
+               country,
+               created,
+            });
+            recorded += 1;
+         } catch (rowError) {
+            console.log('[WARN] Skipping bad collect webvital for ', domain, rowError);
+         }
+      }
+
+      // Total-failure honesty: reaching here guarantees there was at least one clean event OR
+      // web-vital to store (the all-empty case already returned a clean 200 above). If NOT ONE
+      // row stored across both loops, this is not a partial skip, it is a systemic write failure
+      // (schema drift, DB down) that the per-row skip-and-continue would otherwise mask as a
+      // healthy 200 recorded:0. Surface it as a 500 so monitoring sees the outage instead of "fine".
       if (recorded === 0) {
          return res.status(500).json({ recorded: 0, skipped: submitted, error: 'Failed to store any events.' });
       }

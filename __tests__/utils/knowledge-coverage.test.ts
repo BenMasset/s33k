@@ -176,7 +176,11 @@ describe('request_feature safety net (crossCheckCapability)', () => {
    it('does NOT match a genuinely novel request (it should be stored, not pushed back)', () => {
       const novel = [
          'export my keyword rank history as a downloadable CSV file',
-         'monitor my Core Web Vitals LCP and CLS over time',
+         // Was "monitor my Core Web Vitals LCP and CLS over time", but the web_vitals tool now
+         // legitimately owns that ask, so it correctly matches and is no longer novel. Swapped for an
+         // unambiguously novel request (a UI theme toggle, which no tool provides; "digest" would
+         // match weekly_digest) so the test still proves a genuinely new feature ask stays stored.
+         'add dark mode and light mode theme switching to the UI',
          // Was "post my analytics summary into a Slack channel automatically", but segment_analytics
          // and campaign_report now legitimately own "analytics summary" vocabulary, so the only novel
          // part of that phrase was the Slack/automation integration. Swapped for an unambiguously

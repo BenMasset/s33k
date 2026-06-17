@@ -68,6 +68,7 @@ export const allowedApiRoutes = [
    'GET:/api/form-submissions',
    'GET:/api/scroll-depth',
    'GET:/api/page-engagement',
+   'GET:/api/web-vitals',
    'GET:/api/conversions',
    'GET:/api/discover',
    'POST:/api/onboard',

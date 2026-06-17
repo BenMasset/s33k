@@ -394,6 +394,85 @@
          lastTick = Date.now();
       });
 
+      // ===================== Core Web Vitals (real-user field data) ========================
+      // Capture the Core Web Vitals the way Google's field tooling does: from REAL users, with
+      // native PerformanceObserver only (no web-vitals library, no extra bytes). Each metric is
+      // accumulated as the page lives and emitted ONCE on the way out (visibility hidden), when its
+      // value is final, as a type:'webvital' event carrying label:<METRIC> and metric_value:<number>.
+      //
+      // PRIVACY: these are numeric performance measurements, never PII. They carry no URL beyond the
+      // page path already captured on every event.
+      //
+      // Feature-detected and fully guarded: on a browser without PerformanceObserver (or without a
+      // given entry type) the block simply records nothing for that metric and never throws.
+      var webVitals = { LCP: null, CLS: null, INP: null, FID: null, FCP: null, TTFB: null };
+      function observe(type, buffered, cb) {
+         try {
+            if (typeof PerformanceObserver !== 'function') { return; }
+            var po = new PerformanceObserver(function (list) {
+               try {
+                  var entries = list.getEntries();
+                  for (var i = 0; i < entries.length; i++) { cb(entries[i]); }
+               } catch (e) { /* swallow: one bad entry must never break the page */ }
+            });
+            po.observe({ type: type, buffered: buffered });
+         } catch (e) { /* swallow: unsupported entry type on this browser */ }
+      }
+      // LCP: keep the LAST largest-contentful-paint entry's startTime (the metric is the final one).
+      observe('largest-contentful-paint', true, function (entry) {
+         webVitals.LCP = entry.startTime;
+      });
+      // CLS: sum layout-shift entries that did NOT follow recent user input (the spec's definition).
+      observe('layout-shift', true, function (entry) {
+         if (!entry.hadRecentInput) { webVitals.CLS = (webVitals.CLS || 0) + (entry.value || 0); }
+      });
+      // FCP: the first-contentful-paint paint entry's startTime.
+      observe('paint', true, function (entry) {
+         if (entry.name === 'first-contentful-paint') { webVitals.FCP = entry.startTime; }
+      });
+      // INP / interaction latency: track the worst event-timing duration as a representative INP.
+      // 'event' timing is the natively-available signal for interaction responsiveness; we keep the
+      // max duration seen. If the browser supports no 'event' timing at all, we fall back to FID
+      // from the first 'first-input' entry below, so one of INP or FID is reported.
+      observe('event', true, function (entry) {
+         var d = entry.duration;
+         if (typeof d === 'number' && (webVitals.INP === null || d > webVitals.INP)) { webVitals.INP = d; }
+      });
+      // FID: the first-input delay, used as the fallback when 'event' timing is unavailable.
+      observe('first-input', true, function (entry) {
+         if (typeof entry.processingStart === 'number' && typeof entry.startTime === 'number') {
+            webVitals.FID = entry.processingStart - entry.startTime;
+         }
+      });
+      // TTFB: responseStart off the navigation timing entry (time to first byte). Read once.
+      try {
+         if (window.performance && typeof window.performance.getEntriesByType === 'function') {
+            var navEntries = window.performance.getEntriesByType('navigation');
+            if (navEntries && navEntries.length && typeof navEntries[0].responseStart === 'number') {
+               webVitals.TTFB = navEntries[0].responseStart;
+            }
+         }
+      } catch (e) { /* swallow: navigation timing unavailable */ }
+
+      // Emit each captured web-vital ONCE, on the final flush. INP and FID are mutually exclusive in
+      // practice (INP supersedes FID); when INP was captured we skip FID to avoid double-counting.
+      var webVitalsSent = false;
+      function enqueueWebVitals() {
+         try {
+            if (webVitalsSent) { return; }
+            webVitalsSent = true;
+            var metrics = ['LCP', 'CLS', 'INP', 'FID', 'FCP', 'TTFB'];
+            for (var i = 0; i < metrics.length; i++) {
+               var name = metrics[i];
+               if (name === 'FID' && webVitals.INP !== null) { continue; }
+               var v = webVitals[name];
+               if (typeof v === 'number' && isFinite(v) && v >= 0) {
+                  enqueue({ type: 'webvital', page: pagePath(), label: name, metric_value: v });
+               }
+            }
+         } catch (e) { /* swallow */ }
+      }
+
       // ===================== Periodic + final flush ========================================
       function flushSessionMetrics(useBeacon) {
          try {
@@ -407,6 +486,8 @@
             if (maxScroll > 0) {
                enqueue({ type: 'scroll', page: pagePath(), value: maxScroll });
             }
+            // Final-only: web-vitals are emitted on the way out so their values are settled.
+            if (useBeacon) { enqueueWebVitals(); }
             flush(useBeacon);
          } catch (e) { /* swallow */ }
       }

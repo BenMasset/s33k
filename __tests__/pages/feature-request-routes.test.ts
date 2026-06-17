@@ -117,8 +117,10 @@ describe('POST /api/feature-request: a genuinely new request is stored', () => {
       asCaller(TENANT_A);
       mockFeatureRequest.create.mockResolvedValue({ ID: 7 });
       const req = makeReq({
+         // A genuinely novel ask (no tool provides a UI theme toggle). Core Web Vitals is no longer
+         // novel now that the web_vitals tool exists, so the safety net rightly matches it.
          method: 'POST',
-         body: { request: 'Monitor my Core Web Vitals (LCP and CLS) over time', context: 'I forget to check' },
+         body: { request: 'Add dark mode and light mode theme switching to the UI', context: 'I forget to check' },
       });
       const res = makeRes();
 
@@ -142,7 +144,7 @@ describe('POST /api/feature-request: a genuinely new request is stored', () => {
       asCaller(TENANT_A);
       mockFeatureRequest.create.mockResolvedValue({ ID: 8 });
       mockNotify.mockResolvedValue({ sent: false, error: 'boom' });
-      const req = makeReq({ method: 'POST', body: { request: 'Add Core Web Vitals monitoring (LCP and CLS) over time' } });
+      const req = makeReq({ method: 'POST', body: { request: 'Add dark mode and light mode theme switching to the UI' } });
       const res = makeRes();
 
       await handler(req, res);

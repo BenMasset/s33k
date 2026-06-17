@@ -1663,6 +1663,50 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// web_vitals
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'web_vitals',
+   {
+      title: 'Core Web Vitals',
+      description:
+         'Report real-user Core Web Vitals for a domain from s33k autocapture. For each metric (LCP, CLS, INP, FID, FCP, TTFB) '
+         + 'it returns the p75 (the 75th-percentile value Google uses to score CWV) and a rating against Google\'s field thresholds '
+         + '(good / needs-improvement / poor) with the sample count behind each. It also returns worstPages: the slowest pages by '
+         + 'LCP p75 (or the most-sampled metric when LCP has no samples), so you see WHICH pages to fix. metrics[] carries each '
+         + 'metric, its p75, rating, sampleCount, and unit (ms, or score for CLS). This is FIELD data from real visitors, not a lab '
+         + 'test, and flows from the same s33k.js tag as the other analytics, so no extra setup is needed. When no samples exist '
+         + 'yet, the response includes an explanatory note. Cookieless, no PII. Reads the first-party event store; never queries an LLM.',
+      inputSchema: {
+         domain: z.string().describe('The domain to report Core Web Vitals for, e.g. "getmasset.com".'),
+         period: z
+            .string()
+            .optional()
+            .describe('Reporting window, e.g. "30d", "7d", "90d". Defaults to "30d".'),
+      },
+   },
+   async ({ domain, period }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         const data = await s33kFetch('/api/web-vitals', { query });
+         return jsonResult({
+            domain: data.domain,
+            period: data.period,
+            metrics: data.metrics,
+            worstPagesMetric: data.worstPagesMetric,
+            worstPages: data.worstPages,
+            totalSamples: data.totalSamples,
+            note: data.note,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // conversions_by_source
 // ---------------------------------------------------------------------------
 server.registerTool(
@@ -2654,7 +2698,7 @@ async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
    process.stderr.write(
-      `s33k-mcp connected (base URL: ${BASE_URL}). 69 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
+      `s33k-mcp connected (base URL: ${BASE_URL}). 70 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
    );
 }
 
