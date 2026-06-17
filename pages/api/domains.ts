@@ -6,6 +6,7 @@ import Keyword from '../../database/models/keyword';
 import getdomainStats from '../../utils/domains';
 import authorize from '../../utils/authorize';
 import { scopeWhere, ownerIdFor } from '../../utils/scope';
+import resolveDomainAccess from '../../utils/domain-access';
 import type Account from '../../database/models/account';
 import { checkSerchConsoleIntegration, removeLocalSCData } from '../../utils/searchConsole';
 import { removeFromRetryQueue } from '../../utils/scraper';
@@ -111,7 +112,9 @@ export const deleteDomain = async (req: NextApiRequest, res: NextApiResponse<Dom
       // its on-disk Search Console cache by passing the bare domain string. With
       // MULTI_TENANT off, scopeWhere is {} so this is the existing "does the domain exist"
       // check; with it on, it enforces owner_id.
-      const owned = await Domain.findOne({ where: { domain, ...scope } });
+      // Deleting a domain (and cascading its keywords + SC cache) is an owner-only mutation,
+      // so use the WRITE gate. A shared read-only viewer (M2) can never delete the owner's domain.
+      const owned = await resolveDomainAccess(account, domain as string, { write: true });
       if (!owned) {
          return res.status(404).json({ domainRemoved: 0, keywordsRemoved: 0, SCDataRemoved: false, error: 'Domain not found for this account' });
       }
@@ -140,7 +143,9 @@ export const updateDomain = async (req: NextApiRequest, res: NextApiResponse<Dom
    } = req.body as DomainSettings;
 
    try {
-      const domainToUpdate: Domain|null = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+      // Updating a domain's settings is owner-only, so use the WRITE gate (shared viewers, M2,
+      // cannot change another account's domain configuration).
+      const domainToUpdate: Domain|null = await resolveDomainAccess(account, domain as string, { write: true });
       // Validate Search Console API Data
       if (domainToUpdate && search_console?.client_email && search_console?.private_key) {
          const theDomainObj = domainToUpdate.get({ plain: true });

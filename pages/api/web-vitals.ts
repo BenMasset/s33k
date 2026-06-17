@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { Op } from 'sequelize';
 import db from '../../database/database';
 import authorize from '../../utils/authorize';
+import resolveDomainAccess from '../../utils/domain-access';
 import { scopeWhere } from '../../utils/scope';
 import Domain from '../../database/models/domain';
 import S33kEvent from '../../database/models/s33kEvent';
@@ -53,7 +54,7 @@ const getWebVitals = async (req: NextApiRequest, res: NextApiResponse<WebVitalsA
    try {
       // Ownership gate first: a domain belongs to exactly one account (domain is globally unique),
       // so by-domain scoping cannot leak across tenants. 403 before any pillar read.
-      const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+      const owned = await resolveDomainAccess(account, domain);
       if (!owned) {
          return res.status(403).json({ error: 'Domain not found for this account' });
       }

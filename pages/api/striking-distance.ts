@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import db from '../../database/database';
 import authorize from '../../utils/authorize';
+import resolveDomainAccess from '../../utils/domain-access';
 import { scopeWhere } from '../../utils/scope';
 import Domain from '../../database/models/domain';
 import Keyword from '../../database/models/keyword';
@@ -49,7 +50,7 @@ const getStrikingDistance = async (req: NextApiRequest, res: NextApiResponse<Res
 
    // Verify the caller owns this domain before reading any keyword data for it. scopeWhere lets
    // admin / MULTI_TENANT-off callers match any domain and limits a tenant to their own rows.
-   const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+   const owned = await resolveDomainAccess(account, domain);
    if (!owned) { return res.status(403).json({ error: 'Domain not found for this account' }); }
 
    const min = parseBound(q.min, 4);

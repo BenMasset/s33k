@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import db from '../../database/database';
 import authorize from '../../utils/authorize';
+import resolveDomainAccess from '../../utils/domain-access';
 import { scopeWhere, ownerIdFor } from '../../utils/scope';
 import Domain from '../../database/models/domain';
 import Segment from '../../database/models/segment';
@@ -75,7 +76,7 @@ const createSegment = async (req: NextApiRequest, res: NextApiResponse<SegmentsR
    }
    try {
       // Ownership gate: the caller must own the domain before defining a segment on it.
-      const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+      const owned = await resolveDomainAccess(account, domain, { write: true });
       if (!owned) { return res.status(403).json({ error: 'Domain not found for this account' }); }
 
       const segment = await Segment.create({

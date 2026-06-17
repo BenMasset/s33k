@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { Op } from 'sequelize';
 import db from '../../database/database';
 import authorize from '../../utils/authorize';
+import resolveDomainAccess from '../../utils/domain-access';
 import { scopeWhere } from '../../utils/scope';
 import Domain from '../../database/models/domain';
 import Goal from '../../database/models/goal';
@@ -44,7 +45,7 @@ const getChannelReport = async (req: NextApiRequest, res: NextApiResponse<Channe
    const period = (typeof q.period === 'string' && q.period) ? q.period : '30d';
 
    // Ownership gate first: a domain belongs to exactly one account, so this scopes the whole report.
-   const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+   const owned = await resolveDomainAccess(account, domain);
    if (!owned) { return res.status(403).json({ error: 'Domain not found for this account' }); }
 
    try {

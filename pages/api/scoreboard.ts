@@ -3,6 +3,7 @@ import db from '../../database/database';
 import Domain from '../../database/models/domain';
 import Keyword from '../../database/models/keyword';
 import authorize from '../../utils/authorize';
+import resolveDomainAccess from '../../utils/domain-access';
 import { scopeWhere } from '../../utils/scope';
 import type Account from '../../database/models/account';
 import parseKeywords from '../../utils/parseKeywords';
@@ -77,7 +78,7 @@ const getScoreboard = async (req: NextApiRequest, res: NextApiResponse<Scoreboar
 
    // Verify the caller owns this domain before exposing any of its data. With MULTI_TENANT
    // off, scopeWhere returns {} so this matches the domain by name exactly as before.
-   const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+   const owned = await resolveDomainAccess(account, domain);
    if (!owned) {
       return res.status(403).json({ error: 'Domain not found for this account' });
    }

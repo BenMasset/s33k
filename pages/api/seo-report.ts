@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import db from '../../database/database';
 import authorize from '../../utils/authorize';
+import resolveDomainAccess from '../../utils/domain-access';
 import { scopeWhere } from '../../utils/scope';
 import Domain from '../../database/models/domain';
 import Keyword from '../../database/models/keyword';
@@ -134,7 +135,7 @@ const getSeoReport = async (req: NextApiRequest, res: NextApiResponse<SeoReportR
 
    // Verify the caller owns this domain before reading any of its keyword data. scopeWhere returns
    // {} for admin / MULTI_TENANT-off callers (match any domain) and limits a tenant to their rows.
-   const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+   const owned = await resolveDomainAccess(account, domain);
    if (!owned) { return res.status(403).json({ error: 'Domain not found for this account' }); }
 
    // Tenant-scoped cache (key begins with the resolved account ID), built only after the ownership

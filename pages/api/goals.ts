@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import db from '../../database/database';
 import authorize from '../../utils/authorize';
+import resolveDomainAccess from '../../utils/domain-access';
 import { scopeWhere, ownerIdFor } from '../../utils/scope';
 import Domain from '../../database/models/domain';
 import Goal from '../../database/models/goal';
@@ -72,7 +73,7 @@ const createGoal = async (req: NextApiRequest, res: NextApiResponse<GoalsRespons
    }
    try {
       // Ownership gate: the caller must own the domain before defining a goal on it.
-      const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+      const owned = await resolveDomainAccess(account, domain, { write: true });
       if (!owned) { return res.status(403).json({ error: 'Domain not found for this account' }); }
 
       // Reject a duplicate goal name for this (domain, owner). Otherwise the by-name resolvers

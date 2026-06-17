@@ -1,8 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import db from '../../database/database';
-import Domain from '../../database/models/domain';
 import authorize from '../../utils/authorize';
-import { scopeWhere } from '../../utils/scope';
+import resolveDomainAccess from '../../utils/domain-access';
 import type Account from '../../database/models/account';
 import { crawlSite } from '../../utils/site-crawl';
 import { auditSite, SiteAuditResult } from '../../utils/site-audit';
@@ -32,7 +31,7 @@ const getSiteAudit = async (req: NextApiRequest, res: NextApiResponse<Resp>, acc
 
    // Ownership gate first: the domain column is globally unique, so by-domain scoping cannot leak
    // across tenants. 403 before crawling anything for this domain.
-   const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+   const owned = await resolveDomainAccess(account, domain);
    if (!owned) { return res.status(403).json({ error: 'Domain not found for this account' }); }
 
    // Tenant-scoped cache (key begins with the resolved account ID), built only after the ownership

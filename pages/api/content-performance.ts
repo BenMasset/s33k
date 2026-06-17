@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { Op } from 'sequelize';
 import db from '../../database/database';
 import authorize from '../../utils/authorize';
+import resolveDomainAccess from '../../utils/domain-access';
 import { scopeWhere } from '../../utils/scope';
 import Domain from '../../database/models/domain';
 import Goal from '../../database/models/goal';
@@ -58,7 +59,7 @@ const getContentPerformance = async (req: NextApiRequest, res: NextApiResponse<R
 
    // Ownership gate first: the domain column is globally unique, so by-domain scoping cannot leak
    // across tenants. 403 before any pillar read.
-   const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+   const owned = await resolveDomainAccess(account, domain);
    if (!owned) { return res.status(403).json({ error: 'Domain not found for this account' }); }
 
    try {

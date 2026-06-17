@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { Op } from 'sequelize';
 import db from '../../database/database';
 import authorize from '../../utils/authorize';
+import resolveDomainAccess from '../../utils/domain-access';
 import { scopeWhere } from '../../utils/scope';
 import Domain from '../../database/models/domain';
 import S33kEvent from '../../database/models/s33kEvent';
@@ -49,7 +50,7 @@ const getFunnel = async (req: NextApiRequest, res: NextApiResponse<FunnelRespons
    const { steps, error: stepsError } = parseFunnelSteps(q.steps);
    if (stepsError || !steps) { return res.status(400).json({ error: stepsError }); }
 
-   const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+   const owned = await resolveDomainAccess(account, domain);
    if (!owned) { return res.status(403).json({ error: 'Domain not found for this account' }); }
 
    try {

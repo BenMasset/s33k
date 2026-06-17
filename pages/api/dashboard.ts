@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { Op } from 'sequelize';
 import db from '../../database/database';
 import authorize from '../../utils/authorize';
+import resolveDomainAccess from '../../utils/domain-access';
 import { scopeWhere } from '../../utils/scope';
 import Domain from '../../database/models/domain';
 import Keyword from '../../database/models/keyword';
@@ -72,7 +73,7 @@ const getDashboard = async (req: NextApiRequest, res: NextApiResponse<DashboardA
    // Ownership gate first. With MULTI_TENANT off, scopeWhere returns {} so this is an existence
    // check; with it on, a tenant can only see a domain they own. The domain column is globally
    // unique, so everything below (all keyed by the domain string) is gated behind this one check.
-   const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+   const owned = await resolveDomainAccess(account, domain);
    if (!owned) { return res.status(403).json({ error: 'Domain not found for this account' }); }
 
    try {

@@ -7,6 +7,7 @@ import generateEmail from '../../utils/generateEmail';
 import parseKeywords from '../../utils/parseKeywords';
 import authorize from '../../utils/authorize';
 import { scopeWhere } from '../../utils/scope';
+import resolveDomainAccess from '../../utils/domain-access';
 import type Account from '../../database/models/account';
 import { getAppSettings } from './settings';
 
@@ -38,7 +39,10 @@ const notify = async (req: NextApiRequest, res: NextApiResponse<NotifyResponse>,
       }
 
       if (reqDomain) {
-         const theDomain = await Domain.findOne({ where: { domain: reqDomain, ...scopeWhere(account) } });
+         // Triggering a notification email is an owner action on the domain's data, so use
+         // the WRITE gate: a shared read-only viewer (M2) must not be able to fire emails on
+         // a domain owned by someone else. Owner-only now and after sharing lands.
+         const theDomain = await resolveDomainAccess(account, reqDomain, { write: true });
          if (theDomain) {
             await sendNotificationEmail(theDomain, settings, account);
          }

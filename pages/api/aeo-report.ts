@@ -1,10 +1,9 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { Op } from 'sequelize';
 import db from '../../database/database';
-import Domain from '../../database/models/domain';
 import CrawlerHit from '../../database/models/crawlerHit';
 import authorize from '../../utils/authorize';
-import { scopeWhere } from '../../utils/scope';
+import resolveDomainAccess from '../../utils/domain-access';
 import type Account from '../../database/models/account';
 import { getAnalyticsProvider, ReferralSource } from '../../utils/analytics';
 import { periodStartMs } from '../../utils/period';
@@ -50,8 +49,8 @@ import * as reportCache from '../../utils/report-cache';
  * `note` says so honestly, because AI crawls normally appear before AI referrals,
  * so an empty-but-early funnel is the expected state, not a bug.
  *
- * Wired-route contract: db.sync, authorize -> 401, GET guard -> 405, Domain
- * ownership scopeWhere -> 403, try/catch -> 400. Degrades gracefully: a thrown
+ * Wired-route contract: db.sync, authorize -> 401, GET guard -> 405, per-domain
+ * resolveDomainAccess gate -> 403, try/catch -> 400. Degrades gracefully: a thrown
  * crawler read or referral read sets the matching error field and still returns
  * 200 with the rest of the report intact.
  */
@@ -160,7 +159,7 @@ const getAeoReport = async (req: NextApiRequest, res: NextApiResponse<AeoReportR
    try {
       // Verify the caller owns this domain before exposing any of its data. With
       // MULTI_TENANT off, scopeWhere is {} so this matches the domain by name.
-      const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+      const owned = await resolveDomainAccess(account, domain);
       if (!owned) {
          return res.status(403).json({ error: 'Domain not found for this account' });
       }
@@ -212,10 +211,11 @@ const getAeoReport = async (req: NextApiRequest, res: NextApiResponse<AeoReportR
       try {
          const cutoff = new Date(periodStartMs(period, Date.now())).toJSON();
          crawlerRows = await CrawlerHit.findAll({
-            // Spread scopeWhere into EVERY CrawlerHit query (CLAUDE.md rule). Defense-in-depth:
-            // the @Unique domain + ownership 403 above already isolate tenants, so this is
-            // convention alignment with no behavior change while the domain is unique.
-            where: { domain, hitAt: { [Op.gte]: cutoff }, ...scopeWhere(account) },
+            // CrawlerHit has NO owner_id column, so do NOT spread scopeWhere here (it would
+            // filter a non-existent owner_id and break under MULTI_TENANT on Postgres).
+            // Isolation comes from the resolveDomainAccess gate above plus the globally-@Unique
+            // domain: a domain name belongs to exactly one account, so this read cannot cross tenants.
+            where: { domain, hitAt: { [Op.gte]: cutoff } },
             order: [['hitAt', 'DESC']],
             raw: true,
          }) as unknown as CrawlerRow[];

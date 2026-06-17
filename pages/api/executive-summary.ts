@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { Op } from 'sequelize';
 import db from '../../database/database';
 import authorize from '../../utils/authorize';
+import resolveDomainAccess from '../../utils/domain-access';
 import { scopeWhere } from '../../utils/scope';
 import Domain from '../../database/models/domain';
 import Goal from '../../database/models/goal';
@@ -103,7 +104,7 @@ const getExecutiveSummary = async (
    // Ownership gate: verify the caller owns this domain BEFORE reading any pillar. With MULTI_TENANT
    // off, scopeWhere returns {} so this is a plain by-name existence check; with it on, a tenant can
    // only summarize a domain they own, and every read below inherits that scope.
-   const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+   const owned = await resolveDomainAccess(account, domain);
    if (!owned) { return res.status(403).json({ error: 'Domain not found for this account' }); }
 
    // Tenant-scoped cache (key begins with the resolved account ID), built only after ownership

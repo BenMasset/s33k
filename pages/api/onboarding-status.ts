@@ -3,6 +3,7 @@ import { Op } from 'sequelize';
 import db from '../../database/database';
 import authorize from '../../utils/authorize';
 import { scopeWhere } from '../../utils/scope';
+import resolveDomainAccess from '../../utils/domain-access';
 import Domain from '../../database/models/domain';
 import Keyword from '../../database/models/keyword';
 import S33kEvent from '../../database/models/s33kEvent';
@@ -46,7 +47,7 @@ const getStatus = async (req: NextApiRequest, res: NextApiResponse<Resp>, accoun
 
    try {
       const scope = scopeWhere(account);
-      const owned = await Domain.findOne({ where: { domain, ...scope } });
+      const owned = await resolveDomainAccess(account, domain);
       // Recent events = the tracking script is live and sending. 7-day window.
       const weekAgo = new Date(Date.now() - 7 * 86400e3).toJSON();
       const [keywordCount, recentEvents, goalCount] = await Promise.all([

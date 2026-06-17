@@ -32,6 +32,7 @@ import db from '../../database/database';
 import Domain from '../../database/models/domain';
 import Keyword from '../../database/models/keyword';
 import authorize from '../../utils/authorize';
+import resolveDomainAccess from '../../utils/domain-access';
 import { scopeWhere } from '../../utils/scope';
 import type Account from '../../database/models/account';
 import parseKeywords from '../../utils/parseKeywords';
@@ -96,7 +97,7 @@ const getEntryPages = async (req: NextApiRequest, res: NextApiResponse<EntryPage
 
    // Ownership gate (identical to scoreboard.ts): verify the caller owns this domain
    // before exposing any of its data. With MULTI_TENANT off, scopeWhere returns {}.
-   const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+   const owned = await resolveDomainAccess(account, domain);
    if (!owned) {
       return res.status(403).json({ error: 'Domain not found for this account' });
    }

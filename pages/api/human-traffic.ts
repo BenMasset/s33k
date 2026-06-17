@@ -1,9 +1,8 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import db from '../../database/database';
 import authorize from '../../utils/authorize';
-import { scopeWhere } from '../../utils/scope';
+import resolveDomainAccess from '../../utils/domain-access';
 import type Account from '../../database/models/account';
-import Domain from '../../database/models/domain';
 import { getAnalyticsProvider } from '../../utils/analytics';
 import { estimateHumanTraffic, HumanTrafficEstimate } from '../../utils/bot-filter';
 
@@ -33,7 +32,7 @@ const getHumanTraffic = async (req: NextApiRequest, res: NextApiResponse<HumanTr
    const domain = req.query.domain as string;
    const period = (typeof req.query.period === 'string' && req.query.period) ? req.query.period : '30d';
 
-   const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+   const owned = await resolveDomainAccess(account, domain);
    if (!owned) {
       return res.status(403).json({ error: 'Domain not found for this account' });
    }

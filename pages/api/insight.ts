@@ -3,7 +3,7 @@ import db from '../../database/database';
 import { getCountryInsight, getKeywordsInsight, getPagesInsight } from '../../utils/insight';
 import { fetchDomainSCData, getSearchConsoleApiInfo, readLocalSCData } from '../../utils/searchConsole';
 import authorize from '../../utils/authorize';
-import { scopeWhere } from '../../utils/scope';
+import resolveDomainAccess from '../../utils/domain-access';
 import type Account from '../../database/models/account';
 import Domain from '../../database/models/domain';
 
@@ -28,10 +28,11 @@ const getDomainSearchConsoleInsight = async (req: NextApiRequest, res: NextApiRe
    if (!req.query.domain && typeof req.query.domain !== 'string') return res.status(400).json({ data: null, error: 'Domain is Missing.' });
    const domainname = (req.query.domain as string).replaceAll('-', '.').replaceAll('_', '-');
 
-   // Verify the caller owns this domain before reading any (possibly cached) Search Console
-   // data for it. Scoped by scopeWhere: admin / MULTI_TENANT-off callers match any domain,
-   // a tenant only matches their own rows. This guards the local-SC-file read below too.
-   const ownedDomain: Domain | null = await Domain.findOne({ where: { domain: domainname, ...scopeWhere(account) } });
+   // Verify the caller may access this domain before reading any (possibly cached) Search
+   // Console data for it. resolveDomainAccess is the per-domain chokepoint: admin /
+   // MULTI_TENANT-off callers match any domain, a tenant only their own (M2: owned OR shared).
+   // This guards the local-SC-file read below too.
+   const ownedDomain: Domain | null = await resolveDomainAccess(account, domainname);
    if (!ownedDomain) {
       return res.status(403).json({ data: null, error: 'Domain not found for this account' });
    }

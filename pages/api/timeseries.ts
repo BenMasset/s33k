@@ -1,8 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import db from '../../database/database';
-import Domain from '../../database/models/domain';
 import authorize from '../../utils/authorize';
-import { scopeWhere } from '../../utils/scope';
+import resolveDomainAccess from '../../utils/domain-access';
 import type Account from '../../database/models/account';
 import { getAnalyticsProvider, TimeSeriesPoint } from '../../utils/analytics';
 
@@ -34,7 +33,7 @@ const getTimeSeries = async (req: NextApiRequest, res: NextApiResponse<TimeSerie
    const period = (typeof req.query.period === 'string' && req.query.period) ? req.query.period : '30d';
    const unit = (typeof req.query.unit === 'string' && req.query.unit) ? req.query.unit : 'day';
 
-   const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+   const owned = await resolveDomainAccess(account, domain);
    if (!owned) {
       return res.status(403).json({ error: 'Domain not found for this account' });
    }

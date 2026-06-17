@@ -2,8 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { Op } from 'sequelize';
 import db from '../../database/database';
 import authorize from '../../utils/authorize';
-import { scopeWhere } from '../../utils/scope';
-import Domain from '../../database/models/domain';
+import resolveDomainAccess from '../../utils/domain-access';
 import CrawlerHit from '../../database/models/crawlerHit';
 import type Account from '../../database/models/account';
 
@@ -76,17 +75,18 @@ const getAiCrawlers = async (req: NextApiRequest, res: NextApiResponse<AiCrawler
    const period = (typeof req.query.period === 'string' && req.query.period) ? req.query.period : '30d';
 
    try {
-      const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+      const owned = await resolveDomainAccess(account, domain);
       if (!owned) {
          return res.status(403).json({ error: 'Domain not found for this account' });
       }
 
       const cutoff = periodToCutoff(period).toJSON();
       const rows = await CrawlerHit.findAll({
-         // Spread scopeWhere into EVERY CrawlerHit query (CLAUDE.md rule). Defense-in-depth: the
-         // @Unique domain + ownership 403 above already isolate tenants, so this is convention
-         // alignment with no behavior change while the domain is unique.
-         where: { domain, hitAt: { [Op.gte]: cutoff }, ...scopeWhere(account) },
+         // CrawlerHit has NO owner_id column, so do NOT spread scopeWhere here (it would
+         // filter a non-existent owner_id and break under MULTI_TENANT on Postgres). Isolation
+         // comes from the resolveDomainAccess gate above plus the globally-@Unique domain: a
+         // domain name belongs to exactly one account, so this read cannot cross tenants.
+         where: { domain, hitAt: { [Op.gte]: cutoff } },
          order: [['hitAt', 'DESC']],
          raw: true,
       }) as unknown as Array<{

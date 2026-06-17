@@ -13,9 +13,8 @@
 
 import type { NextApiRequest, NextApiResponse } from 'next';
 import db from '../../database/database';
-import Domain from '../../database/models/domain';
 import authorize from '../../utils/authorize';
-import { scopeWhere } from '../../utils/scope';
+import resolveDomainAccess from '../../utils/domain-access';
 import type Account from '../../database/models/account';
 import { getInstallGuides, InstallGuides } from '../../utils/install-guides';
 
@@ -56,7 +55,7 @@ const getInstructions = async (
 
    try {
       // Verify the caller owns the domain before exposing its install details.
-      const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+      const owned = await resolveDomainAccess(account, domain);
       if (!owned) {
          return res.status(403).json({ error: 'Domain not found for this account' });
       }

@@ -4,6 +4,7 @@ import Domain from '../../database/models/domain';
 import { fetchDomainSCData, getSearchConsoleApiInfo, readLocalSCData } from '../../utils/searchConsole';
 import authorize from '../../utils/authorize';
 import { scopeWhere } from '../../utils/scope';
+import resolveDomainAccess from '../../utils/domain-access';
 import type Account from '../../database/models/account';
 
 type searchConsoleRes = {
@@ -34,7 +35,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 const getDomainSearchConsoleData = async (req: NextApiRequest, res: NextApiResponse<searchConsoleRes>, account?: Account | null) => {
    if (!req.query.domain && typeof req.query.domain !== 'string') return res.status(400).json({ data: null, error: 'Domain is Missing.' });
    const domainname = (req.query.domain as string).replaceAll('-', '.').replaceAll('_', '-');
-   const foundDomain:Domain| null = await Domain.findOne({ where: { domain: domainname, ...scopeWhere(account) } });
+   const foundDomain:Domain| null = await resolveDomainAccess(account, domainname);
    if (!foundDomain) {
       return res.status(403).json({ data: null, error: 'Domain not found for this account' });
    }

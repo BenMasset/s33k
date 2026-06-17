@@ -5,6 +5,7 @@ import Keyword from '../../database/models/keyword';
 import CrawlerHit from '../../database/models/crawlerHit';
 import Domain from '../../database/models/domain';
 import authorize from '../../utils/authorize';
+import resolveDomainAccess from '../../utils/domain-access';
 import { scopeWhere } from '../../utils/scope';
 import type Account from '../../database/models/account';
 import parseKeywords from '../../utils/parseKeywords';
@@ -145,7 +146,7 @@ const getBriefing = async (req: NextApiRequest, res: NextApiResponse<BriefingRes
    // on, a tenant can only brief a domain they own; everything below (Keyword,
    // CrawlerHit, and the analytics providers, all keyed by the domain string) is
    // gated behind this single ownership check.
-   const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+   const owned = await resolveDomainAccess(account, domain);
    if (!owned) {
       return res.status(403).json({ error: 'Domain not found for this account' });
    }

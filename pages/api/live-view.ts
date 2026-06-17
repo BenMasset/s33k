@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { Op } from 'sequelize';
 import db from '../../database/database';
 import authorize from '../../utils/authorize';
+import resolveDomainAccess from '../../utils/domain-access';
 import { scopeWhere } from '../../utils/scope';
 import Domain from '../../database/models/domain';
 import S33kEvent from '../../database/models/s33kEvent';
@@ -76,7 +77,7 @@ const getLiveView = async (req: NextApiRequest, res: NextApiResponse<LiveViewRes
    const requested = parseInt(typeof q.windowMinutes === 'string' ? q.windowMinutes : '', 10);
    const windowMinutes = Number.isFinite(requested) ? Math.min(Math.max(requested, 1), MAX_WINDOW_MINUTES) : 5;
 
-   const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+   const owned = await resolveDomainAccess(account, domain);
    if (!owned) { return res.status(403).json({ error: 'Domain not found for this account' }); }
 
    try {

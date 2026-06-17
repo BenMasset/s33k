@@ -6,6 +6,7 @@ import CrawlerHit from '../../database/models/crawlerHit';
 import S33kEvent from '../../database/models/s33kEvent';
 import Domain from '../../database/models/domain';
 import authorize from '../../utils/authorize';
+import resolveDomainAccess from '../../utils/domain-access';
 import { scopeWhere } from '../../utils/scope';
 import type Account from '../../database/models/account';
 import parseKeywords from '../../utils/parseKeywords';
@@ -230,7 +231,7 @@ const getAlerts = async (req: NextApiRequest, res: NextApiResponse<AlertsRespons
    // Ownership gate, identical to scoreboard.ts / briefing.ts. With MULTI_TENANT off
    // scopeWhere returns {} so this is an existence check; with it on, a tenant can only
    // analyze a domain it owns, and every read below is keyed behind this single check.
-   const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+   const owned = await resolveDomainAccess(account, domain);
    if (!owned) {
       return res.status(403).json({ error: 'Domain not found for this account' });
    }

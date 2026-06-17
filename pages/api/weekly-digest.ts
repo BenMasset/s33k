@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { Op } from 'sequelize';
 import db from '../../database/database';
 import authorize from '../../utils/authorize';
+import resolveDomainAccess from '../../utils/domain-access';
 import { scopeWhere } from '../../utils/scope';
 import Domain from '../../database/models/domain';
 import Keyword from '../../database/models/keyword';
@@ -81,7 +82,7 @@ const getWeeklyDigest = async (req: NextApiRequest, res: NextApiResponse<WeeklyD
    // Ownership gate BEFORE any pillar read. With MULTI_TENANT off this is just an existence check;
    // with it on a tenant can only digest a domain they own (the domain column is globally unique, so
    // by-domain scoping below cannot leak across tenants).
-   const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+   const owned = await resolveDomainAccess(account, domain);
    if (!owned) { return res.status(403).json({ error: 'Domain not found for this account' }); }
 
    // Cache only AFTER the ownership check: the key is tenant-scoped (begins with the resolved

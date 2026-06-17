@@ -3,6 +3,7 @@ import db from '../../database/database';
 import Domain from '../../database/models/domain';
 import Keyword from '../../database/models/keyword';
 import authorize from '../../utils/authorize';
+import resolveDomainAccess from '../../utils/domain-access';
 import { scopeWhere } from '../../utils/scope';
 import type Account from '../../database/models/account';
 import { crawlSite } from '../../utils/site-crawl';
@@ -77,7 +78,7 @@ const getContentGap = async (req: NextApiRequest, res: NextApiResponse<Resp>, ac
    // data. scopeWhere lets admin / MULTI_TENANT-off callers match any domain and limits a tenant to
    // their own. The competitor is a public site we only crawl, never a tracked domain, so it needs
    // no ownership check.
-   const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+   const owned = await resolveDomainAccess(account, domain);
    if (!owned) { return res.status(403).json({ error: 'Domain not found for this account' }); }
 
    try {

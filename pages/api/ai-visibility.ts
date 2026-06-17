@@ -1,10 +1,9 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { Op } from 'sequelize';
 import db from '../../database/database';
-import Domain from '../../database/models/domain';
 import CrawlerHit from '../../database/models/crawlerHit';
 import authorize from '../../utils/authorize';
-import { scopeWhere } from '../../utils/scope';
+import resolveDomainAccess from '../../utils/domain-access';
 import type Account from '../../database/models/account';
 import { getAnalyticsProvider, ReferralSource } from '../../utils/analytics';
 import { cleanPath } from '../../utils/lodd';
@@ -195,9 +194,9 @@ const getAiVisibility = async (req: NextApiRequest, res: NextApiResponse<AiVisib
    const domain = req.query.domain as string;
    const period = (typeof req.query.period === 'string' && req.query.period) ? req.query.period : '30d';
 
-   // Verify the caller owns this domain before exposing any of its data. With
-   // MULTI_TENANT off, scopeWhere returns {} so this matches the domain by name.
-   const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+   // Verify the caller may access this domain before exposing any of its data, via the
+   // per-domain chokepoint. MULTI_TENANT off -> matches by domain name; on -> owned (M2: shared).
+   const owned = await resolveDomainAccess(account, domain);
    if (!owned) {
       return res.status(403).json({ error: 'Domain not found for this account' });
    }

@@ -1,8 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import db from '../../database/database';
 import authorize from '../../utils/authorize';
-import { scopeWhere } from '../../utils/scope';
-import Domain from '../../database/models/domain';
+import resolveDomainAccess from '../../utils/domain-access';
 import CrawlerHit from '../../database/models/crawlerHit';
 import type Account from '../../database/models/account';
 import { classifyCrawler, CrawlerClassification } from '../../utils/ai-crawlers';
@@ -52,7 +51,7 @@ const recordCrawlerHit = async (req: NextApiRequest, res: NextApiResponse<Crawle
       // A crawler hit is tenant data keyed by domain. Confirm the caller owns the domain
       // before recording, so one account cannot write hit rows against another's domain.
       // With MULTI_TENANT off, scopeWhere returns {} and this is the existing lookup-by-domain.
-      const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+      const owned = await resolveDomainAccess(account, domain, { write: true });
       if (!owned) {
          return res.status(403).json({ error: 'Domain not found for this account' });
       }
