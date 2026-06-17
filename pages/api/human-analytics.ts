@@ -8,7 +8,7 @@ import S33kEvent from '../../database/models/s33kEvent';
 import type Account from '../../database/models/account';
 import { periodStartMs } from '../../utils/period';
 import {
-   sessionize, applyFilters, parseSegmentFilters, EventLike, SegmentFilters, SessionAgg,
+   sessionize, applyFilters, parseSegmentFilters, isEngaged, EventLike, SegmentFilters, SessionAgg,
 } from '../../utils/sessionize';
 
 // GET /api/human-analytics?domain=&period=[&includeBots=true][&<filters>]
@@ -83,7 +83,9 @@ const getHumanAnalytics = async (req: NextApiRequest, res: NextApiResponse<Human
       const sessions: SessionAgg[] = applyFilters(allSessions, filters).filter((s) => s.pageviewCount > 0);
       const visitors = sessions.length;
       const pageviews = sessions.reduce((sum, s) => sum + s.pageviewCount, 0);
-      const bounced = sessions.filter((s) => s.pageviewCount === 1).length;
+      // Use the shared engaged/bounce test so this endpoint's bounce rate matches period-compare and
+      // the engagement filter. `pageviewCount === 1` disagreed (it ignored non-pageview events).
+      const bounced = sessions.filter((s) => !isEngaged(s)).length;
       const bounceRatePct = visitors > 0 ? Math.round((1000 * bounced) / visitors) / 10 : 0;
       const pagesPerSession = visitors > 0 ? Math.round((100 * pageviews) / visitors) / 100 : 0;
 

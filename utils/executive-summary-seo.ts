@@ -37,9 +37,11 @@ export type SeoSummary = {
 
 const PAGE_ONE_MAX = 10;
 
-// Parse history into chronological [dateMs, position] pairs, oldest first. Drops non-positive
-// positions (0 means "not in the top 100 that day", not a real rank, and would distort a delta).
-// Mirrors striking-distance.ts's historyPairs intent, kept local so the two reports stay independent.
+// Parse history into chronological [dateMs, position] pairs, oldest first. Keeps a 0 position
+// (dropped OUT of rankings that day) as a real worst-case value rather than filtering it, so this
+// report agrees with rank-movers.ts: a keyword that fell out of the rankings is the biggest
+// worsening signal, not invisible. Mirrors striking-distance.ts's historyPairs shape but with the
+// rank-movers convention for drop-outs, kept local so the reports stay independent.
 const historyPairs = (raw: string): Array<[number, number]> => {
    const s = String(raw || '').trim();
    if (!s) { return []; }
@@ -48,7 +50,7 @@ const historyPairs = (raw: string): Array<[number, number]> => {
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { return []; }
       return Object.entries(parsed as Record<string, unknown>)
          .map(([date, pos]) => [Date.parse(date), Number(pos)] as [number, number])
-         .filter(([d, pos]) => Number.isFinite(d) && Number.isFinite(pos) && pos > 0)
+         .filter(([d, pos]) => Number.isFinite(d) && Number.isFinite(pos) && pos >= 0)
          .sort((a, b) => a[0] - b[0]);
    } catch {
       return [];

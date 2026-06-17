@@ -94,7 +94,7 @@ const getContentPerformance = async (req: NextApiRequest, res: NextApiResponse<R
       const [eventRows, keywordRows] = await Promise.all([
          S33kEvent.findAll({
             where: { domain, created: { [Op.gte]: startISO }, ...scopeWhere(account) },
-            attributes: ['session', 'source', 'is_bot', 'device', 'country', 'page', 'type', 'created'],
+            attributes: ['id', 'session', 'source', 'is_bot', 'device', 'country', 'page', 'type', 'created'],
             order: [['created', 'ASC']],
          }),
          Keyword.findAll({ where: { domain, ...scopeWhere(account) }, attributes: ['keyword', 'position', 'target_page'] }),

@@ -102,6 +102,11 @@ const isCovered = (compTokens: string[], yourTokenSets: string[][]): boolean => 
       let shared = 0;
       compSet.forEach((t) => { if (yourSet.has(t)) { shared += 1; } });
       const smaller = Math.min(compSet.size, yourSet.size);
+      // A single shared GENERIC token (e.g. "dam") would mark a 2+-token competitor topic
+      // ['dam','mcp'] "covered" by ['dam','software'] under a 50%-of-smaller rule, silently
+      // dropping a real gap. Require at least 2 shared tokens once the smaller topic has 2+ tokens;
+      // keep the original subset/50% rule only for single-token topics, where 1 shared IS the whole.
+      if (smaller >= 2 && shared < 2) { return false; }
       // Subset (one fully contains the other) or >= 50% of the smaller set overlaps == same topic.
       return shared === smaller || shared / smaller >= 0.5;
    });

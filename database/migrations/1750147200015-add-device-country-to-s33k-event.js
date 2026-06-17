@@ -24,24 +24,26 @@ module.exports = {
    up: async (arg) => {
       const queryInterface = resolveQueryInterface(arg);
       return queryInterface.sequelize.transaction(async (t) => {
+         // Idempotency probe ONLY: a missing s33k_event table throws here and is caught so
+         // the migration no-ops (the event table is created by an earlier migration). The
+         // addColumn/addIndex path below is intentionally NOT wrapped: a real failure must
+         // throw out of up() so Umzug leaves this migration un-applied and retryable. A
+         // swallowed error would mark it APPLIED with the columns missing, and every read
+         // expecting device/country would then throw forever with nothing to re-run.
+         let tableDefinition = null;
          try {
-            let tableDefinition = null;
-            try {
-               tableDefinition = await queryInterface.describeTable('s33k_event');
-            } catch (describeError) {
-               tableDefinition = null;
+            tableDefinition = await queryInterface.describeTable('s33k_event');
+         } catch (describeError) {
+            tableDefinition = null;
+         }
+         if (!tableDefinition) { return; }
+         for (const [column, spec] of COLUMNS) {
+            if (!tableDefinition[column]) {
+               // eslint-disable-next-line no-await-in-loop
+               await queryInterface.addColumn('s33k_event', column, spec, { transaction: t });
+               // eslint-disable-next-line no-await-in-loop
+               await queryInterface.addIndex('s33k_event', [column], { transaction: t });
             }
-            if (!tableDefinition) { return; }
-            for (const [column, spec] of COLUMNS) {
-               if (!tableDefinition[column]) {
-                  // eslint-disable-next-line no-await-in-loop
-                  await queryInterface.addColumn('s33k_event', column, spec, { transaction: t });
-                  // eslint-disable-next-line no-await-in-loop
-                  await queryInterface.addIndex('s33k_event', [column], { transaction: t });
-               }
-            }
-         } catch (error) {
-            console.log('error :', error);
          }
       });
    },

@@ -89,7 +89,10 @@ export const computeRankMovers = (keywords: MoverInput[], startMs: number, nowMs
          // Single in-window point: compare it to the live position so a keyword that has only one
          // recent scrape still reports a real, if coarser, movement.
          from = inWindow[0].pos;
-         to = Number(k.currentPosition) || inWindow[0].pos;
+         // currentPosition 0 means DROPPED OUT of rankings (a real, worst-case position), not
+         // "missing". `|| fallback` would swallow that 0 and hide the biggest worsening. Only fall
+         // back when there is genuinely no numeric current position.
+         to = Number.isFinite(Number(k.currentPosition)) ? Number(k.currentPosition) : inWindow[0].pos;
       }
 
       const delta = from - to; // POSITIVE = climbed toward #1 (improved); NEGATIVE = fell.

@@ -64,8 +64,9 @@ export const suggestGoals = (pages: PageSummary[]): SuggestedGoal[] => {
          continue;
       }
 
-      // Intent / form page -> event form_submit on that page.
-      const isIntent = INTENT_PATTERNS.some((d) => path === d || path.startsWith(`${d}/`) || path.startsWith(d));
+      // Intent / form page -> event form_submit on that page. Match an exact path or a real path
+      // segment only; a bare startsWith would over-match ('/demo' hitting '/democracy').
+      const isIntent = INTENT_PATTERNS.some((d) => path === d || path.startsWith(`${d}/`));
       if (isIntent) {
          add({
             name: `${titleCase(p.path.replace(/^\//, '')) || 'Form'} submitted`,

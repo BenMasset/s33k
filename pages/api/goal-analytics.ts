@@ -73,10 +73,17 @@ const getGoalAnalytics = async (req: NextApiRequest, res: NextApiResponse<GoalAn
    try {
       // Resolve the goal by id or name (scoped).
       const goalWhere: Record<string, unknown> = { domain, ...scopeWhere(account) };
-      if (typeof q.goalId === 'string' && q.goalId.trim()) {
-         goalWhere.ID = parseInt(q.goalId, 10);
-      } else if (typeof q.goal === 'string' && q.goal.trim()) {
-         goalWhere.name = q.goal.trim();
+      const hasGoalId = typeof q.goalId === 'string' && q.goalId.trim();
+      const hasGoalName = typeof q.goal === 'string' && q.goal.trim();
+      if (hasGoalId) {
+         goalWhere.ID = parseInt(q.goalId as string, 10);
+      } else if (hasGoalName) {
+         goalWhere.name = (q.goal as string).trim();
+      }
+      // Without a goalId/goal predicate, findOne would resolve on domain alone and silently pick an
+      // arbitrary goal, reporting its rate as if requested. Require an explicit goal selector.
+      if (!hasGoalId && !hasGoalName) {
+         return res.status(400).json({ error: 'Specify goalId or goal name.' });
       }
       const goalRow = await Goal.findOne({ where: goalWhere });
       if (!goalRow) {
@@ -98,7 +105,8 @@ const getGoalAnalytics = async (req: NextApiRequest, res: NextApiResponse<GoalAn
       const startISO = new Date(periodStartMs(period, Date.now())).toJSON();
       const rows = await S33kEvent.findAll({
          where: { domain, created: { [Op.gte]: startISO }, ...scopeWhere(account) },
-         attributes: ['session', 'source', 'is_bot', 'device', 'country', 'page', 'type', 'created'],
+         // 'id' is needed so sessionize's secondary-sort tiebreaker (by id) is deterministic.
+         attributes: ['id', 'session', 'source', 'is_bot', 'device', 'country', 'page', 'type', 'created'],
          order: [['created', 'ASC']],
       });
       const allSessions = sessionize(rows.map((r) => r.get({ plain: true }) as EventLike));
@@ -128,10 +136,13 @@ const getGoalAnalytics = async (req: NextApiRequest, res: NextApiResponse<GoalAn
             .slice(0, 50);
       }
 
+      // The filter note must match what actually ran: only claim "Human-only" when bots were filtered.
+      const filterNote = filters.humanOnly
+         ? `Human-only by default${botSessionsExcluded ? ` (${botSessionsExcluded} bot session(s) excluded)` : ''}`
+         : 'Bots included';
       const note = totalSessions === 0
          ? 'No first-party sessions in this window/filter yet. Install the s33k.js tracking script so pageviews and events flow in.'
-         : `${conversions} of ${totalSessions} session(s) completed "${g.name}". Human-only by default`
-            + `${botSessionsExcluded ? ` (${botSessionsExcluded} bot session(s) excluded)` : ''}.`;
+         : `${conversions} of ${totalSessions} session(s) completed "${g.name}". ${filterNote}.`;
 
       const matchDesc = goal.kind === 'event'
          ? `${goal.matchValue}${goal.matchPage ? ` on ${goal.matchPage}` : ''}`

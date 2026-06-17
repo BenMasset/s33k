@@ -100,8 +100,10 @@ export const buildContentPerformance = (
             if (converted) { b.conversions += 1; }
          }
       }
-      // entries: the session's landing page, counted once.
-      ensure(s.landingPage).entries += 1;
+      // entries: the session's landing page, counted once. Guard on pageviewCount > 0 so a session
+      // with no pageview (sessionize falls back landingPage to its first event page) cannot credit an
+      // entry to a page that was never viewed. Matches human-analytics, which also guards pageviews>0.
+      if (s.pageviewCount > 0) { ensure(s.landingPage).entries += 1; }
    }
 
    // Union the viewed pages with the keyword target pages, so a tracked-but-never-viewed page still

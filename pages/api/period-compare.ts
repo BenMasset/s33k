@@ -101,7 +101,7 @@ const getPeriodCompare = async (req: NextApiRequest, res: NextApiResponse<Resp>,
       const curStartISO = new Date(curStartMs).toJSON();
       const rows = await S33kEvent.findAll({
          where: { domain, created: { [Op.gte]: priorStartISO }, ...scopeWhere(account) },
-         attributes: ['session', 'source', 'is_bot', 'device', 'country', 'page', 'type', 'created'],
+         attributes: ['id', 'session', 'source', 'is_bot', 'device', 'country', 'page', 'type', 'created'],
          order: [['created', 'ASC']],
       });
       const plainRows = rows.map((r) => r.get({ plain: true }) as EventLike);

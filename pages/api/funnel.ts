@@ -60,7 +60,7 @@ const getFunnel = async (req: NextApiRequest, res: NextApiResponse<FunnelRespons
       const startISO = new Date(periodStartMs(period, Date.now())).toJSON();
       const rows = await S33kEvent.findAll({
          where: { domain, created: { [Op.gte]: startISO }, ...scopeWhere(account) },
-         attributes: ['session', 'source', 'is_bot', 'device', 'country', 'page', 'type', 'created'],
+         attributes: ['id', 'session', 'source', 'is_bot', 'device', 'country', 'page', 'type', 'created'],
          order: [['created', 'ASC']],
       });
 

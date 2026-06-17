@@ -95,7 +95,11 @@ const getWeeklyDigest = async (req: NextApiRequest, res: NextApiResponse<WeeklyD
       if (goalRequested) {
          const goalWhere: Record<string, unknown> = { domain, ...scopeWhere(account) };
          if (typeof q.goalId === 'string' && q.goalId.trim()) {
-            goalWhere.ID = parseInt(q.goalId, 10);
+            // Validate BEFORE building the where clause: a non-numeric goalId yields NaN, and on
+            // Postgres `WHERE "ID" = NaN` throws and is swallowed into a generic 400. Fail clearly.
+            const gid = parseInt(q.goalId, 10);
+            if (Number.isNaN(gid)) { return res.status(400).json({ error: 'goalId must be numeric' }); }
+            goalWhere.ID = gid;
          } else {
             goalWhere.name = String(q.goal).trim();
          }

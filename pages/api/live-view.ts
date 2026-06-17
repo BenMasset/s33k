@@ -85,7 +85,7 @@ const getLiveView = async (req: NextApiRequest, res: NextApiResponse<LiveViewRes
       // Pull the window once (human + bot) so bot exclusion can be reported rather than hidden.
       const rows = (await S33kEvent.findAll({
          where: { domain, created: { [Op.gte]: startISO }, ...scopeWhere(account) },
-         attributes: ['session', 'source', 'is_bot', 'device', 'country', 'page', 'type', 'created'],
+         attributes: ['id', 'session', 'source', 'is_bot', 'device', 'country', 'page', 'type', 'created'],
          order: [['created', 'DESC']],
       })).map((r) => r.get({ plain: true }) as EventLike);
 

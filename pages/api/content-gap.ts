@@ -44,7 +44,11 @@ const keywordsAsYourTopics = async (domain: string, account?: Account | null): P
       // topic-bearing title; target_page (if any) is the path so a slug-derived topic also matches.
       return {
          url: targetPage,
-         path: targetPage || `/${keyword.replace(/\s+/g, '-')}`,
+         // The topic for a tracked keyword is the KEYWORD PHRASE itself (authoritative), so derive
+         // the slug from the keyword, not from target_page. A target_page is often an abbreviated
+         // slug (e.g. "/seismic-alt") that only partially token-matches "seismic alternative" and
+         // would slip past the stricter isCovered overlap rule, re-flagging a topic you already own.
+         path: `/${keyword.replace(/\s+/g, '-')}`,
          title: keyword,
          metaDescription: '',
          h1: [],

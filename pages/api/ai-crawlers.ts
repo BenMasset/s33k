@@ -83,7 +83,10 @@ const getAiCrawlers = async (req: NextApiRequest, res: NextApiResponse<AiCrawler
 
       const cutoff = periodToCutoff(period).toJSON();
       const rows = await CrawlerHit.findAll({
-         where: { domain, hitAt: { [Op.gte]: cutoff } },
+         // Spread scopeWhere into EVERY CrawlerHit query (CLAUDE.md rule). Defense-in-depth: the
+         // @Unique domain + ownership 403 above already isolate tenants, so this is convention
+         // alignment with no behavior change while the domain is unique.
+         where: { domain, hitAt: { [Op.gte]: cutoff }, ...scopeWhere(account) },
          order: [['hitAt', 'DESC']],
          raw: true,
       }) as unknown as Array<{

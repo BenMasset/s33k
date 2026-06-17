@@ -94,6 +94,10 @@ export const buildEntryPageReport = (
    };
 
    for (const s of sessions) {
+      // Guard on pageviewCount > 0 so a session with no pageview (sessionize falls back landingPage to
+      // its first event page) cannot credit an entry to a page that was never viewed. Matches
+      // human-analytics, which also guards pageviews>0.
+      if (s.pageviewCount <= 0) { continue; }
       const b = ensure(s.landingPage);
       b.entries += 1;
       // channel is already normalized to one of the four classes by sessionize.normalizeChannel.

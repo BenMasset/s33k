@@ -47,10 +47,17 @@ const getAttribution = async (req: NextApiRequest, res: NextApiResponse<Resp>, a
 
    try {
       const goalWhere: Record<string, unknown> = { domain, ...scopeWhere(account) };
-      if (typeof q.goalId === 'string' && q.goalId.trim()) {
-         goalWhere.ID = parseInt(q.goalId, 10);
-      } else if (typeof q.goal === 'string' && q.goal.trim()) {
-         goalWhere.name = q.goal.trim();
+      const hasGoalId = typeof q.goalId === 'string' && q.goalId.trim();
+      const hasGoalName = typeof q.goal === 'string' && q.goal.trim();
+      if (hasGoalId) {
+         goalWhere.ID = parseInt(q.goalId as string, 10);
+      } else if (hasGoalName) {
+         goalWhere.name = (q.goal as string).trim();
+      }
+      // Without a goalId/goal predicate, findOne would resolve on domain alone and silently pick an
+      // arbitrary goal, attributing its conversions as if requested. Require an explicit goal selector.
+      if (!hasGoalId && !hasGoalName) {
+         return res.status(400).json({ error: 'Specify goalId or goal name.' });
       }
       const goalRow = await Goal.findOne({ where: goalWhere });
       if (!goalRow) { return res.status(404).json({ error: 'Goal not found. Create it first with create_goal, or list goals.' }); }
@@ -69,7 +76,8 @@ const getAttribution = async (req: NextApiRequest, res: NextApiResponse<Resp>, a
       const [eventRows, keywordRows] = await Promise.all([
          S33kEvent.findAll({
             where: { domain, created: { [Op.gte]: startISO }, ...scopeWhere(account) },
-            attributes: ['session', 'source', 'is_bot', 'device', 'country', 'page', 'type', 'created'],
+            // 'id' is needed so sessionize's secondary-sort tiebreaker (by id) is deterministic.
+            attributes: ['id', 'session', 'source', 'is_bot', 'device', 'country', 'page', 'type', 'created'],
             order: [['created', 'ASC']],
          }),
          Keyword.findAll({ where: { domain, ...scopeWhere(account) }, attributes: ['keyword', 'position', 'target_page'] }),
@@ -82,10 +90,12 @@ const getAttribution = async (req: NextApiRequest, res: NextApiResponse<Resp>, a
       });
 
       const attribution = attributeConversions(sessions, goal, keywords);
+      // The filter note must match what actually ran: only claim "Human-only" when bots were filtered.
+      const filterNote = filters.humanOnly ? 'Human-only by default' : 'Bots included';
       const note = attribution.totalSessions === 0
          ? 'No first-party sessions in this window/filter yet. Install the s33k.js tracking script so traffic and conversions flow in.'
          : `${attribution.conversions} conversion(s) attributed across ${attribution.byChannel.length} channel(s) and `
-            + `${attribution.byKeyword.length} keyword-bearing page(s). Human-only by default.`;
+            + `${attribution.byKeyword.length} keyword-bearing page(s). ${filterNote}.`;
 
       return res.status(200).json({
          domain,

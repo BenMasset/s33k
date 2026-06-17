@@ -7,7 +7,7 @@
 // so this module is pure metric math + diffing with no DB or filtering of its own. No server-side
 // LLM: it returns structured rows for the user's own LLM (and the briefing) to narrate.
 
-import { SessionAgg, GoalDef, sessionConverted } from './sessionize';
+import { SessionAgg, GoalDef, sessionConverted, isBounce } from './sessionize';
 
 // One metric measured for a single window. bounceRatePct and conversionRatePct are percentages
 // (0..100, one decimal); the rest are raw counts.
@@ -69,9 +69,10 @@ const pctChange = (current: number, prior: number): number | null =>
 export const computeWindowMetrics = (sessions: SessionAgg[], goal: GoalDef | null): WindowMetrics => {
    const humanVisitors = sessions.length;
    const pageviews = sessions.reduce((sum, s) => sum + s.pageviewCount, 0);
-   // Bounce == NOT engaged: one pageview and no non-pageview event. Mirrors applyFilters' engagement
-   // test so bounce-rate here and an engagement filter elsewhere can never contradict each other.
-   const bounced = sessions.filter((s) => !(s.pageviewCount > 1 || s.hasNonPageviewEvent)).length;
+   // Bounce == NOT engaged. Uses the shared isBounce helper (the single engaged/bounce definition) so
+   // bounce-rate here and an engagement filter elsewhere are literally the same code, never just a
+   // copy that can drift.
+   const bounced = sessions.filter((s) => isBounce(s)).length;
    const metrics: WindowMetrics = {
       humanVisitors,
       pageviews,

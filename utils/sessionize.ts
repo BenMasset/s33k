@@ -15,6 +15,9 @@ export type EventLike = {
    page: string,
    type: string,
    created: string,
+   // Optional row id: a tiebreaker so events sharing one `created` timestamp sort deterministically
+   // on Postgres (where equal-string ordering is otherwise arbitrary). Missing id = treated equal.
+   id?: number | string,
 };
 
 export type SessionAgg = {
@@ -78,7 +81,19 @@ export const canonicalChannel = (input: string): string => {
  * @returns {SessionAgg[]}
  */
 export const sessionize = (rows: EventLike[]): SessionAgg[] => {
-   const sorted = [...rows].sort((a, b) => (a.created < b.created ? -1 : a.created > b.created ? 1 : 0));
+   // Sort by `created` ASC, then by `id` ASC as a stable tiebreaker. Multiple pageviews can share one
+   // batch `created` timestamp; on Postgres their relative order is otherwise non-deterministic, which
+   // would make landingPage/exitPage flip between runs. Missing ids compare equal so legacy callers
+   // (no id selected) keep their prior behavior.
+   const sorted = [...rows].sort((a, b) => {
+      if (a.created < b.created) { return -1; }
+      if (a.created > b.created) { return 1; }
+      if (a.id != null && b.id != null) {
+         if (a.id < b.id) { return -1; }
+         if (a.id > b.id) { return 1; }
+      }
+      return 0;
+   });
    const map = new Map<string, EventLike[]>();
    for (const r of sorted) {
       const key = r.session || `anon-${r.created}`;
@@ -135,6 +150,12 @@ export const parseSegmentFilters = (q: Record<string, unknown>): SegmentFilters 
    };
 };
 
+// The single source of truth for the engaged/bounce test. A session is engaged if it has more than
+// one pageview OR fired any non-pageview event; a bounce is its inverse. Every endpoint imports these
+// so the definition can never drift between routes (period-compare, the engagement filter, etc.).
+export const isEngaged = (s: SessionAgg): boolean => s.pageviewCount > 1 || s.hasNonPageviewEvent;
+export const isBounce = (s: SessionAgg): boolean => !isEngaged(s);
+
 /**
  * Apply the composable segment filters to sessionized data. Any unset filter is a no-op, so
  * filters compose ("human + organic-search + mobile"). humanOnly is honored here too when set.
@@ -149,8 +170,8 @@ export const applyFilters = (sessions: SessionAgg[], f: SegmentFilters): Session
    if (f.page && !s.pageviewPaths.includes(f.page)) { return false; }
    if (f.device && s.device !== f.device) { return false; }
    if (f.country && s.country !== String(f.country).toUpperCase()) { return false; }
-   if (f.engagement === 'engaged' && !(s.pageviewCount > 1 || s.hasNonPageviewEvent)) { return false; }
-   if (f.engagement === 'bounced' && (s.pageviewCount > 1 || s.hasNonPageviewEvent)) { return false; }
+   if (f.engagement === 'engaged' && !isEngaged(s)) { return false; }
+   if (f.engagement === 'bounced' && isEngaged(s)) { return false; }
    return true;
 });
 

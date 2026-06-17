@@ -20,32 +20,35 @@ module.exports = {
    up: async (arg) => {
       const queryInterface = resolveQueryInterface(arg);
       return queryInterface.sequelize.transaction(async (t) => {
+         // Idempotency probe ONLY: a missing table throws here, which is the expected
+         // "not yet created" signal, so it is caught and treated as exists=false. The
+         // create/addIndex path below is intentionally NOT wrapped: a real failure must
+         // throw out of up() so Umzug leaves this migration un-applied and retryable.
+         // entrypoint.sh runs db:migrate on boot and does not exit on failure, so a
+         // swallowed error here would mark the migration APPLIED with no goal table and
+         // every Goal read/create would throw forever with nothing left to re-run.
+         let exists = false;
          try {
-            let exists = false;
-            try {
-               await queryInterface.describeTable('goal');
-               exists = true;
-            } catch (describeError) {
-               exists = false;
-            }
-            if (!exists) {
-               await queryInterface.createTable('goal', {
-                  ID: { type: DataTypes.INTEGER, allowNull: false, primaryKey: true, autoIncrement: true },
-                  domain: { type: DataTypes.STRING, allowNull: false },
-                  owner_id: { type: DataTypes.INTEGER, allowNull: true },
-                  name: { type: DataTypes.STRING, allowNull: false },
-                  kind: { type: DataTypes.STRING, allowNull: false },
-                  match_value: { type: DataTypes.TEXT, allowNull: false },
-                  match_page: { type: DataTypes.TEXT, allowNull: true },
-                  match_mode: { type: DataTypes.STRING, allowNull: false, defaultValue: 'prefix' },
-                  created: { type: DataTypes.STRING, allowNull: false },
-               }, { transaction: t });
-               // Scope/lookup indexes.
-               await queryInterface.addIndex('goal', ['domain'], { transaction: t });
-               await queryInterface.addIndex('goal', ['owner_id'], { transaction: t });
-            }
-         } catch (error) {
-            console.log('error :', error);
+            await queryInterface.describeTable('goal');
+            exists = true;
+         } catch (describeError) {
+            exists = false;
+         }
+         if (!exists) {
+            await queryInterface.createTable('goal', {
+               ID: { type: DataTypes.INTEGER, allowNull: false, primaryKey: true, autoIncrement: true },
+               domain: { type: DataTypes.STRING, allowNull: false },
+               owner_id: { type: DataTypes.INTEGER, allowNull: true },
+               name: { type: DataTypes.STRING, allowNull: false },
+               kind: { type: DataTypes.STRING, allowNull: false },
+               match_value: { type: DataTypes.TEXT, allowNull: false },
+               match_page: { type: DataTypes.TEXT, allowNull: true },
+               match_mode: { type: DataTypes.STRING, allowNull: false, defaultValue: 'prefix' },
+               created: { type: DataTypes.STRING, allowNull: false },
+            }, { transaction: t });
+            // Scope/lookup indexes.
+            await queryInterface.addIndex('goal', ['domain'], { transaction: t });
+            await queryInterface.addIndex('goal', ['owner_id'], { transaction: t });
          }
       });
    },

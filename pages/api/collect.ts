@@ -132,6 +132,15 @@ const collect = async (req: NextApiRequest, res: NextApiResponse<CollectResponse
          }
       }
 
+      // Total-failure honesty: reaching this loop guarantees clean.length > 0 (the empty
+      // case already returned a clean 200 above). If NOT ONE clean row stored, this is not
+      // a partial skip, it is a systemic write failure (schema drift, DB down) that the
+      // per-row skip-and-continue would otherwise mask as a healthy 200 recorded:0. Surface
+      // it as a 500 with a non-null error so monitoring sees the outage instead of "fine".
+      if (recorded === 0) {
+         return res.status(500).json({ recorded: 0, skipped: submitted, error: 'Failed to store any events.' });
+      }
+
       return res.status(200).json({ recorded, skipped: submitted - recorded, error: null });
    } catch (error) {
       // Last-resort guard: even an unexpected failure returns a clean 400, never a stack trace.

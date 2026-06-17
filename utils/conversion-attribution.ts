@@ -45,6 +45,10 @@ export type ConversionAttribution = {
    conversionRatePct: number,
    byChannel: ChannelRow[],
    byKeyword: KeywordRow[],
+   // Each keyword is credited with the FULL conversions of its target PAGE, so two keywords sharing
+   // one target page each report that page's conversions. Summing byKeyword double-counts; use the
+   // top-level distinct-converter `conversions` for any total.
+   byKeywordNote: string,
    opportunities: Opportunity[],
 };
 
@@ -126,14 +130,16 @@ export const attributeConversions = (
    for (const k of byKeyword) {
       const landRate = k.conversionRatePct;
       if (k.conversions >= 1 && (k.position === 0 || k.position > 10) && landRate > 0) {
-         // Naive projection: if rank reached page one, assume landing sessions roughly double.
-         const projected = Math.round(k.conversions);
+         // Rough estimate: if rank reaches page one, assume landing sessions roughly double, so at a
+         // held conversion rate the conversions roughly double too. This is a directional guess, not a forecast.
+         const projected = Math.round(k.conversions * 2);
          opportunities.push({
             type: 'converting-not-ranking',
             page: k.targetPage,
             keyword: k.keyword,
             detail: `${k.targetPage} converts landing visitors at ${landRate}% but "${k.keyword}" ranks `
-               + `${k.position === 0 ? 'outside the top 100' : `#${k.position}`}. Pushing it onto page one compounds a page that already converts.`,
+               + `${k.position === 0 ? 'outside the top 100' : `#${k.position}`}. Pushing it onto page one compounds a page that already converts. `
+               + `Projected ~${projected} conversion(s) is a rough estimate assuming page-one roughly doubles landing sessions.`,
             projectedConversions: projected,
          });
       }
@@ -155,6 +161,8 @@ export const attributeConversions = (
       conversionRatePct: rate(conversions, totalSessions),
       byChannel,
       byKeyword: byKeyword.filter((k) => k.landingSessions > 0),
+      byKeywordNote: 'Per-keyword conversions are per-page credits and may overlap when keywords share a target page. '
+         + 'Do NOT sum byKeyword; use the top-level conversions for the distinct total.',
       opportunities,
    };
 };
