@@ -286,6 +286,20 @@ const capabilities: CapabilityEntry[] = [
       examplePrompt: 'How much of getmasset.com traffic is real humans versus bots?',
    },
    {
+      id: 'human_analytics',
+      toolName: 'human_analytics',
+      category: 'analytics',
+      title: 'Human-only analytics (bots excluded), with exit and bounce rate',
+      description: 'Human-only traffic analytics computed from s33k\'s own first-party pageview events, with datacenter/bot traffic excluded by '
+         + 'default. Each pageview\'s source IP is classified as datacenter-or-not at ingest (is_bot), so JavaScript-executing cloud scrapers are '
+         + 'filtered instead of counted. Returns visitors, pageviews, pagesPerSession, bounceRatePct, entryPages, and exitPages with exitRatePct, '
+         + 'plus botVisitorsFiltered and botSharePct.',
+      whenToUse: 'Use when you want real human numbers, including the exit rate the Umami-backed traffic view cannot produce. Unlike human_traffic '
+         + '(a behavioral ESTIMATE over Umami data), this is computed from first-party IP-classified pageviews and is exact for the pageviews it '
+         + 'has. Requires the s33k.js tracking script installed so pageviews flow in. Pass includeBots=true for the raw with-bots view.',
+      examplePrompt: 'Show me getmasset.com analytics for humans only, with bounce and exit rate.',
+   },
+   {
       id: 'top_clicks',
       toolName: 'top_clicks',
       category: 'analytics',

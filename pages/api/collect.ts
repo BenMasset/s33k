@@ -4,6 +4,7 @@ import Domain from '../../database/models/domain';
 import S33kEvent from '../../database/models/s33kEvent';
 import { sanitizeBatch, sanitizeSession } from '../../utils/event-sanitize';
 import { isLikelyBotUA, clientIp, rateLimitCollect } from '../../utils/collect-guards';
+import { isDatacenterIp } from '../../utils/datacenter-ip';
 
 // POST /api/collect  (PUBLIC, no API key)
 //
@@ -86,6 +87,11 @@ const collect = async (req: NextApiRequest, res: NextApiResponse<CollectResponse
          return res.status(200).json({ recorded: 0, skipped: submitted, error: null });
       }
 
+      // THE bot signal: classify the source IP as datacenter/hosting (utils/datacenter-ip.ts) and
+      // stamp it on every row in this batch. The IP itself is never stored (cookieless, no PII);
+      // only this derived boolean survives, and human-only analytics filter is_bot = false.
+      const isBot = isDatacenterIp(ip);
+
       // 1. Domain allow-listing: the domain must be a known s33k Domain. Unknown -> 403.
       // owner_id is read here so it can be stamped on every event row for tenant-scoped reads.
       const owned = await Domain.findOne({ where: { domain } });
@@ -110,6 +116,7 @@ const collect = async (req: NextApiRequest, res: NextApiResponse<CollectResponse
                value: ev.value,
                session,
                source: ev.source,
+               is_bot: isBot,
                created,
             });
             recorded += 1;

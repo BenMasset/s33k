@@ -253,6 +253,14 @@
          } catch (e) { /* never throw out of flush */ }
       }
 
+      // ===================== 0. Pageview (first-party traffic signal) =======================
+      // One pageview per page load. This is the hit whose IP the server classifies as
+      // datacenter-or-not, so human-only traffic, bounce, and exit rate are all computed from
+      // pageview rows. A bounce (single-pageview session) is still captured because the queue is
+      // flushed via sendBeacon on pagehide/visibilitychange even if the visitor leaves at once.
+      // (SPA route changes are not tracked here; this is the full-page-load baseline.)
+      enqueue({ type: 'pageview', page: pagePath() });
+
       // ===================== 1. Clicks (buttons/links) + 5. Outbound ========================
       document.addEventListener('click', function (e) {
          try {

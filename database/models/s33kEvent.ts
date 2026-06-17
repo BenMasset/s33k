@@ -61,6 +61,13 @@ class S33kEvent extends Model {
    @Column({ type: DataType.STRING, allowNull: true, defaultValue: '' })
    session!: string;
 
+   // Datacenter/bot classification, computed at ingest from the source IP (utils/datacenter-ip.ts).
+   // TRUE means the hit came from a known cloud/hosting range, the bot signal a JS pageview
+   // tracker cannot see. Human-only analytics filter is_bot = false by default. Never stores the IP
+   // itself (cookieless, no PII): only this boolean derived from it survives.
+   @Column({ type: DataType.BOOLEAN, allowNull: false, defaultValue: false })
+   is_bot!: boolean;
+
    // The session's first-touch source: a CLASSIFICATION ('direct' | 'referral' |
    // 'organic-search' | 'ai') or at most the bare referrer HOST. NEVER a full referrer URL
    // with a path or query (those can carry PII), enforced by sanitizeSource at ingest. The

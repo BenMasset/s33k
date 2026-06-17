@@ -50,7 +50,8 @@ const getFormSubmissions = async (req: NextApiRequest, res: NextApiResponse<Form
 
       const cutoff = eventPeriodCutoff(period);
       const rows = await S33kEvent.findAll({
-         where: { domain, type: 'form_submit', created: { [Op.gte]: cutoff }, ...scopeWhere(account) },
+         // Human-only by default: exclude datacenter/bot hits (is_bot stamped at ingest).
+         where: { domain, type: 'form_submit', is_bot: false, created: { [Op.gte]: cutoff }, ...scopeWhere(account) },
          raw: true,
       }) as unknown as EventRow[];
 

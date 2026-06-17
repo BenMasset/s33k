@@ -27,6 +27,7 @@ export const allowedApiRoutes = [
    'GET:/api/ai-referrals',
    'GET:/api/summary',
    'GET:/api/human-traffic',
+   'GET:/api/human-analytics',
    'GET:/api/breakdown',
    'GET:/api/timeseries',
    'GET:/api/events',

@@ -11,8 +11,10 @@
  * exception, so the ingest endpoint can stay a never-500 skip-and-continue loop.
  */
 
-/** The five event types s33k autocaptures. Anything else is rejected at ingest. */
-export const EVENT_TYPES = ['click', 'form_submit', 'scroll', 'engagement', 'outbound'] as const;
+/** The event types s33k autocaptures. Anything else is rejected at ingest. 'pageview' is the
+ *  first-party page-load signal that powers human-only traffic, bounce, and exit-rate analytics
+ *  (each pageview row carries the IP-derived is_bot flag, so bots can be excluded at read time). */
+export const EVENT_TYPES = ['pageview', 'click', 'form_submit', 'scroll', 'engagement', 'outbound'] as const;
 export type EventType = typeof EVENT_TYPES[number];
 
 /** Max stored length of a label / selector. Long blobs are a PII smell and are truncated. */

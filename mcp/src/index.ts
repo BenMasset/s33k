@@ -481,6 +481,55 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// human_analytics
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'human_analytics',
+   {
+      title: 'Human-only analytics (bots excluded), with exit and bounce rate',
+      description:
+         'Human-only traffic analytics computed from s33k\'s OWN first-party pageview events, with '
+         + 'datacenter/bot traffic EXCLUDED by default. This does the one thing a JavaScript pageview '
+         + 'tracker (Umami, GA) cannot: it classifies each pageview\'s source IP as datacenter/hosting '
+         + 'or not at ingest (the is_bot flag), so JavaScript-executing scrapers running in the cloud '
+         + 'are filtered out instead of counted as visitors. Returns visitors, pageviews, '
+         + 'pagesPerSession, bounceRatePct, entryPages (each session\'s first pageview with share), and '
+         + 'exitPages WITH exitRatePct (each session\'s last pageview; the exit-rate metric the '
+         + 'Umami-backed summary cannot produce), plus botVisitorsFiltered and botSharePct for '
+         + 'transparency. Requires the s33k.js tracking script to be installed on the site (pageviews '
+         + 'flow into /api/collect). Pass includeBots=true to see the raw with-bots numbers for comparison.',
+      inputSchema: {
+         domain: z.string().describe('The domain to report human-only analytics for, e.g. "getmasset.com".'),
+         period: z
+            .string()
+            .optional()
+            .describe('Reporting window, e.g. "30d", "7d", "24h". Defaults to "30d".'),
+         includeBots: z
+            .boolean()
+            .optional()
+            .describe('When true, include datacenter/bot pageviews in the numbers (raw view). Defaults to human-only.'),
+      },
+   },
+   async ({ domain, period, includeBots }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         if (includeBots) { query.includeBots = 'true'; }
+         const data = await s33kFetch('/api/human-analytics', { query });
+         return jsonResult({
+            summary: data.summary,
+            entryPages: data.entryPages,
+            exitPages: data.exitPages,
+            note: data.note,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // traffic_breakdown
 // ---------------------------------------------------------------------------
 server.registerTool(
@@ -1506,7 +1555,7 @@ async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
    process.stderr.write(
-      `s33k-mcp connected (base URL: ${BASE_URL}). 40 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
+      `s33k-mcp connected (base URL: ${BASE_URL}). 41 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
    );
 }
 
