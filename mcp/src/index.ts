@@ -675,6 +675,54 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// conversion_attribution
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'conversion_attribution',
+   {
+      title: 'What drives conversions across SEO, direct, and AI (the cross-pillar join)',
+      description:
+         'The merged-pillar view only s33k can produce: for a named goal, it attributes the goal\'s '
+         + 'conversions across all three channels at once. Returns byChannel (conversion rate per '
+         + 'acquisition source, including AI search versus organic search versus direct, the "does AI '
+         + 'actually convert" answer no other tool has), byKeyword (each tracked keyword credited with '
+         + 'the conversions its target page drove, with the keyword\'s Google rank, so keywords rank by '
+         + 'CONVERSIONS not clicks), and opportunities (the money moves: pages that rank but do not '
+         + 'convert, pages that convert but do not rank, and where AI out-converts search). Human-only '
+         + 'by default; the same composable filters apply. Requires the tracking script installed and '
+         + 'at least one goal.',
+      inputSchema: {
+         domain: z.string().describe('The domain, e.g. "getmasset.com".'),
+         goal: z.string().optional().describe('The goal NAME (or pass goalId), e.g. "Demo Booked".'),
+         goalId: z.number().optional().describe('The goal id (alternative to goal name).'),
+         period: z.string().optional().describe('Reporting window, e.g. "30d". Defaults to "30d".'),
+         channel: z.string().optional().describe('Optional filter to one channel: direct, referral, organic-search/seo, ai/aio.'),
+         landingPage: z.string().optional().describe('Optional filter to one landing page path.'),
+         device: z.string().optional().describe('Optional device filter: mobile, tablet, desktop.'),
+         country: z.string().optional().describe('Optional ISO country filter.'),
+         includeBots: z.boolean().optional().describe('Include datacenter/bot sessions. Defaults to human-only.'),
+      },
+   },
+   async ({ domain, goal, goalId, period, channel, landingPage, device, country, includeBots }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (goal) { query.goal = goal; }
+         if (goalId !== undefined) { query.goalId = String(goalId); }
+         if (period) { query.period = period; }
+         if (channel) { query.channel = channel; }
+         if (landingPage) { query.landingPage = landingPage; }
+         if (device) { query.device = device; }
+         if (country) { query.country = country; }
+         if (includeBots) { query.includeBots = 'true'; }
+         const data = await s33kFetch('/api/conversion-attribution', { query });
+         return jsonResult({ goal: data.goal, attribution: data.attribution, note: data.note, error: data.error });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // traffic_breakdown
 // ---------------------------------------------------------------------------
 server.registerTool(
@@ -1700,7 +1748,7 @@ async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
    process.stderr.write(
-      `s33k-mcp connected (base URL: ${BASE_URL}). 45 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
+      `s33k-mcp connected (base URL: ${BASE_URL}). 46 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
    );
 }
 

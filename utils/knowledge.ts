@@ -340,6 +340,19 @@ const capabilities: CapabilityEntry[] = [
       examplePrompt: 'What is my Demo Booked conversion rate from organic search, human only?',
    },
    {
+      id: 'conversion_attribution',
+      toolName: 'conversion_attribution',
+      category: 'cross-pillar',
+      title: 'What drives conversions across SEO, direct, and AI',
+      description: 'The merged-pillar view only s33k can produce: attributes a goal\'s conversions by acquisition source (including AI search '
+         + 'versus organic versus direct), by tracked keyword (each keyword credited with the conversions its target page drove, with its Google '
+         + 'rank, so keywords are ranked by conversions not clicks), and into the money moves (pages that rank but do not convert, pages that convert '
+         + 'but do not rank, and where AI out-converts organic).',
+      whenToUse: 'Use to connect effort to outcomes: which keywords, pages, and sources actually drive conversions, whether AI search converts, and '
+         + 'the single highest-value move. This is the join across SEO rank, analytics sources, and conversion goals that no standalone tool has.',
+      examplePrompt: 'For getmasset.com, what actually drives demo bookings, SEO, direct, or AI, and what should I fix?',
+   },
+   {
       id: 'top_clicks',
       toolName: 'top_clicks',
       category: 'analytics',
