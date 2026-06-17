@@ -845,6 +845,31 @@ const capabilities: CapabilityEntry[] = [
          + 'every call.',
       examplePrompt: 'Show me the "AI human converters" segment for getmasset.com over the last 30 days.',
    },
+   {
+      id: 'portfolio_summary',
+      toolName: 'portfolio_summary',
+      category: 'cross-pillar',
+      title: 'Portfolio rollup across all your sites',
+      description: 'Summarizes EVERY domain on your account in one call (no domain argument), for the multi-site / agency view. Per domain it returns a '
+         + 'compact summary: the keyword rank distribution (total tracked, in top 3, in top 10, on page one, not in top 100), a striking-distance '
+         + 'quick-win count (the same near-page-one logic as striking_distance), and human plus AI-referral session counts when first-party events '
+         + 'exist in the window (traffic is null when a site has no events yet). Domains are sorted by tracked-keyword count, descending. Pure query, no LLM.',
+      whenToUse: 'Use for the "how are all my sites doing" question when you manage more than one domain (an agency or a multi-site owner), instead of '
+         + 'calling summary / striking_distance / channel_report once per site. Then drill into a single site with the per-domain tools.',
+      examplePrompt: 'Give me a portfolio rollup of all my sites: rank distribution, quick-win count, and human vs AI traffic for each over the last 30 days.',
+   },
+   {
+      id: 'competitor_visibility',
+      toolName: 'competitor_visibility',
+      category: 'seo',
+      title: 'Competitor share of voice',
+      description: 'Reads the full Google SERP page that every tracked keyword already stores and tallies how often each external domain ranks for the '
+         + 'same terms you track. Returns competitors ranked by share of voice (the fraction of your tracked keywords they appear on) with average '
+         + 'rank, plus a per-keyword view of who outranks you. No new scrape and no LLM, it reads stored data only.',
+      whenToUse: 'Use to see who you compete with in search and where rivals outrank you, once your tracked keywords have been refreshed at least once '
+         + 'so their SERP results are on disk.',
+      examplePrompt: 'Who are my top competitors in search for getmasset.com, and which keywords do they outrank me on?',
+   },
 ];
 
 // ---------------------------------------------------------------------------

@@ -20,8 +20,8 @@ hard-won lesson, so the next session never relearns it.
   line: `export NVM_DIR="$HOME/.nvm"; source "$NVM_DIR/nvm.sh"; nvm use 20 >/dev/null 2>&1;`
 - **Tests:** `npx jest --ci` (one-shot). `npm run test` is WATCH mode, do not use it for verification.
 - **Lint:** `npm run lint` must be clean. **Build:** `npm run build` must print "Compiled successfully".
-- **MCP server:** `cd mcp && npm run build`, then probe over a real stdio handshake. 67 tools + 5
-  resources today. Banner reads "67 tools and 5 resources registered." Smoke harness: `npm run smoke`
+- **MCP server:** `cd mcp && npm run build`, then probe over a real stdio handshake. 69 tools + 5
+  resources today. Banner reads "69 tools and 5 resources registered." Smoke harness: `npm run smoke`
   from `mcp/`.
 - **Do not touch a running dev server or `.env`.** `.env` is gitignored and must stay untracked.
 
@@ -85,7 +85,7 @@ hard-won lesson, so the next session never relearns it.
 - Add a `CapabilityEntry` to `utils/knowledge.ts` for any new tool, or the knowledge-coverage jest
   test FAILS the build. This is the self-support durability guarantee: a user's own LLM must be able
   to answer any question about the tool, so the answers can never silently rot.
-- Tools are registered in `mcp/src/index.ts` (67 tools + 5 resources today).
+- Tools are registered in `mcp/src/index.ts` (69 tools + 5 resources today).
 - Whitelist any new authed API route in `utils/allowedApiRoutes.ts`. Keep that file
   DEPENDENCY-FREE: no DB-model imports. Importing a model drags sequelize/uuid ESM into jest and
   breaks suites. That exact regression happened and was fixed. Do not reintroduce it.

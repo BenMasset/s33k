@@ -51,6 +51,8 @@ export const allowedApiRoutes = [
    'GET:/api/seo-report',
    'GET:/api/aeo-report',
    'GET:/api/campaign-report',
+   'GET:/api/portfolio',
+   'GET:/api/competitor-visibility',
    'GET:/api/segments',
    'POST:/api/segments',
    'DELETE:/api/segments',

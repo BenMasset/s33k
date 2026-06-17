@@ -2506,6 +2506,72 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// portfolio_summary
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'portfolio_summary',
+   {
+      title: 'Portfolio rollup across every domain on the account',
+      description:
+         'The "how are all my sites doing" rollup. One call summarizes EVERY domain on your account at once, so an agency or multi-site owner '
+         + 'gets a single portfolio view instead of calling the per-domain SEO/analytics tools once per site. There is NO domain argument: it '
+         + 'spans exactly your own domains. Per domain it returns a COMPACT summary (counts, never full lists): the keyword rank distribution '
+         + '(total tracked, inTop3, inTop10, onPageOne, notInTop100), a striking-distance count as the top SEO opportunity signal (the same '
+         + 'near-page-one quick-win logic as striking_distance), and, when first-party events exist for that domain in the window, human and '
+         + 'AI-referral session counts (AI = sessions whose channel is AI Search). traffic is null for a domain with no events (tracking not '
+         + 'installed or no traffic yet), distinguishing that from 0 measured sessions. Domains are sorted by tracked-keyword count, descending. '
+         + 'Cross-pillar, pure query over your own data. Never queries an LLM. Drill into one site with striking_distance, page_scoreboard, or '
+         + 'channel_report.',
+      inputSchema: {
+         period: z.string().optional().describe('Reporting window for the traffic half, e.g. "30d", "7d". Defaults to "30d". Lookback is capped at 365 days.'),
+      },
+   },
+   async ({ period }) => {
+      try {
+         const query: Record<string, string> = {};
+         if (period) { query.period = period; }
+         const data = await s33kFetch('/api/portfolio', { query });
+         return jsonResult({
+            period: data.period,
+            domains: data.domains,
+            note: data.note,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// competitor_visibility
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'competitor_visibility',
+   {
+      title: 'Competitor share of voice',
+      description:
+         'Compute competitor share of voice for a domain from SERP data s33k ALREADY stores (no new scrape, no LLM). Every tracked keyword '
+         + 'persists its full Google results page, so this reads which OTHER domains rank for the same terms you track. Returns the top competing '
+         + 'domains ranked by share of voice (the fraction of your tracked keywords each competitor appears on), each with its appearance count and '
+         + 'average rank, plus a per-keyword "who outranks you" view listing the competitors ranking above your position for each keyword (if you do '
+         + 'not rank, position 0, every domain on that SERP outranks you). keywordsAnalyzed counts the tracked keywords that have stored SERP data; '
+         + 'when 0, a note explains that competitors appear only after keywords have been refreshed at least once.',
+      inputSchema: {
+         domain: z.string().describe('The domain to analyze competitor share of voice for, e.g. "getmasset.com".'),
+      },
+   },
+   async ({ domain }) => {
+      try {
+         const data = await s33kFetch('/api/competitor-visibility', { query: { domain } });
+         return jsonResult(data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // MCP resources: listable/readable knowledge docs.
 //
 // These expose the SAME single product-knowledge source the `help` tool reads, so a client can
@@ -2588,7 +2654,7 @@ async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
    process.stderr.write(
-      `s33k-mcp connected (base URL: ${BASE_URL}). 67 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
+      `s33k-mcp connected (base URL: ${BASE_URL}). 69 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
    );
 }
 
