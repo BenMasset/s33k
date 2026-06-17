@@ -50,7 +50,9 @@ const getAttribution = async (req: NextApiRequest, res: NextApiResponse<Resp>, a
       const hasGoalId = typeof q.goalId === 'string' && q.goalId.trim();
       const hasGoalName = typeof q.goal === 'string' && q.goal.trim();
       if (hasGoalId) {
-         goalWhere.ID = parseInt(q.goalId as string, 10);
+         const gid = parseInt(q.goalId as string, 10);
+         if (!Number.isFinite(gid)) { return res.status(400).json({ error: 'goalId must be a number.' }); }
+         goalWhere.ID = gid;
       } else if (hasGoalName) {
          goalWhere.name = (q.goal as string).trim();
       }

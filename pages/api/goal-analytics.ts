@@ -39,8 +39,8 @@ type GoalAnalyticsResponse = {
    conversions?: number,
    conversionRatePct?: number,
    // When the goal carries a monetary value: goalValue echoes it and totalRevenue is
-   // conversions * goalValue. When the goal has no value, both are null and the per-group revenue
-   // field is omitted, so existing value-less responses are byte-for-byte unchanged.
+   // conversions * goalValue. When the goal has no value, goalValue and totalRevenue are always
+   // present and null (never omitted), and only the per-group revenue field is omitted.
    goalValue?: number | null,
    totalRevenue?: number | null,
    botSessionsExcluded?: number,
@@ -85,7 +85,9 @@ const getGoalAnalytics = async (req: NextApiRequest, res: NextApiResponse<GoalAn
       const hasGoalId = typeof q.goalId === 'string' && q.goalId.trim();
       const hasGoalName = typeof q.goal === 'string' && q.goal.trim();
       if (hasGoalId) {
-         goalWhere.ID = parseInt(q.goalId as string, 10);
+         const gid = parseInt(q.goalId as string, 10);
+         if (!Number.isFinite(gid)) { return res.status(400).json({ error: 'goalId must be a number.' }); }
+         goalWhere.ID = gid;
       } else if (hasGoalName) {
          goalWhere.name = (q.goal as string).trim();
       }

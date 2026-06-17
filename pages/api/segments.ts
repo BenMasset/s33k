@@ -64,6 +64,10 @@ const createSegment = async (req: NextApiRequest, res: NextApiResponse<SegmentsR
    if (!domain || !name) {
       return res.status(400).json({ error: 'domain and name are required.' });
    }
+   // Cap the name length so a >255-char name does not silently truncate on a Postgres VARCHAR(255).
+   if (name.length > 255) {
+      return res.status(400).json({ error: 'Segment name must be 255 characters or fewer.' });
+   }
    if (Object.keys(spec).length === 0) {
       return res.status(400).json({
          error: 'filters must include at least one known filter (channel, device, country, humanOnly, landingPage, page, engagement).',

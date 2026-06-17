@@ -75,6 +75,14 @@ const createGoal = async (req: NextApiRequest, res: NextApiResponse<GoalsRespons
       const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
       if (!owned) { return res.status(403).json({ error: 'Domain not found for this account' }); }
 
+      // Reject a duplicate goal name for this (domain, owner). Otherwise the by-name resolvers
+      // (goal-analytics, conversion-attribution) would findOne an arbitrary one of the duplicates
+      // and silently report the wrong goal's data.
+      const existing = await Goal.findOne({ where: { name, domain, ...scopeWhere(account) } });
+      if (existing) {
+         return res.status(409).json({ error: `A goal named "${name}" already exists for this domain.` });
+      }
+
       const goal = await Goal.create({
          domain,
          owner_id: ownerIdFor(account),

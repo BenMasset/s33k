@@ -71,7 +71,9 @@ const getSegmentAnalytics = async (req: NextApiRequest, res: NextApiResponse<Seg
       const hasSegmentId = typeof q.segmentId === 'string' && q.segmentId.trim();
       const hasSegmentName = typeof q.segment === 'string' && q.segment.trim();
       if (hasSegmentId) {
-         segWhere.ID = parseInt(q.segmentId as string, 10);
+         const sid = parseInt(q.segmentId as string, 10);
+         if (!Number.isFinite(sid)) { return res.status(400).json({ error: 'segmentId must be a number.' }); }
+         segWhere.ID = sid;
       } else if (hasSegmentName) {
          segWhere.name = (q.segment as string).trim();
       } else {
@@ -91,7 +93,7 @@ const getSegmentAnalytics = async (req: NextApiRequest, res: NextApiResponse<Seg
       const startISO = new Date(periodStartMs(period, Date.now())).toJSON();
       const rows = await S33kEvent.findAll({
          where: { domain, created: { [Op.gte]: startISO }, ...scopeWhere(account) },
-         attributes: ['session', 'source', 'is_bot', 'device', 'country', 'page', 'type', 'created'],
+         attributes: ['id', 'session', 'source', 'is_bot', 'device', 'country', 'page', 'type', 'created'],
          order: [['created', 'ASC']],
       });
       const allSessions = sessionize(rows.map((r) => r.get({ plain: true }) as EventLike));

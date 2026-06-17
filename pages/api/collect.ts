@@ -2,7 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import db from '../../database/database';
 import Domain from '../../database/models/domain';
 import S33kEvent from '../../database/models/s33kEvent';
-import { sanitizeBatch, sanitizeSession, sanitizeText } from '../../utils/event-sanitize';
+import { sanitizeBatch, sanitizeSession, sanitizeText, looksLikePII } from '../../utils/event-sanitize';
 import { isLikelyBotUA, clientIp, rateLimitCollect } from '../../utils/collect-guards';
 import { isDatacenterIp } from '../../utils/datacenter-ip';
 import { deviceFromUA, countryFromHeaders } from '../../utils/request-segments';
@@ -46,13 +46,16 @@ type UtmKey = typeof UTM_KEYS[number];
 
 // Extract + sanitize the five session-level UTM tags from the request body. Each value is
 // sanitized and length-capped like the other string fields; a missing/blank/non-string value
-// becomes null (untagged). Returns a record keyed by the exact model column names. Never throws.
+// becomes null (untagged). A PII-shaped value (an email, a card number smuggled into a UTM tag by
+// a tampered client) is DROPPED to null, upholding this file's own PII-defense guarantee that
+// nothing PII-shaped is ever stored. Returns a record keyed by the exact model column names.
+// Never throws.
 const utmFromBody = (body: Record<string, unknown>): Record<UtmKey, string | null> => {
    const out = {} as Record<UtmKey, string | null>;
    for (const key of UTM_KEYS) {
       const raw = body[key];
       const value = typeof raw === 'string' ? sanitizeText(raw, MAX_UTM_LEN) : '';
-      out[key] = value || null;
+      out[key] = (value && !looksLikePII(value)) ? value : null;
    }
    return out;
 };

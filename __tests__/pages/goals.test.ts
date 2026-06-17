@@ -2,7 +2,7 @@
 jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
 jest.mock('../../database/models/domain', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
 jest.mock('../../database/models/goal', () => ({
-   __esModule: true, default: { create: jest.fn(), findAll: jest.fn(), destroy: jest.fn(), update: jest.fn() },
+   __esModule: true, default: { create: jest.fn(), findAll: jest.fn(), findOne: jest.fn(), destroy: jest.fn(), update: jest.fn() },
 }));
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
 
@@ -18,7 +18,9 @@ import GoalModel from '../../database/models/goal';
 import authorizeFn from '../../utils/authorize';
 
 const mockDomain = DomainModel as unknown as { findOne: jest.Mock };
-const mockGoal = GoalModel as unknown as { create: jest.Mock, findAll: jest.Mock, destroy: jest.Mock, update: jest.Mock };
+const mockGoal = GoalModel as unknown as {
+   create: jest.Mock, findAll: jest.Mock, findOne: jest.Mock, destroy: jest.Mock, update: jest.Mock,
+};
 const mockAuthorize = authorizeFn as unknown as jest.Mock;
 
 const row = (data: Record<string, unknown>) => ({ get: () => data, ...data });
@@ -35,6 +37,8 @@ const makeRes = () => {
 beforeEach(() => {
    jest.clearAllMocks();
    mockAuthorize.mockResolvedValue({ authorized: true, account: null, error: undefined });
+   // No duplicate goal exists by default, so createGoal's duplicate-name guard passes through.
+   mockGoal.findOne.mockResolvedValue(null);
 });
 
 describe('/api/goals', () => {
@@ -46,6 +50,15 @@ describe('/api/goals', () => {
       expect(res.statusCode).toBe(201);
       expect(mockGoal.create).toHaveBeenCalled();
       expect(res.payload.goal.name).toBe('Demo');
+   });
+
+   it('409s creating a goal whose name already exists for the domain (no create)', async () => {
+      mockDomain.findOne.mockResolvedValue(row({ ID: 1, domain: 'getmasset.com' }));
+      mockGoal.findOne.mockResolvedValue(row({ ID: 9, name: 'Demo', domain: 'getmasset.com' }));
+      const res = makeRes();
+      await handler(makeReq({ method: 'POST', body: { domain: 'getmasset.com', name: 'Demo', kind: 'page_reached', matchValue: '/thanks' } }), res);
+      expect(res.statusCode).toBe(409);
+      expect(mockGoal.create).not.toHaveBeenCalled();
    });
 
    it('403s creating a goal on an unowned domain (no create)', async () => {

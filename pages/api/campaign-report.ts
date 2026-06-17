@@ -61,7 +61,9 @@ const getCampaignReport = async (req: NextApiRequest, res: NextApiResponse<Campa
       if (hasGoalArg) {
          const goalWhere: Record<string, unknown> = { domain, ...scopeWhere(account) };
          if (typeof q.goalId === 'string' && q.goalId.trim()) {
-            goalWhere.ID = parseInt(q.goalId, 10);
+            const gid = parseInt(q.goalId, 10);
+            if (!Number.isFinite(gid)) { return res.status(400).json({ error: 'goalId must be a number.' }); }
+            goalWhere.ID = gid;
          } else if (typeof q.goal === 'string' && q.goal.trim()) {
             goalWhere.name = q.goal.trim();
          }
@@ -102,8 +104,10 @@ const getCampaignReport = async (req: NextApiRequest, res: NextApiResponse<Campa
       const sessions = applyFilters(allSessions, filters);
 
       // One first-touch UTM tuple per session id, so each session contributes its first row's tags.
-      // sessionize keys sessions the same way (session || `anon-${created}`), so the first row per
-      // session here wins exactly as it does for sessionize's first-touch source.
+      // sessionize keys sessions the same way (session || `anon-${created}`). Correctness here does
+      // not rely on row-order parity with sessionize (it orders by created ASC; sessionize sorts
+      // created then id): UTM is session-constant, stamped identically on every row of a session at
+      // ingest, so any row of the session yields the same tags.
       const utmById = new Map<string, SessionUtm>();
       for (const r of plainRows) {
          const key = r.session || `anon-${r.created}`;
