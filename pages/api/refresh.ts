@@ -7,6 +7,7 @@ import refreshAndUpdateKeywords from '../../utils/refresh';
 import { getAppSettings } from './settings';
 import authorize from '../../utils/authorize';
 import { scopeWhere } from '../../utils/scope';
+import resolveDomainAccess from '../../utils/domain-access';
 import type Account from '../../database/models/account';
 import parseKeywords from '../../utils/parseKeywords';
 import { scrapeKeywordFromGoogle } from '../../utils/scraper';
@@ -56,6 +57,13 @@ const refresTheKeywords = async (req: NextApiRequest, res: NextApiResponse<Keywo
       const settings = await getAppSettings();
       if (!settings || (settings && settings.scraper_type === 'never')) {
          return res.status(400).json({ error: 'Scraper has not been set up yet.' });
+      }
+      // Refreshing by domain triggers scraping (a write + COGS action), so require write access to the
+      // named domain and return a clean 403 rather than a silent zero-row no-op when the caller does not
+      // own it. scopeWhere on the queries below already makes this leak-safe; this is the explicit gate.
+      if (req.query.id === 'all' && domain) {
+         const owned = await resolveDomainAccess(account, domain as string, { write: true });
+         if (!owned) { return res.status(403).json({ error: 'Domain not found for this account' }); }
       }
       const scope = scopeWhere(account);
       const query = req.query.id === 'all' && domain ? { domain, ...scope } : { ID: { [Op.in]: keywordIDs }, ...scope };

@@ -298,18 +298,27 @@ EXECUTION PLAN (sequenced; route-heavy waves run AFTER the dashboard wave to avo
   analytics route lacking the `Domain.findOne({domain, ...scopeWhere})` gate). Add isolation tests:
   member-key write rejection, and two-account cross-tenant leak (account A cannot read/mutate B's domain,
   keywords, goals, segments, events). This is what makes flipping the flag safe.
-- **M2 Per-domain read-only sharing (the share feature).** New `DomainShare` model + fail-loud idempotent
-  migration: { id, domain (matches Domain.domain), owner_account_id, shared_with_account_id, role 'viewer',
-  created }. Add `utils/domain-access.ts`: `resolveDomainAccess(account, domain, {write})` returning the
-  domain when accessible else null. READ access = owned (owner_id) OR a DomainShare to this account. WRITE
-  access = owned only (independent of the caller key's own admin role). Domain LIST = owned ∪ shared. The
-  domain column is globally @Unique, so once access is granted, scoping a single domain's pillar data BY
-  DOMAIN is leak-safe (do NOT also require owner_id for a shared read, or the viewer sees nothing).
-  Refactor analytics/data routes to use `resolveDomainAccess` instead of the raw `Domain.findOne(scopeWhere)`
-  so shared viewers can read. Share flow: owner invites a collaborator by email to ONE domain (reuse the
-  Invite machinery + a domain-scoped invite type, or a direct share when the email already has an account);
-  on accept, create the DomainShare. MCP tools: `share_domain`, `list_domain_shares`, `revoke_domain_share`.
-  Tests: a viewer can READ the shared domain, CANNOT write it, CANNOT see the owner's OTHER domains.
+- **M2 Per-domain read-only sharing (the share feature). REVISED to the scoped-key approach (2026-06-17),
+  which is far lower risk than a cross-account DomainShare model.** The cross-account model would force a
+  re-refactor of ~47 routes' pillar queries (a shared viewer is a different account, so `scopeWhere(viewer)`
+  filters the OWNER's data to zero rows). Instead: a "share" is a read-only API key minted on the OWNER's
+  account but RESTRICTED to one domain. Because the key lives on the owner's account, `scopeWhere(owner)`
+  and every pillar query already work UNCHANGED (no route refactor); the only new enforcement is the domain
+  restriction. Implementation:
+  - ApiKey gains a nullable `scoped_domain` (TEXT) column (fail-loud idempotent migration). A normal key
+    has it null; a share key has it set to the one domain it may read.
+  - `resolveAccount` surfaces the resolved key's `scoped_domain`; `authorize()` enforces it centrally: a
+    scoped key is member/GET-only (already) AND the request MUST target that exact domain
+    (`req.query.domain === scoped_domain`), else 403. Routes with no domain param (portfolio, domains list,
+    account, me) carry no matching domain, so a scoped key is denied there. This is the single chokepoint:
+    a share key can read exactly one domain's per-domain routes, nothing else.
+  - Share flow + MCP tools: `share_domain` (owner mints a read-only key scoped to a domain it OWNS, optional
+    Resend email to the collaborator), `list_domain_shares` (the owner's scoped keys), `revoke_domain_share`
+    (revoke one). Reuses the account-key mint machinery + the `scoped_domain` field + `send-invite`.
+  - Tests: a scoped key reads its domain, gets 403 on any OTHER domain, 403 on any write, 403 on portfolio /
+    domains / account (no-domain routes); the owner can mint/list/revoke; a non-owner cannot share a domain.
+  The `resolveDomainAccess` chokepoint from M1 stays owner-only and unchanged (sharing is enforced one level
+  up, in authorize, by the scoped-key restriction), so M1's verified isolation is untouched.
 - **M3 Per-tenant safety caps.** Per-account keyword cap (e.g. default 50, from Account.plan or a constant)
   enforced on add_keyword; refresh-cadence cap enforced on the refresh path. Honest 4xx with the limit when
   exceeded. Admin (ID 1) is uncapped. Bounds the shared Serper COGS.
