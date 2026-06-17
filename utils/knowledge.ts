@@ -508,6 +508,68 @@ const capabilities: CapabilityEntry[] = [
       examplePrompt: 'Show me which content actually performs on getmasset.com over the last 30 days: top pages by traffic, how many sessions they land, what they rank for, and which convert my Demo Booked goal.',
    },
    {
+   id: 'weekly_digest',
+   toolName: 'weekly_digest',
+   category: 'cross-pillar',
+   title: 'Weekly digest (week in review)',
+   description:
+      'A prebuilt cross-pillar "week in review" for a domain (defaults to a 7d window). Bundles traffic '
+      + '(human visitors, pageviews, bounce), the top 5 entry pages, sessions per channel, a count of AI-search '
+      + 'sessions, and the keywords that moved most in Google rank (improved or worsened) over the window. When '
+      + 'a goal is supplied it also returns that goal\'s conversions (total + rate) and the single top '
+      + 'opportunity (money move). Human-only by default. s33k runs the joins with transparent rules and calls no '
+      + 'LLM; the connected LLM narrates the structured digest.',
+   whenToUse:
+      'Reach for it for a fast weekly recap of a site, a "how did we do this week?" question, or a Monday '
+      + 'standup. It is the broad weekly bundle; use briefing for the deeper daily proactive analysis, or the '
+      + 'individual pillar tools (human_analytics, channel_report, conversion_attribution) for one slice in depth.',
+   examplePrompt: 'Give me the weekly digest for getmasset.com, and include the Demo Booked goal.',
+},
+   {
+  id: 'executive_summary',
+  toolName: 'executive_summary',
+  category: 'cross-pillar',
+  title: 'Executive summary: the leadership one-glance report',
+  description: 'A single leadership-facing standup for a domain that bundles all three pillars into one call: headline numbers (human '
+     + 'visitors, plus conversions and conversion rate when a goal is named), the top traffic channel and the top CONVERTING channel, an SEO '
+     + 'snapshot (how many keywords sit on page one, and the biggest rank gain and biggest rank loss over the period from rank history), AI '
+     + 'visibility (are AI engines sending visitors, yes/no plus a count and the top engine), a 2-3 sentence plain-English healthLine, and the '
+     + 'single most important nextAction. Human-only by default so the numbers are not inflated by bots. Rules-based: it never calls an LLM; the '
+     + 'healthLine and nextAction are deterministic strings the user\'s own LLM can narrate.',
+  whenToUse: 'Use when a leader (or you, on their behalf) wants the whole picture in one glance without running each pillar tool. Where briefing '
+     + 'is the operator\'s daily standup and alerts answers "what moved", this answers "how are we doing, in one screen, for someone who will not '
+     + 'run five tools". Pass a goal to fold conversions and the top converting channel into the headline.',
+  examplePrompt: 'Give me the executive summary for getmasset.com for the demo-booked goal over the last 30 days.',
+},
+   {
+      id: 'seo_report',
+      toolName: 'seo_report',
+      category: 'seo',
+      title: 'Comprehensive prebuilt SEO snapshot in one call',
+      description: 'A prebuilt SEO report that bundles the whole picture for a domain into one structured response, so a marketer does not have to '
+         + 'chain separate SEO tools. Pure query over tracked keywords: no crawl, no analytics provider, no LLM. Returns four sections. summary: total '
+         + 'tracked keywords and how many sit in the top 3, top 10, page one, and not in the top 100 (the rank-distribution headline). strikingDistance: '
+         + 'the quick-win keywords ranking just off page one (positions 4 to 30 by default, configurable via min/max), each with its position delta over '
+         + 'history, reusing the same logic as striking_distance. topMovers: the biggest rank improvements and the biggest drops over each keyword\'s '
+         + 'tracked history (improvements most-improved first, drops biggest-fall first), capped by moversLimit (default 5). rankingPages: tracked '
+         + 'keywords grouped by their target_page, busiest page first, each page listing the terms and positions it holds (best rank first).',
+      whenToUse: 'Use for the one-call "how is my SEO doing overall and what should I work on" question, when you want the full snapshot (distribution '
+         + 'plus quick wins plus what changed plus per-page coverage) at once rather than calling summary, striking_distance, and scoreboard separately. '
+         + 'Drill into striking_distance, page_scoreboard, or keyword detail from its sections.',
+      examplePrompt: 'Give me the full SEO report for getmasset.com: how am I ranking overall, my quick wins, what moved, and which pages rank for what.',
+   },
+   {
+      id: 'aeo_report',
+      toolName: 'aeo_report',
+      category: 'aeo',
+      title: 'AEO report (prebuilt snapshot)',
+      description: 'One-call AI-search snapshot for a domain: aiReferrals (AI engines that sent visitors, per engine), aiCrawlers (AI bots that hit '
+         + 'the site, per bot), and a funnelSummary joining crawls vs referrals per engine. Bundles the AEO signals, never queries an LLM.',
+      whenToUse: 'Use for a single whole-picture AEO read instead of calling ai_referrals, ai_crawlers, and ai_visibility separately. The note '
+         + 'flags thin first-party data, since AI crawls normally appear before AI referrals.',
+      examplePrompt: 'Give me the full AEO snapshot for getmasset.com over the last 30 days.',
+   },
+   {
       id: 'top_clicks',
       toolName: 'top_clicks',
       category: 'analytics',

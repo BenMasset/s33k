@@ -176,7 +176,7 @@ describe('request_feature safety net (crossCheckCapability)', () => {
    it('does NOT match a genuinely novel request (it should be stored, not pushed back)', () => {
       const novel = [
          'export my keyword rank history as a downloadable CSV file',
-         'send me a weekly digest email summarizing what changed',
+         'monitor my Core Web Vitals LCP and CLS over time',
          'post my analytics summary into a Slack channel automatically',
       ];
       for (const request of novel) {

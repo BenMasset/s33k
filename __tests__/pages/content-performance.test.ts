@@ -4,6 +4,7 @@
  * keywords whose target page is that page. Mocks the models; the real buildContentPerformance +
  * sessionize logic runs.
  */
+jest.mock('sequelize', () => ({ __esModule: true, Op: { gte: Symbol('gte'), lt: Symbol('lt') } }));
 jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
 jest.mock('../../database/models/domain', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
 jest.mock('../../database/models/goal', () => ({ __esModule: true, default: { findOne: jest.fn() } }));

@@ -118,7 +118,7 @@ describe('POST /api/feature-request: a genuinely new request is stored', () => {
       mockFeatureRequest.create.mockResolvedValue({ ID: 7 });
       const req = makeReq({
          method: 'POST',
-         body: { request: 'Send me a weekly digest email summarizing changes', context: 'I forget to check' },
+         body: { request: 'Monitor my Core Web Vitals (LCP and CLS) over time', context: 'I forget to check' },
       });
       const res = makeRes();
 
@@ -142,7 +142,7 @@ describe('POST /api/feature-request: a genuinely new request is stored', () => {
       asCaller(TENANT_A);
       mockFeatureRequest.create.mockResolvedValue({ ID: 8 });
       mockNotify.mockResolvedValue({ sent: false, error: 'boom' });
-      const req = makeReq({ method: 'POST', body: { request: 'Add a weekly digest email of my analytics' } });
+      const req = makeReq({ method: 'POST', body: { request: 'Add Core Web Vitals monitoring (LCP and CLS) over time' } });
       const res = makeRes();
 
       await handler(req, res);

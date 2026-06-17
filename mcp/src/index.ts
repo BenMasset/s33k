@@ -1206,6 +1206,185 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// weekly_digest
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'weekly_digest',
+   {
+      title: 'Week in review: one cross-pillar "what happened this week" bundle',
+      description:
+         'A prebuilt "week in review" report that bundles every s33k pillar into one structured response '
+         + 'for a domain over a window (defaults to 7d). Returns: traffic (human visitors, pageviews, '
+         + 'bounce rate, bots filtered), topEntryPages (the top 5 landing pages by entries), channels '
+         + '(sessions per acquisition channel: organic-search, ai, referral, direct), aiTraffic (count of '
+         + 'AI-search sessions), and rankMovers (the tracked keywords that improved or worsened most in '
+         + 'Google rank over the window, parsed from each keyword\'s rank history). When you pass a goal '
+         + '(by name or id) it also adds conversions (total + rate for that goal) and topOpportunity (the '
+         + 'single highest-leverage "money move" from the cross-pillar conversion join). Human-only by '
+         + 'default; pass includeBots to fold datacenter/bot sessions back in. The s33k server does NOT '
+         + 'call any LLM: it does the joins with transparent rules and hands YOU (the connected LLM) the '
+         + 'structured digest to narrate as a weekly standup. Use it for a fast "how did the site do this '
+         + 'week?" read, or as a Monday recap.',
+      inputSchema: {
+         domain: z.string().describe('The domain, e.g. "getmasset.com".'),
+         period: z.string().optional().describe('Reporting window, e.g. "7d". Defaults to "7d" (a week in review).'),
+         goal: z.string().optional().describe('Optional goal NAME (or pass goalId) to add conversions + the top opportunity, e.g. "Demo Booked".'),
+         goalId: z.number().optional().describe('Optional goal id (alternative to goal name).'),
+         includeBots: z.boolean().optional().describe('Include datacenter/bot sessions. Defaults to human-only.'),
+      },
+   },
+   async ({ domain, period, goal, goalId, includeBots }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         if (goal) { query.goal = goal; }
+         if (goalId !== undefined) { query.goalId = String(goalId); }
+         if (includeBots) { query.includeBots = 'true'; }
+         const data = await s33kFetch('/api/weekly-digest', { query });
+         return jsonResult({
+            traffic: data.traffic,
+            topEntryPages: data.topEntryPages,
+            channels: data.channels,
+            conversions: data.conversions,
+            rankMovers: data.rankMovers,
+            aiTraffic: data.aiTraffic,
+            topOpportunity: data.topOpportunity,
+            note: data.note,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// executive_summary
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'executive_summary',
+   {
+      title: 'Executive summary: the leadership one-glance report',
+      description:
+         'A single leadership-facing cross-pillar standup for a domain: headline numbers (human visitors, and '
+         + 'conversions + conversion rate when a goal is set), the top traffic channel and the top converting '
+         + 'channel, an SEO snapshot (keywords on page one plus the biggest rank gain and loss over the period), '
+         + 'AI visibility (whether AI engines send visitors), a plain-English healthLine, and the single nextAction. '
+         + 'Human-only by default. Rules-based, no server-side LLM.',
+      inputSchema: {
+         domain: z.string().describe('The domain, e.g. "getmasset.com".'),
+         period: z.string().optional().describe('Reporting window, e.g. "30d". Defaults to "30d".'),
+         goal: z.string().optional().describe('Optional goal NAME (or pass goalId) to add conversions and the top converting channel.'),
+         goalId: z.number().optional().describe('Optional goal id.'),
+         includeBots: z.boolean().optional().describe('Include datacenter/bot sessions. Defaults to human-only.'),
+      },
+   },
+   async ({ domain, period, goal, goalId, includeBots }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         if (goal) { query.goal = goal; }
+         if (goalId !== undefined) { query.goalId = String(goalId); }
+         if (includeBots) { query.includeBots = 'true'; }
+         const data = await s33kFetch('/api/executive-summary', { query });
+         return jsonResult({
+            goal: data.goal, headline: data.headline, topChannel: data.topChannel,
+            topConvertingChannel: data.topConvertingChannel, seo: data.seo, aiVisibility: data.aiVisibility,
+            healthLine: data.healthLine, nextAction: data.nextAction, note: data.note, error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// seo_report  (prebuilt report: the whole SEO picture in one call)
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'seo_report',
+   {
+      title: 'SEO report (prebuilt snapshot)',
+      description:
+         'A comprehensive, prebuilt SEO snapshot for a domain in ONE call, so the marketer gets the whole picture without chaining '
+         + 'separate tools. Pure query over tracked keywords (no crawl, no analytics provider, no LLM). Bundles four sections: '
+         + 'summary (total tracked keywords and how many sit in the top 3 / top 10 / page one / not in the top 100, the rank-distribution '
+         + 'headline); strikingDistance (the quick-win to-do list, keywords ranking just off page one in positions 4 to 30 by default, each '
+         + 'with its position delta over history, sorted by closeness then improvement); topMovers (the biggest rank improvements and the '
+         + 'biggest drops over each keyword\'s tracked history, where improvements is most-improved first and drops is biggest-fall first); '
+         + 'and rankingPages (tracked keywords grouped by their target_page, busiest page first, each page listing the terms it holds and their '
+         + 'positions, best rank first). Use this for the "how is my SEO doing overall and what should I work" question, then drill into '
+         + 'striking_distance, page_scoreboard, or keyword detail from there.',
+      inputSchema: {
+         domain: z.string().describe('The domain to build the SEO report for, e.g. "getmasset.com".'),
+         min: z
+            .number()
+            .optional()
+            .describe('Inclusive lower bound of the striking-distance window. Defaults to 4 (positions 1 to 3 are already page one).'),
+         max: z
+            .number()
+            .optional()
+            .describe('Inclusive upper bound of the striking-distance window. Defaults to 30.'),
+         moversLimit: z
+            .number()
+            .optional()
+            .describe('How many movers to return per side (improvements and drops). Defaults to 5, max 50.'),
+      },
+   },
+   async ({ domain, min, max, moversLimit }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (min !== undefined) { query.min = String(min); }
+         if (max !== undefined) { query.max = String(max); }
+         if (moversLimit !== undefined) { query.moversLimit = String(moversLimit); }
+         const data = await s33kFetch('/api/seo-report', { query });
+         return jsonResult(data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// aeo_report (prebuilt report)
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'aeo_report',
+   {
+      title: 'AEO report',
+      description:
+         'One-call AI-search (AEO) snapshot for a domain. Bundles three first-party signals so a marketer gets the whole AI-search picture at once, never querying an LLM: aiReferrals (which AI engines actually SENT visitors, per engine, with counts and AI share of referred traffic), aiCrawlers (which AI bots HIT the site in the window, per bot with hits and lastSeen), and a funnelSummary (per engine: crawls vs referrals, the leading-indicator-to-outcome join, plus topAdvocate and biggestGap). AI crawls normally appear before AI referrals, so when first-party data is thin the note says so honestly. Use this instead of stitching ai_referrals + ai_crawlers + ai_visibility by hand. Defaults to a 30-day window.',
+      inputSchema: {
+         domain: z.string().describe('The domain to build the AEO report for, e.g. "getmasset.com".'),
+         period: z
+            .string()
+            .optional()
+            .describe('Reporting window, e.g. "30d", "7d", "90d". Defaults to "30d".'),
+      },
+   },
+   async ({ domain, period }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         const data = await s33kFetch('/api/aeo-report', { query });
+         return jsonResult({
+            domain: data.domain,
+            period: data.period,
+            aiReferrals: data.aiReferrals,
+            aiCrawlers: data.aiCrawlers,
+            funnelSummary: data.funnelSummary,
+            referralError: data.referralError,
+            crawlerError: data.crawlerError,
+            note: data.note,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // traffic_breakdown
 // ---------------------------------------------------------------------------
 server.registerTool(
@@ -2231,7 +2410,7 @@ async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
    process.stderr.write(
-      `s33k-mcp connected (base URL: ${BASE_URL}). 58 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
+      `s33k-mcp connected (base URL: ${BASE_URL}). 62 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
    );
 }
 
