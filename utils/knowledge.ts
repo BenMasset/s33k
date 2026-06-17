@@ -364,6 +364,17 @@ const capabilities: CapabilityEntry[] = [
       examplePrompt: 'Suggest conversion goals for getmasset.com.',
    },
    {
+      id: 'setup_status',
+      toolName: 'setup_status',
+      category: 'onboarding',
+      title: 'Onboarding walkthrough: where you are and the next step',
+      description: 'Reports a domain\'s setup progress as a checklist (site added, keywords tracked, tracking script live, conversion goals '
+         + 'defined, first report ready) with percentComplete, and returns the single next step plus the exact tool to call.',
+      whenToUse: 'Use to walk a new user from zero to value step by step, or whenever someone asks what to set up next or whether s33k is '
+         + 'configured for their site.',
+      examplePrompt: 'Walk me through setting up s33k for getmasset.com.',
+   },
+   {
       id: 'top_clicks',
       toolName: 'top_clicks',
       category: 'analytics',

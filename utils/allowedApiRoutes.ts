@@ -34,6 +34,7 @@ export const allowedApiRoutes = [
    'GET:/api/goal-analytics',
    'GET:/api/conversion-attribution',
    'GET:/api/suggest-goals',
+   'GET:/api/onboarding-status',
    'GET:/api/breakdown',
    'GET:/api/timeseries',
    'GET:/api/events',

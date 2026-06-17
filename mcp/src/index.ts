@@ -750,6 +750,33 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// setup_status
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'setup_status',
+   {
+      title: 'Onboarding walkthrough: where you are and the next step',
+      description:
+         'The guided-setup walkthrough. Reports where a domain is in setup (site added, keywords '
+         + 'tracked, tracking script live, conversion goals defined, first report ready) as a checklist '
+         + 'with percentComplete, and returns the single next step plus the exact tool to call. Use this '
+         + 'to walk a new user from zero to value step by step, and any time someone asks "what should I '
+         + 'set up next?" or "is my s33k configured?".',
+      inputSchema: {
+         domain: z.string().describe('The domain to check setup for, e.g. "getmasset.com".'),
+      },
+   },
+   async ({ domain }) => {
+      try {
+         const data = await s33kFetch('/api/onboarding-status', { query: { domain } });
+         return jsonResult({ percentComplete: data.percentComplete, steps: data.steps, nextStep: data.nextStep, message: data.message, error: data.error });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // traffic_breakdown
 // ---------------------------------------------------------------------------
 server.registerTool(
@@ -1775,7 +1802,7 @@ async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
    process.stderr.write(
-      `s33k-mcp connected (base URL: ${BASE_URL}). 47 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
+      `s33k-mcp connected (base URL: ${BASE_URL}). 48 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
    );
 }
 
