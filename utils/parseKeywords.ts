@@ -1,5 +1,20 @@
 import Keyword from '../database/models/keyword';
 
+// Parse a stored JSON column defensively. A single corrupt/truncated blob in ONE keyword row must
+// not throw and collapse a whole-domain read (e.g. competitor_visibility maps over every keyword);
+// a bad row degrades to the empty fallback instead of poisoning the entire request. Valid JSON is
+// byte-for-byte unchanged. The scraper always writes valid JSON, so this only fires on a corrupt write.
+// Returns `any` (like the JSON.parse it replaces) so the parsed fields keep assigning cleanly to
+// KeywordType. The fallback is used only when the stored blob is corrupt and JSON.parse throws.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const safeParse = (raw: unknown, fallback: any): any => {
+   try {
+      return JSON.parse(String(raw));
+   } catch {
+      return fallback;
+   }
+};
+
 /**
  * Parses the SQL Keyword Model object to frontend consumable object.
  * @param {Keyword[]} allKeywords - Keywords to scrape
@@ -9,10 +24,10 @@ const parseKeywords = (allKeywords: Keyword[]) : KeywordType[] => {
    const parsedItems = allKeywords.map((keywrd:Keyword) => ({
          ...keywrd,
          target_page: keywrd.target_page || '',
-         history: JSON.parse(keywrd.history),
-         tags: JSON.parse(keywrd.tags),
-         lastResult: JSON.parse(keywrd.lastResult),
-         lastUpdateError: keywrd.lastUpdateError !== 'false' && keywrd.lastUpdateError.includes('{') ? JSON.parse(keywrd.lastUpdateError) : false,
+         history: safeParse(keywrd.history, {}),
+         tags: safeParse(keywrd.tags, []),
+         lastResult: safeParse(keywrd.lastResult, []),
+         lastUpdateError: keywrd.lastUpdateError !== 'false' && keywrd.lastUpdateError.includes('{') ? safeParse(keywrd.lastUpdateError, false) : false,
       }));
    return parsedItems;
 };

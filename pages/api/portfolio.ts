@@ -54,6 +54,10 @@ type PortfolioResponse = {
    error?: string | null,
 };
 
+// Bound the rollup so a very large account cannot turn one call into an unbounded scan. Beyond this
+// many domains we truncate with an honest note; an agency with more can drill in per-site.
+const MAX_PORTFOLIO_DOMAINS = 100;
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse<PortfolioResponse>) {
    await db.sync();
    const { authorized, account, error } = await authorize(req, res);
@@ -96,26 +100,53 @@ const getPortfolio = async (req: NextApiRequest, res: NextApiResponse<PortfolioR
          });
       }
 
-      // The S33kEvent window is clamped once via periodStartMs (which itself caps lookback at 365d),
-      // so each per-domain event read is bounded and the multi-domain scan cannot pull the whole event
-      // table into memory.
+      // Cap the number of domains processed so a very large account cannot turn one portfolio call into
+      // an unbounded scan. Beyond the cap we truncate with an honest note rather than silently dropping.
+      const allNames = domainRows.map((d) => String((d.get({ plain: true }) as Record<string, unknown>).domain || '')).filter(Boolean);
+      const names = allNames.slice(0, MAX_PORTFOLIO_DOMAINS);
+      const truncated = allNames.length - names.length;
+
+      // The S33kEvent window is clamped once via periodStartMs (which itself caps lookback at 365d).
       const startISO = new Date(periodStartMs(period, Date.now())).toJSON();
 
-      const domains: PortfolioDomain[] = [];
-      for (const dRow of domainRows) {
-         const dPlain = dRow.get({ plain: true }) as Record<string, unknown>;
-         const domain = String(dPlain.domain || '');
+      // Batch the per-domain reads into TWO grouped Op.in queries (keywords, events) instead of two
+      // queries PER domain, so the round-trip count is constant (3 total) no matter how many domains the
+      // account has. Both are scoped + bounded (the cap above, and the clamped window for events).
+      const keywordRows = await Keyword.findAll({
+         where: { domain: { [Op.in]: names }, ...scopeWhere(account) },
+         attributes: ['domain', 'keyword', 'position', 'url', 'history'],
+      });
+      const eventRows = await S33kEvent.findAll({
+         where: { domain: { [Op.in]: names }, created: { [Op.gte]: startISO }, ...scopeWhere(account) },
+         attributes: ['id', 'domain', 'session', 'source', 'is_bot', 'device', 'country', 'page', 'type', 'created'],
+         order: [['created', 'ASC']],
+      });
 
-         // SEO: load this domain's tracked keywords once and derive both the rank distribution and the
-         // striking-distance count from the same rows (reusing findStrikingDistance, no duplication).
-         const keywordRows = await Keyword.findAll({
-            where: { domain, ...scopeWhere(account) },
-            attributes: ['keyword', 'position', 'url', 'history'],
-         });
+      // Group both result sets by domain in memory so each domain's summary reads from its own slice.
+      const keywordsByDomain = new Map<string, Record<string, unknown>[]>();
+      keywordRows.forEach((k) => {
+         const p = k.get({ plain: true }) as Record<string, unknown>;
+         const dom = String(p.domain || '');
+         const list = keywordsByDomain.get(dom) || [];
+         list.push(p);
+         keywordsByDomain.set(dom, list);
+      });
+      const eventsByDomain = new Map<string, EventLike[]>();
+      eventRows.forEach((r) => {
+         const p = r.get({ plain: true }) as EventLike & { domain?: string };
+         const dom = String(p.domain || '');
+         const list = eventsByDomain.get(dom) || [];
+         list.push(p);
+         eventsByDomain.set(dom, list);
+      });
+
+      const domains: PortfolioDomain[] = names.map((domain) => {
+         // SEO: derive the rank distribution and the striking-distance count from the same keyword rows
+         // (reusing findStrikingDistance, no duplication).
+         const kwRows = keywordsByDomain.get(domain) || [];
          const positions: number[] = [];
          const strikingInput: StrikingInput[] = [];
-         keywordRows.forEach((k) => {
-            const p = k.get({ plain: true }) as Record<string, unknown>;
+         kwRows.forEach((p) => {
             positions.push(Number(p.position) || 0);
             strikingInput.push({
                keyword: String(p.keyword || ''),
@@ -127,17 +158,12 @@ const getPortfolio = async (req: NextApiRequest, res: NextApiResponse<PortfolioR
          const keywords = summarizeKeywords(positions);
          const strikingDistanceCount = findStrikingDistance(strikingInput, 4, 30).length;
 
-         // Analytics: count human vs AI-referral sessions for this domain in the window. Bounded by the
-         // clamped startISO. traffic stays null when no events exist, so the rollup distinguishes "no
-         // tracking here" from "0 sessions measured".
-         const eventRows = await S33kEvent.findAll({
-            where: { domain, created: { [Op.gte]: startISO }, ...scopeWhere(account) },
-            attributes: ['id', 'session', 'source', 'is_bot', 'device', 'country', 'page', 'type', 'created'],
-            order: [['created', 'ASC']],
-         });
+         // Analytics: count human vs AI-referral sessions in the window. traffic stays null when no
+         // events exist, so the rollup distinguishes "no tracking here" from "0 sessions measured".
+         const evRows = eventsByDomain.get(domain) || [];
          let traffic: DomainTraffic | null = null;
-         if (eventRows.length > 0) {
-            const sessions = sessionize(eventRows.map((r) => r.get({ plain: true }) as EventLike));
+         if (evRows.length > 0) {
+            const sessions = sessionize(evRows);
             // Human sessions exclude datacenter/bot sessions, matching the human-only default elsewhere.
             const human = sessions.filter((s) => !s.isBot);
             traffic = {
@@ -146,14 +172,15 @@ const getPortfolio = async (req: NextApiRequest, res: NextApiResponse<PortfolioR
             };
          }
 
-         domains.push({ domain, keywords, strikingDistanceCount, traffic });
-      }
+         return { domain, keywords, strikingDistanceCount, traffic };
+      });
 
       // Sort by tracked-keyword count desc so the most-invested sites lead the portfolio.
       domains.sort((a, b) => b.keywords.total - a.keywords.total);
 
       const withTraffic = domains.filter((d) => d.traffic !== null).length;
-      const note = `${domains.length} domain(s) in this portfolio, sorted by tracked-keyword count. `
+      const capNote = truncated > 0 ? `${truncated} more domain(s) were omitted (portfolio is capped at ${MAX_PORTFOLIO_DOMAINS}). ` : '';
+      const note = `${domains.length} domain(s) in this portfolio, sorted by tracked-keyword count. ${capNote}`
          + `${withTraffic} have first-party traffic in this window. `
          + 'Each domain shows its rank distribution, striking-distance quick-win count, and human / AI-referral sessions. '
          + 'Drill into a single site with the per-domain tools (striking_distance, page_scoreboard, channel_report).';

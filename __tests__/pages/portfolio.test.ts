@@ -3,7 +3,7 @@
  * once. Mocks the models; the real keyword-distribution + striking-distance + sessionize logic runs.
  */
 jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
-jest.mock('sequelize', () => ({ __esModule: true, Op: { gte: Symbol('gte'), lt: Symbol('lt') } }));
+jest.mock('sequelize', () => ({ __esModule: true, Op: { gte: Symbol('gte'), lt: Symbol('lt'), in: Symbol('in') } }));
 jest.mock('../../database/models/domain', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../database/models/keyword', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../database/models/s33kEvent', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
@@ -28,9 +28,9 @@ const mockEvent = S33kEventModel as unknown as { findAll: jest.Mock };
 const mockAuthorize = authorizeFn as unknown as jest.Mock;
 
 const row = (data: Record<string, unknown>) => ({ get: () => data, ...data });
-const kw = (keyword: string, position: number) => row({ keyword, position, url: '[]', history: '{}' });
-const pv = (session: string, source: string, is_bot: boolean, page: string, created: string) =>
-   row({ session, source, is_bot, device: 'desktop', country: 'US', page, type: 'pageview', created });
+const kw = (domain: string, keyword: string, position: number) => row({ domain, keyword, position, url: '[]', history: '{}' });
+const pv = (domain: string, session: string, source: string, is_bot: boolean, page: string, created: string) =>
+   row({ domain, session, source, is_bot, device: 'desktop', country: 'US', page, type: 'pageview', created });
 
 const makeReq = (query: Record<string, string>): NextApiRequest =>
    ({ method: 'GET', query, body: {}, headers: {} } as unknown as NextApiRequest);
@@ -52,21 +52,19 @@ beforeEach(() => {
       row({ ID: 1, domain: 'getmasset.com' }),
       row({ ID: 2, domain: 'second.com' }),
    ]);
-   // Per-domain keyword reads, in the order the route loops the domains.
-   // getmasset.com: 4 keywords (pos 2 top3+top10, pos 9 top10, pos 18 striking, pos 0 not-in-top-100).
-   // second.com: 1 keyword (pos 5, top10, striking-distance window is 4..30 so it counts).
-   mockKeyword.findAll
-      .mockResolvedValueOnce([kw('a', 2), kw('b', 9), kw('c', 18), kw('d', 0)])
-      .mockResolvedValueOnce([kw('e', 5)]);
-   // Per-domain event reads. getmasset.com: A human direct, B human ai, C bot ai.
-   // second.com: no events at all.
-   mockEvent.findAll
-      .mockResolvedValueOnce([
-         pv('A', 'direct', false, '/', '2026-06-16T10:00:00Z'),
-         pv('B', 'ai', false, '/', '2026-06-16T10:01:00Z'),
-         pv('C', 'ai', true, '/', '2026-06-16T10:02:00Z'),
-      ])
-      .mockResolvedValueOnce([]);
+   // The route now batches keywords across all domains into ONE grouped Op.in query, then groups by
+   // the row's domain field in memory. getmasset.com: 4 keywords (pos 2 top3+top10, pos 9 top10, pos 18
+   // striking, pos 0 not-in-top-100). second.com: 1 keyword (pos 5, top10, striking window is 4..30).
+   mockKeyword.findAll.mockResolvedValue([
+      kw('getmasset.com', 'a', 2), kw('getmasset.com', 'b', 9), kw('getmasset.com', 'c', 18), kw('getmasset.com', 'd', 0),
+      kw('second.com', 'e', 5),
+   ]);
+   // One grouped event query too. getmasset.com: A human direct, B human ai, C bot ai. second.com: none.
+   mockEvent.findAll.mockResolvedValue([
+      pv('getmasset.com', 'A', 'direct', false, '/', '2026-06-16T10:00:00Z'),
+      pv('getmasset.com', 'B', 'ai', false, '/', '2026-06-16T10:01:00Z'),
+      pv('getmasset.com', 'C', 'ai', true, '/', '2026-06-16T10:02:00Z'),
+   ]);
 });
 
 describe('GET /api/portfolio', () => {
