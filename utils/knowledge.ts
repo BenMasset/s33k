@@ -427,7 +427,8 @@ const capabilities: CapabilityEntry[] = [
          + 'first-party landing sessions (analytics), it correlates the two series and reports which rank change LIKELY drove which traffic change. '
          + 'Ahrefs has rank history but not your sessions; Plausible has sessions but not rank; s33k holds both for one domain in one store. It detects '
          + 'a material rank move and a subsequent traffic move within a lag window and classifies each page as rank-gain-drove-traffic, '
-         + 'rank-loss-cut-traffic, rank-up-no-traffic (a demand or snippet problem), or traffic-fell-rank-flat (check another source, e.g. an AI '
+         + 'rank-loss-cut-traffic, rank-up-no-traffic (a demand or snippet problem), rank-traffic-mismatch (rank and traffic both moved materially '
+         + 'but in non-matching directions, so the rank change did not drive it), or traffic-fell-rank-flat (check another source, e.g. an AI '
          + 'referral that dried up). It is CORRELATION not proof: every link says "likely", attaches both series as evidence, and never asserts '
          + 'causation. When a page lacks enough history it says so rather than guess. Rules-based, human-only by default, no LLM.',
       whenToUse: 'Use to answer "did my SEO actually pay off?" and to connect a specific rank change to a specific traffic change on the same page '

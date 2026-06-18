@@ -16,8 +16,8 @@ const DAY = 86400e3;
 const NOW = Date.parse('2026-06-30T00:00:00Z');
 
 // Build a keyword input whose history maps the given day -> position. Days are "YYYY-MM-DD".
-const kw = (keyword: string, targetPage: string, history: Record<string, number>, currentPosition = 0): CausalKeywordInput => ({
-   keyword, targetPage, history: JSON.stringify(history), currentPosition,
+const kw = (keyword: string, targetPage: string, history: Record<string, number>): CausalKeywordInput => ({
+   keyword, targetPage, history: JSON.stringify(history),
 });
 
 // Build N entry sessions all landing on `page` on the given UTC day "YYYY-MM-DD".
@@ -95,6 +95,54 @@ describe('computeCausalLinks classifications', () => {
       expect(links[0].classification).toBe('rank-up-no-traffic');
       expect(links[0].confidence).toBe('possible');
       expect(links[0].evidence.note.toLowerCase()).toMatch(/demand|snippet/);
+   });
+
+   it('rank-traffic-mismatch: rank IMPROVES but traffic FALLS materially (non-matching directions)', () => {
+      const page = '/mismatch-up';
+      // Rank 18 -> 4 (a real gain) dated 2026-06-10, but entries FALL hard after. The two moved against
+      // each other, so this must NOT be labeled traffic-fell-rank-flat (which means no rank change).
+      const keywordsByPage = new Map<string, CausalKeywordInput[]>([
+         [page, [kw('weird term', page, { '2026-06-03': 18, '2026-06-10': 4 })]],
+      ]);
+      const before = [...entriesOn(page, '2026-06-06', 12), ...entriesOn(page, '2026-06-08', 12)];
+      const after = [...entriesOn(page, '2026-06-12', 2), ...entriesOn(page, '2026-06-14', 2)];
+      const entriesByPage = new Map<string, CausalEntryInput[]>([[page, [...before, ...after]]]);
+
+      const { links } = computeCausalLinks({ keywordsByPage, entriesByPage, nowMs: NOW });
+      expect(links).toHaveLength(1);
+      expect(links[0].classification).toBe('rank-traffic-mismatch');
+      expect(links[0].confidence).toBe('possible');
+      // The structured fields KEEP the real rank move (not nulled like traffic-fell-rank-flat).
+      expect(links[0].rankFrom).toBe(18);
+      expect(links[0].rankTo).toBe(4);
+      expect(links[0].rankChangeDate).toBe('2026-06-10');
+      // Traffic actually fell, so the percent is negative and material.
+      expect((links[0].trafficChangePct as number)).toBeLessThanOrEqual(-30);
+      // Honest note: states they moved against each other, never asserts cause.
+      expect(links[0].evidence.note.toLowerCase()).toMatch(/against each other|opposite/);
+      expect(links[0].evidence.note.toLowerCase()).not.toContain('proof of cause.\nproves');
+      expect(links[0].evidence.note.toLowerCase()).not.toContain('with no rank change');
+   });
+
+   it('rank-traffic-mismatch: rank DROPS but traffic RISES materially (non-matching directions)', () => {
+      const page = '/mismatch-down';
+      // Rank 4 -> 19 (a real drop) dated 2026-06-10, but entries RISE hard after. Again non-matching,
+      // so this is rank-traffic-mismatch, not rank-loss-cut-traffic and not traffic-fell-rank-flat.
+      const keywordsByPage = new Map<string, CausalKeywordInput[]>([
+         [page, [kw('odd term', page, { '2026-06-03': 4, '2026-06-10': 19 })]],
+      ]);
+      const before = [...entriesOn(page, '2026-06-06', 2), ...entriesOn(page, '2026-06-08', 2)];
+      const after = [...entriesOn(page, '2026-06-12', 12), ...entriesOn(page, '2026-06-14', 12)];
+      const entriesByPage = new Map<string, CausalEntryInput[]>([[page, [...before, ...after]]]);
+
+      const { links } = computeCausalLinks({ keywordsByPage, entriesByPage, nowMs: NOW });
+      expect(links).toHaveLength(1);
+      expect(links[0].classification).toBe('rank-traffic-mismatch');
+      expect(links[0].rankFrom).toBe(4);
+      expect(links[0].rankTo).toBe(19);
+      expect(links[0].rankChangeDate).toBe('2026-06-10');
+      expect((links[0].trafficChangePct as number)).toBeGreaterThanOrEqual(30);
+      expect(links[0].evidence.note.toLowerCase()).toMatch(/against each other|opposite/);
    });
 
    it('traffic-fell-rank-flat: traffic drops with no material rank change (check another source)', () => {
@@ -232,6 +280,55 @@ describe('computeCausalLinks honesty + edge cases', () => {
       const { note } = computeCausalLinks({ keywordsByPage, entriesByPage, nowMs: NOW });
       expect(note.toLowerCase()).toContain('correlation');
       expect(note.toLowerCase()).not.toContain('proves');
+   });
+
+   it('does NOT emit a link for a rank change that falls OUTSIDE the analyzed period window', () => {
+      const page = '/stale';
+      // The only material rank move (18 -> 4) is dated 2026-03-01, ~120 days before NOW. The session
+      // data is all in June (inside a 30d window). With periodStartMs set to ~30d before NOW, that old
+      // rank point is dropped, the in-window rank series falls below MIN_RANK_DAYS, and the page reads
+      // as "not enough history yet" instead of correlating the stale move against the June traffic.
+      const keywordsByPage = new Map<string, CausalKeywordInput[]>([
+         [page, [kw('stale term', page, { '2026-03-01': 18, '2026-03-05': 4 })]],
+      ]);
+      const entriesByPage = new Map<string, CausalEntryInput[]>([[page, [
+         ...entriesOn(page, '2026-06-12', 3), ...entriesOn(page, '2026-06-14', 12),
+      ]]]);
+
+      const periodStart = NOW - 30 * DAY;
+      const { links, note } = computeCausalLinks({ keywordsByPage, entriesByPage, nowMs: NOW, periodStartMs: periodStart });
+      // The stale, out-of-window rank change produces NO link.
+      expect(links).toHaveLength(0);
+      expect(note.toLowerCase()).toContain('not enough history');
+
+      // Sanity: WITHOUT the clamp (default behavior), the same inputs DO surface a (misleading) link,
+      // proving the clamp is what suppressed it, not some unrelated gate.
+      const unclamped = computeCausalLinks({ keywordsByPage, entriesByPage, nowMs: NOW });
+      expect(unclamped.links.length).toBeGreaterThanOrEqual(1);
+   });
+
+   it('biases conservative on a recent change: the clamped after-window under-reports, never over-reports', () => {
+      // A change dated 2 days before NOW with a 7-day lag: the after window clamps to now (2 days) while
+      // the before window stays the full 7 days. Same daily entry rate on both sides means the after SUM
+      // is smaller than the before SUM purely because of the shorter span, so trafficChangePct is <= 0.
+      // That is the intended conservative bias: we never invent a rise off an unequal window comparison.
+      const page = '/recent';
+      const changeDay = dayKey(NOW - 2 * DAY);
+      const beforeDay1 = dayKey(NOW - 7 * DAY);
+      const beforeDay2 = dayKey(NOW - 5 * DAY);
+      const keywordsByPage = new Map<string, CausalKeywordInput[]>([
+         [page, [kw('recent term', page, { [beforeDay1]: 18, [changeDay]: 4 })]],
+      ]);
+      // Identical 5/day rate before and after the change day.
+      const entriesByPage = new Map<string, CausalEntryInput[]>([[page, [
+         ...entriesOn(page, beforeDay1, 5), ...entriesOn(page, beforeDay2, 5),
+         ...entriesOn(page, changeDay, 5), ...entriesOn(page, dayKey(NOW - 1 * DAY), 5),
+      ]]]);
+
+      const { links } = computeCausalLinks({ keywordsByPage, entriesByPage, nowMs: NOW });
+      expect(links).toHaveLength(1);
+      // Equal daily rate + shorter after window => the measured change is not a positive rise.
+      expect((links[0].trafficChangePct as number)).toBeLessThanOrEqual(0);
    });
 
    it('uses the injected clock so the after-window is bounded by now (no future days counted)', () => {

@@ -64,8 +64,10 @@ const notify = async (req: NextApiRequest, res: NextApiResponse<NotifyResponse>,
          if (theDomain) {
             await sendNotificationEmail(theDomain, settings, account);
             // Additive, opt-in second email. Never throws into the keyword-email path: the brief
-            // is best-effort and any failure is swallowed inside composeAndSendDailyBrief.
-            if (isDailyBriefEnabled()) {
+            // is best-effort and any failure is swallowed inside composeAndSendDailyBrief. Gate on the
+            // domain's notification toggle too, so an explicit per-domain trigger honors a disabled
+            // domain exactly like the no-domain cron loop below does (consistent toggle behavior).
+            if (isDailyBriefEnabled() && theDomain.notification !== false) {
                await composeAndSendDailyBrief(theDomain, settings, account);
             }
          }
@@ -77,6 +79,9 @@ const notify = async (req: NextApiRequest, res: NextApiResponse<NotifyResponse>,
             for (const domain of domains) {
                if (domain.notification !== false) {
                   await sendNotificationEmail(domain, settings, account);
+                  // composeAndSendDailyBrief issues its own (~17) reads per domain, separate from the
+                  // keyword email's. Acceptable: it is gated behind DAILY_BRIEF_ENABLED (off by default),
+                  // so the extra read amplification only happens when an operator opts in.
                   if (briefEnabled) {
                      await composeAndSendDailyBrief(domain, settings, account);
                   }
@@ -168,10 +173,15 @@ export const composeAndSendDailyBrief = async (domain: Domain, settings: Setting
          if (smtp_password) mailerSettings.auth.pass = smtp_password;
       }
       const transporter = nodeMailer.createTransport(mailerSettings);
+      // Collapse any internal whitespace / control chars in the headline before it goes into the
+      // Subject, so a headline carrying odd characters (it is built from keyword / page-path text)
+      // renders as one clean line. nodemailer already encodes the header against injection; this is
+      // purely cosmetic. The body is separately escaped via escapeHtml in renderDailyBriefHtml.
+      const cleanHeadline = String(brief.headline || '').replace(/\s+/g, ' ').trim();
       await transporter.sendMail({
          from: fromEmail,
          to: domain.notification_emails || notification_email,
-         subject: `[${domainName}] Daily Brief: ${brief.headline}`.slice(0, 160),
+         subject: `[${domainName}] Daily Brief: ${cleanHeadline}`.slice(0, 160),
          html,
       });
    } catch (err:any) {

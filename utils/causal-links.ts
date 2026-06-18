@@ -39,14 +39,14 @@ const DAY_MS = 86400e3;
 
 // --- Inputs. The route hydrates these from Keyword rows + sessionized S33kEvent rows. -----------
 
-// One tracked keyword's contribution to a page: its rank history JSON and its current position.
+// One tracked keyword's contribution to a page: its rank history JSON. Only the history is read here:
+// the per-day rank series (and so every change-detection) is derived entirely from history, so there
+// is no separate current-position fallback (it would bypass the date-keyed series and the honesty gate).
 export type CausalKeywordInput = {
    keyword: string,
    targetPage: string,
    // Raw history JSON string from the keyword row (date -> Google position). Parsed defensively.
    history: string,
-   // Current position column, a fallback day-of-read data point when history is sparse.
-   currentPosition: number,
 };
 
 // One landing/entry event the page received, already classified human-only by the caller. Only the
@@ -62,13 +62,16 @@ export type CausalClassification =
    | 'rank-gain-drove-traffic'
    | 'rank-loss-cut-traffic'
    | 'rank-up-no-traffic'
+   | 'rank-traffic-mismatch'
    | 'traffic-fell-rank-flat';
 
 export type CausalLink = {
    page: string,
    classification: CausalClassification,
    // The rank series around the detected change. rankFrom is the representative position BEFORE the
-   // change date, rankTo is AFTER. Null on the 'traffic-fell-rank-flat' case (rank did not move).
+   // change date, rankTo is AFTER. Both null ONLY on the 'traffic-fell-rank-flat' case (rank did not
+   // move); non-null on every case where a material rank change was detected, including the
+   // 'rank-traffic-mismatch' case where rank moved but traffic moved in a non-matching direction.
    rankFrom: number | null,
    rankTo: number | null,
    // ISO day the material rank change is dated to (the first day the new level is seen). Null when
@@ -79,8 +82,9 @@ export type CausalLink = {
    entriesAfter: number,
    trafficChangePct: number | null,
    lagDays: number | null,
-   // 'likely' when both a material rank move AND a material traffic move line up in time; 'possible'
-   // when only one side moved materially (e.g. rank up but traffic flat, or traffic fell with flat rank).
+   // 'likely' when a material rank move AND a material traffic move line up in the SAME direction in
+   // time; 'possible' otherwise (only one side moved materially, e.g. rank up but traffic flat or
+   // traffic fell with flat rank, or both moved materially but in non-matching directions).
    confidence: 'likely' | 'possible',
    // The raw two-sided evidence so the narration can show the receipts, never just the verdict.
    evidence: {
@@ -200,6 +204,10 @@ const detectRankChange = (
  * @param {Map<string, CausalEntryInput[]>} inputs.entriesByPage - Human-only landing sessions grouped
  *   by normalized landing-page path.
  * @param {number} [inputs.nowMs] - The clock (ms). Defaults to Date.now(). Injectable for tests.
+ * @param {number} [inputs.periodStartMs] - The start of the analyzed traffic window (ms). Rank-history
+ *   points OLDER than this are dropped before change-detection so a rank move from OUTSIDE the window
+ *   (e.g. 90 days ago) is never correlated against the in-window, possibly-empty traffic series.
+ *   Defaults to no clamp (consider all rank history) for back-compat callers and tests.
  * @param {number} [inputs.rankChange] - Min position delta to call a rank change material.
  * @param {number} [inputs.trafficChangePct] - Min percent delta to call a traffic change material.
  * @param {number} [inputs.lagDays] - Days after a rank change a traffic change may land and still count.
@@ -209,11 +217,13 @@ export const computeCausalLinks = (inputs: {
    keywordsByPage: Map<string, CausalKeywordInput[]>,
    entriesByPage: Map<string, CausalEntryInput[]>,
    nowMs?: number,
+   periodStartMs?: number,
    rankChange?: number,
    trafficChangePct?: number,
    lagDays?: number,
 }): CausalLinksResult => {
    const nowMs = inputs.nowMs ?? Date.now();
+   const periodStartMs = inputs.periodStartMs;
    const minRank = inputs.rankChange ?? DEFAULT_RANK_CHANGE;
    const minTrafficPct = inputs.trafficChangePct ?? DEFAULT_TRAFFIC_CHANGE_PCT;
    const lagDays = inputs.lagDays ?? DEFAULT_LAG_DAYS;
@@ -229,11 +239,26 @@ export const computeCausalLinks = (inputs: {
       if (!entries || entries.length === 0) { continue; }
       pagesConsidered += 1;
 
-      const rankSeries = buildPageRankSeries(keywords);
+      const fullRankSeries = buildPageRankSeries(keywords);
       const entriesSeries = buildEntriesSeries(entries);
 
+      // Clamp the rank series considered for change-detection to the SAME period window as the entries.
+      // The entries are loaded period-clamped (route loads S33kEvent with created >= periodStart) but
+      // the keyword history blob is unclamped, and detectRankChange returns the LARGEST-magnitude move
+      // across whatever it is given. Without this clamp, a big rank move from BEFORE the window (e.g. 90
+      // days ago) would be correlated against an in-window traffic series that has no data spanning it,
+      // surfacing a misleading link. Keep the point ON periodStart so a change dated to the first
+      // in-window day is still readable. With no periodStartMs (default), nothing is dropped.
+      const rankSeries = periodStartMs === undefined
+         ? fullRankSeries
+         : fullRankSeries.filter((p) => {
+            const ms = historyDateMs(p.date);
+            return Number.isNaN(ms) || ms >= periodStartMs;
+         });
+
       // Honesty gate: too few distinct days on either side and we cannot read a movement. Skip with a
-      // count rather than guessing.
+      // count rather than guessing. Applied to the in-window rank series, so a page whose only rank
+      // movement is out-of-window correctly reads as "not enough history yet" rather than a stale link.
       if (rankSeries.length < MIN_RANK_DAYS || entriesSeries.length < MIN_SESSION_DAYS) {
          pagesSkippedForHistory += 1;
          continue;
@@ -242,9 +267,13 @@ export const computeCausalLinks = (inputs: {
       const change = detectRankChange(rankSeries, minRank);
 
       if (change) {
-         // A material rank move happened. Compare entries in the equal-length windows immediately
-         // before and after the change date (after window is [D, D+lag]; before window is the same
-         // length ending the day before D), so the comparison is symmetric.
+         // A material rank move happened. Compare entries in the before/after windows around the change
+         // date: after window is [D, min(D+lag, now)]; before window is [D-1-lag, D-1]. When the change
+         // is RECENT (dated within `lagDays` of now), afterEnd clamps to now so the after window covers
+         // FEWER days than the before window. We deliberately leave the before window full rather than
+         // shrinking it: that under-counts a recent rise (the after sum is over a shorter span), which
+         // biases CONSERVATIVE (we under-report a movement, never over-report one) and keeps an honest
+         // tool from manufacturing a strong signal off a half-formed after window.
          const changeMs = historyDateMs(change.date);
          const lagMs = lagDays * DAY_MS;
          const afterStart = changeMs;
@@ -284,18 +313,28 @@ export const computeCausalLinks = (inputs: {
             confidence = 'possible';
             const moved = trafficChangePct === null ? 'had no prior baseline to measure against' : `moved only ${trafficChangePct}%`;
             note = `Rank improved from #${change.from} to #${change.to} around ${change.date}, but entries to `
-               + `${page} ${moved} in the ${lagDays} days after. The rank gain did not POSSIBLY convert into more `
+               + `${page} ${moved} in the ${lagDays} days after. The rank gain did not convert into more `
                + 'traffic. That points to a demand problem (few people search this term) or a snippet problem (the '
                + 'listing is not earning clicks): improve the title and meta description, or target a higher-demand term.';
          } else {
-            // Rank dropped but traffic did not fall materially (or rose), or rank moved but the traffic
-            // direction does not match the rank direction. Report it as a possible, weak link.
-            classification = rankImproved ? 'rank-up-no-traffic' : 'traffic-fell-rank-flat';
+            // A material rank move happened, but traffic moved in a NON-matching direction: rank improved
+            // yet traffic fell materially, or rank dropped yet traffic rose materially (the only cases
+            // left after the three above). This is its OWN classification, never 'traffic-fell-rank-flat'
+            // (which is reserved for the genuine no-rank-change case, rankFrom/rankTo null) and never
+            // 'rank-up-no-traffic' (reserved for a rank gain with immaterial traffic): a narrating LLM
+            // keys off the label, so an honest label is load-bearing here. The structured fields keep the
+            // real rank move; the note states plainly that the two moved against each other.
+            classification = 'rank-traffic-mismatch';
             confidence = 'possible';
-            note = `Rank moved from #${change.from} to #${change.to} around ${change.date}, but the entries to `
-               + `${page} did not move in the matching, expected direction (${trafficChangePct === null ? 'no baseline' : `${trafficChangePct}%`}). `
-               + 'The rank change and the traffic change do not line up, so another factor is likely at work. '
-               + 'This is correlation analysis only, never proof of cause.';
+            const dir = rankImproved
+               ? `Rank improved from #${change.from} to #${change.to}`
+               : `Rank dropped from #${change.from} to #${change.to}`;
+            const trafficWord = trafficChangePct === null ? 'no baseline to measure' : `moved ${trafficChangePct}%`;
+            note = `${dir} around ${change.date}, but entries to ${page} ${trafficWord} in the ${lagDays} days after, `
+               + 'the OPPOSITE direction you would expect from the rank move. Rank and traffic moved against each '
+               + 'other, so the rank change did NOT drive this traffic change: another factor (a campaign, '
+               + 'seasonality, an AI-referral shift, or a different keyword) is likely at work. This is correlation '
+               + 'analysis only, never proof of cause.';
          }
 
          links.push({

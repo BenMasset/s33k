@@ -58,14 +58,15 @@ const getCausalLinks = async (req: NextApiRequest, res: NextApiResponse<Resp>, a
       // periodStartMs clamps the lookback at 365 days (the shared DoS bound), so a hostile period=
       // cannot pull the whole event table into memory.
       const nowMs = Date.now();
-      const startISO = new Date(periodStartMs(period, nowMs)).toJSON();
+      const periodStart = periodStartMs(period, nowMs);
+      const startISO = new Date(periodStart).toJSON();
 
       // Pull both pillars in parallel. Each read is wrapped so a rejection degrades to empty (and the
       // composer's honest note) instead of 500ing the join.
       const [keywordRows, eventRows] = await Promise.all([
          Keyword.findAll({
             where: { domain, ...scopeWhere(account) },
-            attributes: ['keyword', 'position', 'history', 'target_page'],
+            attributes: ['keyword', 'history', 'target_page'],
          }).catch(() => [] as Keyword[]),
          S33kEvent.findAll({
             where: { domain, created: { [Op.gte]: startISO }, ...scopeWhere(account) },
@@ -88,7 +89,6 @@ const getCausalLinks = async (req: NextApiRequest, res: NextApiResponse<Resp>, a
             keyword: String(k.keyword),
             targetPage: page,
             history: String(k.history || '{}'),
-            currentPosition: Number(k.position) || 0,
          });
          keywordsByPage.set(page, list);
       });
@@ -116,7 +116,12 @@ const getCausalLinks = async (req: NextApiRequest, res: NextApiResponse<Resp>, a
          entriesByPage.set(page, list);
       });
 
-      const result = computeCausalLinks({ keywordsByPage, entriesByPage, nowMs });
+      // Pass periodStart so the rank series is clamped to the SAME window as the entries (which are
+      // already loaded with created >= startISO). Without it, a stale rank move from before the window
+      // would correlate against an in-window traffic series that cannot speak to it.
+      const result = computeCausalLinks({
+         keywordsByPage, entriesByPage, nowMs, periodStartMs: periodStart,
+      });
 
       return res.status(200).json({
          domain, period, links: result.links, note: result.note, error: null,
