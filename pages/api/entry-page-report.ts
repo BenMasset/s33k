@@ -63,7 +63,11 @@ const getEntryPageReport = async (req: NextApiRequest, res: NextApiResponse<Resp
       if ((typeof q.goal === 'string' && q.goal.trim()) || (typeof q.goalId === 'string' && q.goalId.trim())) {
          const goalWhere: Record<string, unknown> = { domain, ...scopeWhere(account) };
          if (typeof q.goalId === 'string' && q.goalId.trim()) {
-            goalWhere.ID = parseInt(q.goalId, 10);
+            // Reject a non-numeric goalId with a clear 400 (matching conversion-attribution.ts and
+            // aeo-roi.ts) rather than passing NaN into the query, which Postgres surfaces as a generic 400.
+            const gid = parseInt(q.goalId, 10);
+            if (!Number.isFinite(gid)) { return res.status(400).json({ error: 'goalId must be a number.' }); }
+            goalWhere.ID = gid;
          } else {
             goalWhere.name = (q.goal as string).trim();
          }

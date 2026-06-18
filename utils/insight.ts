@@ -9,13 +9,13 @@ export const sortInsightItems = (items:SCInsightItem[], sortBy: string = 'clicks
    let sortedItems = [];
    switch (sortKey) {
       case 'clicks':
-         sortedItems = items.sort((a, b) => (b.clicks > a.clicks ? 1 : -1));
+         sortedItems = items.sort((a, b) => b.clicks - a.clicks);
          break;
       case 'impressions':
-         sortedItems = items.sort((a, b) => (b.impressions > a.impressions ? 1 : -1));
+         sortedItems = items.sort((a, b) => b.impressions - a.impressions);
          break;
       case 'position':
-         sortedItems = items.sort((a, b) => (b.position > a.position ? 1 : -1));
+         sortedItems = items.sort((a, b) => b.position - a.position);
          break;
       default:
          sortedItems = items;
@@ -98,7 +98,7 @@ export const getKeywordsInsight = (SCData:SCDomainDataType, sortBy:string = 'cli
                countriesCount[keywordKey] = [];
             }
             if (countriesCount[keywordKey] && !countriesCount[keywordKey].includes(itm.country)) {
-               countriesCount[keywordKey].push(itm.keyword);
+               countriesCount[keywordKey].push(itm.country);
             }
             keywordCounts[keywordKey] = keywordCounts[keywordKey] ? keywordCounts[keywordKey] + 1 : 1;
          }

@@ -60,7 +60,9 @@ const DiscoverPage: NextPage = () => {
                   <DomainHeader
                   domain={activDomain}
                   domains={theDomains}
-                  showAddModal={() => console.log('XXXXX')}
+                  // This is a read-only keyword-ideas view: it has no add-keyword modal, so the
+                  // DomainHeader add control is intentionally a no-op here (use the keywords tab to add).
+                  showAddModal={() => {}}
                   showSettingsModal={setShowDomainSettings}
                   exportCsv={() => exportKeywordIdeas(showFavorites ? favorites : keywordIdeas, activDomain.domain)}
                   showIdeaUpdateModal={() => setShowUpdateModal(true)}

@@ -198,7 +198,11 @@ describe('AI Visibility funnel: math + status classification', () => {
       expect(captured.body.summary.crawlToReferralRate).toBe(50);
    });
 
-   it('reports crawlToReferralRate 0 (no divide-by-zero) when there are no AI-crawled pages', async () => {
+   it('reports crawlToReferralRate null when this provider has no per-landing referral detail', async () => {
+      // Per-page crawl-to-referral is NOT attributable when no referral source carries a landing_path
+      // (referralLandingAvailable false). A hard 0 would read as a real, terrible funnel, so the route
+      // returns null and the note explains it. This replaces the old "0 means no AI-crawled pages"
+      // assertion: 0 was lying about un-attributable data. (Genuine-bug fix; see ai-visibility #3.)
       mockedCrawlerFindAll.mockResolvedValue([]);
       mockedGetProvider.mockReturnValue(providerStub({ referral: { sources: [] } }));
 
@@ -206,9 +210,25 @@ describe('AI Visibility funnel: math + status classification', () => {
       await handler(req, res);
 
       expect(captured.status).toBe(200);
-      expect(captured.body.summary.crawlToReferralRate).toBe(0);
+      expect(captured.body.summary.crawlToReferralRate).toBeNull();
       expect(captured.body.summary.totalAICrawls).toBe(0);
       expect(captured.body.summary.totalAIReferrals).toBe(0);
+   });
+
+   it('reports crawlToReferralRate 0 (no divide-by-zero) when landing detail exists but no AI-crawled pages', async () => {
+      // referralLandingAvailable is true (a source carries landing_path), so the rate IS attributable;
+      // with zero crawled pages it must be a real 0, not null, and must not divide by zero.
+      mockedCrawlerFindAll.mockResolvedValue([]);
+      mockedGetProvider.mockReturnValue(providerStub({
+         referral: { sources: [refRow({ unique_visitors: 3, landing_path: '/only-cited' })] },
+      }));
+
+      const { req, res, captured } = makeReqRes({ domain: 'getmasset.com' });
+      await handler(req, res);
+
+      expect(captured.status).toBe(200);
+      expect(captured.body.summary.crawlToReferralRate).toBe(0);
+      expect(captured.body.summary.totalAICrawls).toBe(0);
    });
 
    it('picks the advocate with the most referrals as topAdvocate', async () => {
@@ -323,7 +343,9 @@ describe('AI Visibility funnel: graceful degradation', () => {
       expect(captured.body.summary).toEqual({
          totalAICrawls: 0,
          totalAIReferrals: 0,
-         crawlToReferralRate: 0,
+         // No referral source carries a landing_path, so per-page crawl-to-referral is not
+         // attributable: null, not a misleading 0. (Genuine-bug fix; see ai-visibility #3.)
+         crawlToReferralRate: null,
          topAdvocate: null,
          biggestGap: null,
       });

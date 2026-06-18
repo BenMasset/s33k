@@ -75,53 +75,87 @@ const READ_DOMAIN = 'getmasset.com';
 const TEMP_DOMAIN = 's33k-smoke-test.example';
 const PERIOD = '30d';
 
-// The exact set of 39 tools the server must expose (original 20 + 19 night additions).
+// The exact set of tools the server must expose. This list is the smoke-test source of truth and
+// MUST equal the tools registered in mcp/src/index.ts. A jest test (mcp/__tests__/tool-list-parity)
+// asserts this array matches the registerTool names so the two can never silently drift again. Keep
+// it sorted; regenerate from the live tools/list when the registered set changes.
 const EXPECTED_TOOLS = [
-   // Original SEO/keyword tools.
-   'list_domains',
-   'list_keywords',
    'add_keyword',
-   'refresh_keywords',
-   'get_insight',
-   'page_scoreboard',
-   'ai_referrals',
+   'aeo_report',
+   'aeo_roi',
    'ai_crawlers',
-   'traffic_summary',
-   'human_traffic',
-   'traffic_breakdown',
-   'traffic_timeseries',
-   'top_events',
-   'engagement',
-   'insights',
+   'ai_referrals',
+   'ai_visibility',
+   'alerts',
    'briefing',
+   'campaign_report',
+   'cannibalization_detection',
+   'channel_report',
+   'competitor_visibility',
+   'connect_search_console',
+   'content_gap',
+   'content_performance_report',
+   'conversion_attribution',
+   'conversions_by_source',
    'create_domain',
-   'update_keyword',
+   'create_goal',
+   'dashboard',
+   'delete_account_data',
+   'delete_goal',
    'delete_keyword',
    'discover_pages',
-   // Build-night additions.
-   'ai_visibility',
+   'engagement',
+   'entry_page_report',
    'entry_pages',
-   'alerts',
-   'top_clicks',
+   'executive_summary',
+   'export_data',
    'form_submissions',
-   'scroll_depth',
-   'page_engagement',
-   'onboard',
+   'funnel_analysis',
+   'get_insight',
+   'goal_analytics',
+   'help',
+   'human_analytics',
+   'human_traffic',
+   'insights',
    'install_instructions',
    'invite_external',
    'invite_internal',
-   'list_invites',
-   'list_waitlist',
-   'export_data',
-   'delete_account_data',
-   'security_facts',
-   'help',
-   'request_feature',
-   'list_feature_requests',
-   // Per-domain read-only sharing.
-   'share_domain',
    'list_domain_shares',
+   'list_domains',
+   'list_feature_requests',
+   'list_goals',
+   'list_invites',
+   'list_keywords',
+   'list_waitlist',
+   'live_view',
+   'onboard',
+   'page_engagement',
+   'page_scoreboard',
+   'period_compare',
+   'portfolio_summary',
+   'refresh_keywords',
+   'request_feature',
    'revoke_domain_share',
+   'scroll_depth',
+   'security_facts',
+   'segment_analytics',
+   'segment_delete',
+   'segment_list',
+   'segment_save',
+   'seo_report',
+   'setup_status',
+   'share_domain',
+   'site_audit',
+   'striking_distance',
+   'suggest_goals',
+   'top_clicks',
+   'top_events',
+   'traffic_breakdown',
+   'traffic_summary',
+   'traffic_timeseries',
+   'update_keyword',
+   'web_vitals',
+   'weekly_digest',
 ];
 
 // Genuinely mutating / side-effectful new tools NOT exercised in the default smoke.
@@ -329,8 +363,8 @@ async function main() {
       return;
    }
 
-   // 2. tools/list and assert exactly the 39 expected tools are present.
-   console.log('\n[2] tools/list (expect exactly 39)');
+   // 2. tools/list and assert exactly the expected tool set is present (no missing, no unexpected).
+   console.log(`\n[2] tools/list (expect exactly ${EXPECTED_TOOLS.length})`);
    let toolNames = [];
    try {
       const { tools } = await client.listTools();
@@ -343,9 +377,9 @@ async function main() {
       let detail = `${toolNames.length} tools`;
       if (missing.length) detail += ` | MISSING: ${missing.join(', ')}`;
       if (unexpected.length) detail += ` | UNEXPECTED: ${unexpected.join(', ')}`;
-      record('tools/list exact 39', exact, detail);
+      record('tools/list exact', exact, detail);
    } catch (err) {
-      record('tools/list exact 39', false, err instanceof Error ? err.message : String(err));
+      record('tools/list exact', false, err instanceof Error ? err.message : String(err));
    }
 
    // 3. Exercise all read tools against the real domain (read-only).
@@ -545,8 +579,8 @@ function finish() {
    const drivenCount = EXPECTED_TOOLS.length - skippedNames.length;
    console.log('\n' + '-'.repeat(60));
    console.log(`Summary: ${passCount}/${total} assertions passed.`);
-   // Tool-coverage line: of the 39 registered tools, how many were driven vs
-   // intentionally skipped (the destructive mutators).
+   // Tool-coverage line: of the registered tools, how many are NOT in the skipped-mutator set
+   // (the destructive mutators that the default smoke never drives).
    console.log(
       `Tools: ${EXPECTED_TOOLS.length} registered | ${drivenCount} driven | `
       + `${skippedNames.length} SKIPPED (${skippedNames.join(', ')}).`,

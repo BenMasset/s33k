@@ -11,7 +11,6 @@ import Invite from '../../database/models/invite';
 import FeatureRequest from '../../database/models/featureRequest';
 import authorize from '../../utils/authorize';
 import { scopeWhere, ADMIN_ACCOUNT_ID } from '../../utils/scope';
-import type Account2 from '../../database/models/account';
 import { deleteUmamiWebsite } from '../../utils/umami-provision';
 
 // HARD DELETE: the ultimate "your data is yours." DELETE /api/account-data permanently and
@@ -61,7 +60,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
    return deleteAccountData(req, res, account);
 }
 
-const deleteAccountData = async (req: NextApiRequest, res: NextApiResponse<DeleteResponse>, account?: Account2 | null) => {
+const deleteAccountData = async (req: NextApiRequest, res: NextApiResponse<DeleteResponse>, account?: Account | null) => {
    // GUARDRAIL 1 (confirmation gate). No exact { confirm: "DELETE" } -> 400, delete nothing.
    const confirm = req.body?.confirm;
    if (confirm !== 'DELETE') {

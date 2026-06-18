@@ -50,6 +50,47 @@ const FETCH_TIMEOUT_MS = 10000;
 /** Max redirect hops we follow (and revalidate) before giving up. */
 const MAX_REDIRECTS = 4;
 
+/**
+ * Hard ceiling on a fetched body, in bytes. The crawler fetches a caller-supplied domain, so a
+ * malicious or accidentally-huge page could otherwise buffer hundreds of MB into memory (a cheap
+ * memory-pressure vector as the product moves to untrusted multi-tenant API keys). We stream and
+ * abort once this ceiling is crossed. Page text for keyword discovery never needs more than this.
+ */
+const MAX_BODY_BYTES = 5 * 1024 * 1024;
+
+/**
+ * Read a response body as text, but abort once MAX_BODY_BYTES is exceeded so an oversized page cannot
+ * exhaust memory. Falls back to res.text() when the body is not a readable stream (older runtimes).
+ * @param {Response} res - A fetch Response whose body we want as bounded text.
+ * @returns {Promise<string | null>} Decoded text, or null when the cap is exceeded or read fails.
+ */
+const readBoundedText = async (res: Response): Promise<string | null> => {
+   const body = res.body as ReadableStream<Uint8Array> | null;
+   if (!body || typeof body.getReader !== 'function') {
+      // No stream available: fall back to the full read, then enforce the cap on the decoded length.
+      const text = await res.text();
+      return text.length > MAX_BODY_BYTES ? null : text;
+   }
+   const reader = body.getReader();
+   const chunks: Uint8Array[] = [];
+   let total = 0;
+   try {
+      for (;;) {
+         // eslint-disable-next-line no-await-in-loop
+         const { done, value } = await reader.read();
+         if (done) { break; }
+         if (value) {
+            total += value.byteLength;
+            if (total > MAX_BODY_BYTES) { await reader.cancel().catch(() => {}); return null; }
+            chunks.push(value);
+         }
+      }
+   } catch {
+      return null;
+   }
+   return Buffer.concat(chunks.map((c) => Buffer.from(c))).toString('utf8');
+};
+
 /** A realistic, honest user agent so well-behaved sites do not block us. */
 const USER_AGENT = 's33k-onboarding-crawler/0.1 (+https://github.com/s33k)';
 
@@ -279,8 +320,10 @@ export const safeFetchText = async (url: string, accept?: string): Promise<strin
             continue;
          }
          if (!res.ok) { return null; }
+         // Stream with a byte ceiling so an attacker-controlled domain serving a giant body cannot
+         // exhaust memory (audit: unbounded res.text() on a caller-supplied domain).
          // eslint-disable-next-line no-await-in-loop
-         return await res.text();
+         return await readBoundedText(res);
       } catch {
          return null;
       } finally {

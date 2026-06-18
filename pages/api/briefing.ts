@@ -17,6 +17,7 @@ import {
    SummaryResult,
    EngagementTier,
 } from '../../utils/analytics';
+import { aggregateTrafficPages } from '../../utils/aggregate-traffic-pages';
 import { estimateHumanTraffic } from '../../utils/bot-filter';
 
 /*
@@ -186,34 +187,11 @@ const getBriefing = async (req: NextApiRequest, res: NextApiResponse<BriefingRes
       const crawlers = crawlerRows as Array<{ bot: string, owner: string | null, isAiEngine: boolean, hitAt: string }>;
 
       // ---------------------------------------------------------------------
-      // Shared joins (same aggregation insights.ts and scoreboard.ts use).
+      // Shared joins (same aggregation scoreboard.ts uses, via the shared util).
       // Aggregate page rows by clean path FIRST: a provider can return several
       // raw rows that all normalize to one page (e.g. "/", "/?utm_medium=x").
       // ---------------------------------------------------------------------
-      const aggByPath = new Map<string, NormalizedPage>();
-      trafficPages.forEach((p) => {
-         const existing = aggByPath.get(p.pathClean);
-         if (!existing) {
-            aggByPath.set(p.pathClean, {
-               url: p.url,
-               pathClean: p.pathClean,
-               page_views: p.page_views || 0,
-               page_title: p.page_title,
-               unique_visitors: p.unique_visitors,
-               bounce_rate: p.bounce_rate,
-               avg_duration: p.avg_duration,
-            });
-            return;
-         }
-         existing.page_views += (p.page_views || 0);
-         if (typeof p.unique_visitors === 'number') {
-            existing.unique_visitors = (existing.unique_visitors || 0) + p.unique_visitors;
-         }
-         if (p.url && (!existing.url || p.url.length < existing.url.length)) {
-            existing.url = p.url;
-         }
-      });
-      const aggregatedPages = Array.from(aggByPath.values());
+      const aggregatedPages = aggregateTrafficPages(trafficPages);
       const totalPageviews = aggregatedPages.reduce((sum, p) => sum + (p.page_views || 0), 0);
 
       // Group tracked keywords by the page they target.

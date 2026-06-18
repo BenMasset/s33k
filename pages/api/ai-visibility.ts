@@ -107,8 +107,13 @@ type AiVisibilityEngine = {
 type FunnelSummary = {
    totalAICrawls: number,
    totalAIReferrals: number,
-   /** Percent of AI-crawled pages that also receive AI referral traffic (0..100). */
-   crawlToReferralRate: number,
+   /**
+    * Percent of AI-crawled pages that also receive AI referral traffic (0..100), or null when this
+    * provider reports AI referrals only site-wide (no per-landing-page detail). In that case per-page
+    * crawl-to-referral is NOT attributable, so null (not a hard 0 that would read as a real, terrible
+    * funnel) is the honest answer. See the summary note when this is null.
+    */
+   crawlToReferralRate: number | null,
    /** The engine doing the most for you (advocate with the most referrals), or null. */
    topAdvocate: string | null,
    /** The engine with the largest crawl-minus-referral gap (most aware, least citing). */
@@ -337,9 +342,16 @@ const getAiVisibility = async (req: NextApiRequest, res: NextApiResponse<AiVisib
       const totalAIReferrals = aiReferralSources.reduce((sum, s) => sum + Number(s.unique_visitors ?? 0), 0);
       const crawledPagesCount = pages.filter((p) => p.isCrawled).length;
       const crawledAndCitedCount = pages.filter((p) => p.isCrawled && p.isCited).length;
-      const crawlToReferralRate = crawledPagesCount > 0
-         ? Math.round((crawledAndCitedCount / crawledPagesCount) * 1000) / 10
-         : 0;
+      // isCited is only ever set from a referral source that carries a landing_path. When the provider
+      // reports AI referrals site-wide (no landing detail), crawledAndCitedCount is structurally 0 even
+      // when the site demonstrably gets AI referral traffic, so a computed 0% would lie as a real (and
+      // terrible) funnel. Report null instead and let the summary note explain it is not attributable.
+      let crawlToReferralRate: number | null = null;
+      if (referralLandingAvailable) {
+         crawlToReferralRate = crawledPagesCount > 0
+            ? Math.round((crawledAndCitedCount / crawledPagesCount) * 1000) / 10
+            : 0;
+      }
 
       const advocates = engines.filter((e) => e.status === 'advocate');
       const topAdvocate = advocates.length > 0

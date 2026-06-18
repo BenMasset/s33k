@@ -152,11 +152,10 @@ export const resolveWebsiteId = async (
       }
       const json: any = await res.json();
       const rows: any[] = Array.isArray(json?.data) ? json.data : (Array.isArray(json) ? json : []);
-      const wanted = String(domain || '').trim().toLowerCase().replace(/^www\./, '');
-      const match = rows.find((row) => {
-         const d = String(row?.domain || '').trim().toLowerCase().replace(/^www\./, '');
-         return d === wanted;
-      });
+      // Use the one canonical normalizer so a trailing-dot or scheme-prefixed Umami row still matches
+      // the requested domain (the hand-rolled www-strip alone did not strip protocol/path/trailing-dot).
+      const wanted = canonicalizeDomain(domain);
+      const match = rows.find((row) => canonicalizeDomain(row?.domain) === wanted);
       if (!match?.id) {
          return { websiteId: null, error: `No Umami website found for domain "${domain}". Set UMAMI_WEBSITE_ID.` };
       }
@@ -211,6 +210,11 @@ const resolveUmami = async (
    return { base, token, websiteId };
 };
 
+// Cap any lookback at 365 days, matching utils/period.ts MAX_LOOKBACK_MS. This is the PROD analytics
+// parser, so without the cap a period=99999d would request a 99999-day window straight from Umami,
+// the same per-domain OOM/DoS the first-party parser already guards. Keep both ceilings identical.
+const MAX_LOOKBACK_DAYS = 365;
+
 const periodToRange = (period: string): { startAt: number, endAt: number } => {
    const endAt = Date.now();
    const match = /^(\d+)\s*([dhwm])$/i.exec(String(period || '').trim());
@@ -223,7 +227,8 @@ const periodToRange = (period: string): { startAt: number, endAt: number } => {
       else if (unit === 'w') { days = n * 7; }
       else if (unit === 'm') { days = n * 30; }
    }
-   const startAt = endAt - Math.max(1, days) * 24 * 60 * 60 * 1000;
+   const boundedDays = Math.min(Math.max(1, days), MAX_LOOKBACK_DAYS);
+   const startAt = endAt - boundedDays * 24 * 60 * 60 * 1000;
    return { startAt, endAt };
 };
 
@@ -678,7 +683,7 @@ export class UmamiProvider implements AnalyticsProvider {
       // 2. Site-wide referrers -> the four source classes. A failure here is NON-fatal:
       // entry pages still come back, sources default to all-direct, and the referrer
       // error is surfaced (graceful degradation, never a 500 from a sub-signal).
-      const selfHost = String(domain || '').trim().toLowerCase().replace(/^www\./, '');
+      const selfHost = canonicalizeDomain(domain);
       let siteSources: EntryPageSources = { ...EMPTY_ENTRY_SOURCES };
       let referrerError: string | null = null;
       try {

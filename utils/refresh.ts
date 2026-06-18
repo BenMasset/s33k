@@ -78,7 +78,12 @@ export const updateKeywordPosition = async (keywordRaw:Keyword, updatedKeyword: 
          const newPos = updatedKeyword.position;
          const { history } = keyword;
          const theDate = new Date();
-         const dateKey = `${theDate.getFullYear()}-${theDate.getMonth() + 1}-${theDate.getDate()}`;
+         // ISO date key (UTC, zero-padded): "2026-06-09", not the old locale-ambiguous "2026-6-9".
+         // The old non-padded form parsed as LOCAL midnight in new Date(key) while the rank-movers
+         // window bounds are UTC, skewing "what moved". ISO parses as UTC midnight and sorts lexically.
+         // Old keys are still read back: every parser of these keys normalizes both formats (see
+         // utils/history-date.ts normalizeHistoryDateKey), so existing history stays correct.
+         const dateKey = theDate.toISOString().slice(0, 10);
          history[dateKey] = newPos;
 
          const updatedVal = {

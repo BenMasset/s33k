@@ -11,6 +11,8 @@
 // IMPROVED (climbed toward #1) and a NEGATIVE delta means it WORSENED (fell). That keeps "biggest
 // positive number = best news" intuitive for whoever reads the digest.
 
+import { historyDateMs } from './history-date';
+
 export type MoverInput = {
    keyword: string,
    // The raw history JSON string from the keyword row (date -> position). Parsed defensively here.
@@ -48,8 +50,14 @@ const parsePairs = (history: string): { t: number, pos: number }[] => {
    } catch { obj = {}; }
    const pairs: { t: number, pos: number }[] = [];
    for (const dateKey of Object.keys(obj)) {
-      const t = new Date(dateKey).getTime();
-      const pos = Number(obj[dateKey]);
+      // Tolerant of both the new padded-ISO key and the old "2026-6-9" form; parses UTC-midnight so it
+      // lines up with the UTC window bounds (see utils/history-date.ts).
+      const t = historyDateMs(dateKey);
+      const raw = obj[dateKey];
+      // Number(null) coerces to 0, which this module reads as "dropped out of rankings" (a real
+      // worst-case position) and would manufacture a false big worsening. Drop null/undefined instead.
+      if (raw == null) { continue; }
+      const pos = Number(raw);
       if (Number.isNaN(t) || Number.isNaN(pos)) { continue; }
       pairs.push({ t, pos });
    }

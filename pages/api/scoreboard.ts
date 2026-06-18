@@ -9,6 +9,7 @@ import type Account from '../../database/models/account';
 import parseKeywords from '../../utils/parseKeywords';
 import { cleanPath } from '../../utils/lodd';
 import { getAnalyticsProvider, NormalizedPage, ReferralSource } from '../../utils/analytics';
+import { aggregateTrafficPages } from '../../utils/aggregate-traffic-pages';
 
 type ScoreboardKeyword = {
    keyword: string,
@@ -88,9 +89,14 @@ const getScoreboard = async (req: NextApiRequest, res: NextApiResponse<Scoreboar
       const allKeywords: Keyword[] = await Keyword.findAll({ where: { domain, ...scopeWhere(account) } });
       const keywords: KeywordType[] = parseKeywords(allKeywords.map((e) => e.get({ plain: true })));
 
-      // 2. Fetch per-page traffic from the configured analytics provider.
+      // 2. Fetch per-page traffic from the configured analytics provider, then aggregate by clean
+      // path. A provider can return several raw rows that normalize to one page (e.g. "/p" and
+      // "/p?utm=x"); without this both pageByPath (plain .set, last wins) and the row-emitting
+      // forEach below would drop/double-count that page. briefing.ts aggregates the same way via
+      // the shared util, so the two cross-pillar views agree on the same data.
       const provider = getAnalyticsProvider();
-      const { pages: trafficPages, error: analyticsError } = await provider.getPageTraffic(domain, period);
+      const { pages: rawTrafficPages, error: analyticsError } = await provider.getPageTraffic(domain, period);
+      const trafficPages = aggregateTrafficPages(rawTrafficPages);
 
       // 2b. Fetch AI-referral sources so we can attribute AI-referred visitors to
       // a landing page when the provider exposes a per-landing-page detail. Most

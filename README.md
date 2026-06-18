@@ -32,7 +32,7 @@ Beyond rank tracking and traffic, s33k now has the higher-level capabilities a m
 
 ## MCP tools
 
-s33k is fully controllable from an LLM over MCP. The server exposes 70 tools and 5 knowledge resources (authoritative list from `mcp/src/index.ts`), grouped below by pillar. The example prompts are what you would type into Claude or Cursor; the LLM picks the tool.
+s33k is fully controllable from an LLM over MCP. The server exposes 76 tools and 5 knowledge resources (authoritative list from `mcp/src/index.ts`), grouped below by pillar. The example prompts are what you would type into Claude or Cursor; the LLM picks the tool.
 
 ### Cross-pillar (start here)
 

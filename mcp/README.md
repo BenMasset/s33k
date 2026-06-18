@@ -6,7 +6,7 @@ The server is a thin wrapper over the s33k REST API. It speaks stdio transport a
 
 ## Tools
 
-The server registers 70 tools and 5 knowledge resources, grouped by pillar. The authoritative source is `src/index.ts`; the per-tool descriptions live in `utils/knowledge.ts` in the root repo. Most read tools take `domain` and an optional `period` (e.g. `30d`); the per-tool specifics are below.
+The server registers 76 tools and 5 knowledge resources, grouped by pillar. The authoritative source is `src/index.ts`; the per-tool descriptions live in `utils/knowledge.ts` in the root repo. Most read tools take `domain` and an optional `period` (e.g. `30d`); the per-tool specifics are below.
 
 ### Cross-pillar
 
@@ -188,7 +188,7 @@ The server speaks stdio and waits for a client, so running it by hand will print
 S33K_API_KEY=... S33K_BASE_URL=http://localhost:3000 node dist/index.js
 ```
 
-A clean boot prints `s33k-mcp connected (base URL: ...). 70 tools and 5 resources registered.` to stderr. Press Ctrl-C to stop.
+A clean boot prints `s33k-mcp connected (base URL: ...). 76 tools and 5 resources registered.` to stderr. Press Ctrl-C to stop.
 
 ## End-to-end smoke test
 

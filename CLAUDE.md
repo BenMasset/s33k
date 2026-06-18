@@ -20,9 +20,10 @@ hard-won lesson, so the next session never relearns it.
   line: `export NVM_DIR="$HOME/.nvm"; source "$NVM_DIR/nvm.sh"; nvm use 20 >/dev/null 2>&1;`
 - **Tests:** `npx jest --ci` (one-shot). `npm run test` is WATCH mode, do not use it for verification.
 - **Lint:** `npm run lint` must be clean. **Build:** `npm run build` must print "Compiled successfully".
-- **MCP server:** `cd mcp && npm run build`, then probe over a real stdio handshake. 72 tools + 5
-  resources today. Banner reads "72 tools and 5 resources registered." Smoke harness: `npm run smoke`
-  from `mcp/`.
+- **MCP server:** `cd mcp && npm run build`, then probe over a real stdio handshake. 76 tools + 5
+  resources today. Banner reads "76 tools and 5 resources registered." Smoke harness: `npm run smoke`
+  from `mcp/`. The smoke test's EXPECTED_TOOLS and the registered set are kept in lockstep by a jest
+  guard (`__tests__/utils/knowledge-coverage.test.ts`), so this count cannot silently rot.
 - **Do not touch a running dev server or `.env`.** `.env` is gitignored and must stay untracked.
 
 ---
@@ -85,7 +86,7 @@ hard-won lesson, so the next session never relearns it.
 - Add a `CapabilityEntry` to `utils/knowledge.ts` for any new tool, or the knowledge-coverage jest
   test FAILS the build. This is the self-support durability guarantee: a user's own LLM must be able
   to answer any question about the tool, so the answers can never silently rot.
-- Tools are registered in `mcp/src/index.ts` (71 tools + 5 resources today).
+- Tools are registered in `mcp/src/index.ts` (76 tools + 5 resources today).
 - Whitelist any new authed API route in `utils/allowedApiRoutes.ts`. Keep that file
   DEPENDENCY-FREE: no DB-model imports. Importing a model drags sequelize/uuid ESM into jest and
   breaks suites. That exact regression happened and was fixed. Do not reintroduce it.
@@ -170,6 +171,6 @@ hard-won lesson, so the next session never relearns it.
 - `utils/authorize.ts`, `utils/scope.ts` · the multi-tenant auth + scoping seam.
 - `utils/allowedApiRoutes.ts` · API-route whitelist (keep dependency-free).
 - `utils/knowledge.ts` · single source of truth for tool docs; the coverage test gates it.
-- `mcp/src/index.ts` · MCP tool + resource registration (40 + 5).
+- `mcp/src/index.ts` · MCP tool + resource registration (76 + 5).
 - `SECURITY.md` · the verifiable trust facts (no-training, isolation, export/delete, cookieless).
 - `BUILD_PLAN.md` · the phased plan + decision log. `NIGHT_REPORT.md` · the build-session log.

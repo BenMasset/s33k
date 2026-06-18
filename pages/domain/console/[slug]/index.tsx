@@ -102,7 +102,9 @@ const DiscoverPage: NextPage = () => {
                ? <DomainHeader
                   domain={activDomain}
                   domains={theDomains}
-                  showAddModal={() => console.log('XXXXX')}
+                  // This is a read-only Search Console view: it has no add-keyword modal, so the
+                  // DomainHeader add control is intentionally a no-op here (use the keywords tab to add).
+                  showAddModal={() => {}}
                   showSettingsModal={setShowDomainSettings}
                   exportCsv={() => exportCSV(theKeywordsGrouped, activDomain.domain, scDateFilter)}
                   scFilter={scDateFilter}

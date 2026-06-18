@@ -7,6 +7,8 @@
 // sit on page one right now, and the single biggest rank GAIN and biggest rank LOSS over the period.
 // No server-side LLM, no DB: it takes already-read rows and returns plain numbers and labels.
 
+import { historyDateMs } from './history-date';
+
 export type SeoKeywordInput = {
    keyword: string,
    position: number,
@@ -49,7 +51,9 @@ const historyPairs = (raw: string): Array<[number, number]> => {
       const parsed = JSON.parse(s);
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { return []; }
       return Object.entries(parsed as Record<string, unknown>)
-         .map(([date, pos]) => [Date.parse(date), Number(pos)] as [number, number])
+         // historyDateMs tolerates both the new padded-ISO key and the old "2026-6-9" form and parses
+         // UTC-midnight, so mixed-format history sorts and window-clips correctly (see utils/history-date.ts).
+         .map(([date, pos]) => [historyDateMs(date), Number(pos)] as [number, number])
          .filter(([d, pos]) => Number.isFinite(d) && Number.isFinite(pos) && pos >= 0)
          .sort((a, b) => a[0] - b[0]);
    } catch {

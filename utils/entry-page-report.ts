@@ -124,8 +124,12 @@ export const buildEntryPageReport = (
       };
    }).sort((a, c) => c.entries - a.entries || c.trackedKeywords.length - a.trackedKeywords.length);
 
+   // totalEntries must reconcile with the sum of per-page entries: only sessions with a pageview
+   // credit an entry page (the pageviewCount > 0 guard above), so a pageview-less session must not
+   // inflate the header relative to the breakdown the user can actually sum.
+   const totalEntries = sessions.reduce((n, s) => (s.pageviewCount > 0 ? n + 1 : n), 0);
    return {
-      totalEntries: sessions.length,
+      totalEntries,
       hasGoal: Boolean(goal),
       entryPages,
    };

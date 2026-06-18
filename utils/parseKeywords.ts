@@ -21,14 +21,22 @@ const safeParse = (raw: unknown, fallback: any): any => {
  * @returns {KeywordType[]}
  */
 const parseKeywords = (allKeywords: Keyword[]) : KeywordType[] => {
-   const parsedItems = allKeywords.map((keywrd:Keyword) => ({
+   const parsedItems = allKeywords.map((keywrd:Keyword) => {
+      // lastUpdateError is a nullable column (allowNull: true), so a row can legitimately hold NULL
+      // (raw write, update({ lastUpdateError: null }), or a migration adding the column to old rows
+      // before the default applies). Guard the string access the same way the sibling JSON fields are
+      // defended by safeParse: a single bad/NULL row must not throw and collapse a whole-domain read.
+      const lue = keywrd.lastUpdateError;
+      const lastUpdateError = (typeof lue === 'string' && lue !== 'false' && lue.includes('{')) ? safeParse(lue, false) : false;
+      return {
          ...keywrd,
          target_page: keywrd.target_page || '',
          history: safeParse(keywrd.history, {}),
          tags: safeParse(keywrd.tags, []),
          lastResult: safeParse(keywrd.lastResult, []),
-         lastUpdateError: keywrd.lastUpdateError !== 'false' && keywrd.lastUpdateError.includes('{') ? safeParse(keywrd.lastUpdateError, false) : false,
-      }));
+         lastUpdateError,
+      };
+   });
    return parsedItems;
 };
 

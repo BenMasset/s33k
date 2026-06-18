@@ -48,6 +48,28 @@ const readRegisteredToolNames = (): string[] => {
    return names;
 };
 
+const SMOKE_TEST_PATH = path.resolve(__dirname, '../../mcp/smoke-test.mjs');
+
+/**
+ * Parse the EXPECTED_TOOLS array out of the MCP smoke test (mcp/smoke-test.mjs). The smoke test
+ * asserts the live tools/list equals this list exactly, so if it drifts from the registered set the
+ * documented `npm run smoke` verification hard-fails. Reading the source (not importing the ESM
+ * harness, which boots a stdio child) keeps this a static, side-effect-free enumeration.
+ */
+const readSmokeExpectedTools = (): string[] => {
+   const src = fs.readFileSync(SMOKE_TEST_PATH, 'utf8');
+   const block = /const EXPECTED_TOOLS = \[([\s\S]*?)\];/.exec(src);
+   if (!block) { return []; }
+   const names: string[] = [];
+   const re = /['"]([a-zA-Z0-9_]+)['"]/g;
+   let m: RegExpExecArray | null = re.exec(block[1]);
+   while (m !== null) {
+      names.push(m[1]);
+      m = re.exec(block[1]);
+   }
+   return names;
+};
+
 const knowledgeIds = new Set<string>(knowledge.capabilities.map((c: CapabilityEntry) => c.id));
 
 /** The single assertion the durability guarantee rests on: this tool name has a knowledge entry. */
@@ -106,6 +128,25 @@ describe('MCP knowledge coverage: every registered tool is documented', () => {
       expect(() => assertDocumented(phantomTool, knowledgeIds)).toThrow(/TOOL NOT DOCUMENTED/);
       // And it does NOT throw for a tool that IS documented, confirming the guard is specific.
       expect(() => assertDocumented('briefing', knowledgeIds)).not.toThrow();
+   });
+});
+
+describe('MCP smoke test EXPECTED_TOOLS stays in lockstep with the registered tools', () => {
+   // The smoke test (mcp/smoke-test.mjs) is the documented verification artifact (`npm run smoke`) and
+   // asserts the live tools/list equals EXPECTED_TOOLS exactly. That array is hand-maintained, so it
+   // can silently fall behind the registered set (it once listed 42 while 76 were registered, which
+   // would hard-fail the headline assertion). This guard fails the jest build the moment the two drift,
+   // so the documented command can never be left broken.
+   it('EXPECTED_TOOLS in the smoke test equals the registerTool names exactly', () => {
+      const registered = [...new Set(readRegisteredToolNames())].sort();
+      const smoke = [...new Set(readSmokeExpectedTools())].sort();
+      // Sanity: the parser actually found a realistic list (never pass vacuously on a parse miss).
+      expect(smoke.length).toBeGreaterThanOrEqual(30);
+      const missingFromSmoke = registered.filter((t) => !smoke.includes(t));
+      const extraInSmoke = smoke.filter((t) => !registered.includes(t));
+      expect(missingFromSmoke).toEqual([]);
+      expect(extraInSmoke).toEqual([]);
+      expect(smoke).toEqual(registered);
    });
 });
 

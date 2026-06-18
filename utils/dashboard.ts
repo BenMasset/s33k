@@ -32,6 +32,7 @@ import {
 } from './sessionize';
 import { buildWebVitals, WebVitalRow, WebVitalMetric } from './web-vitals';
 import type { NormalizedPage, ReferralSource, SummaryResult } from './analytics';
+import { normalizeHistoryDateKey } from './history-date';
 
 // --- Tunables, kept together so they are easy to audit. ----------------------
 // How many rows each "top N" section shows. The dashboard is a glance, never a
@@ -182,8 +183,12 @@ export type DashboardState = {
 const historyPairs = (history: unknown): Array<[string, number]> => {
    if (!history || typeof history !== 'object' || Array.isArray(history)) { return []; }
    return Object.entries(history as Record<string, unknown>)
-      .map(([date, pos]) => [date, Number(pos)] as [string, number])
-      .filter(([, pos]) => Number.isFinite(pos) && pos > 0)
+      // Normalize the date key to padded ISO so the lexical sort below orders mixed-format history
+      // correctly: the old "2026-6-9" form sorts WRONG against padded "2026-06-10" lexically (see
+      // utils/history-date.ts). Drop any key that is not a recognizable date.
+      .map(([date, pos]) => [normalizeHistoryDateKey(date), Number(pos)] as [string | null, number])
+      .filter(([date, pos]) => date !== null && Number.isFinite(pos) && pos > 0)
+      .map(([date, pos]) => [date as string, pos] as [string, number])
       .sort((a, b) => a[0].localeCompare(b[0]));
 };
 

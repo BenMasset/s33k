@@ -59,5 +59,11 @@ else
   echo "[DIAG] /app/data is NOT writable"
 fi
 
-npx sequelize-cli db:migrate --env production
+# Fail LOUD and EARLY on a migration failure: a partial/failed migration would otherwise let the
+# server boot against a broken/mismatched schema, surfacing as runtime 400s instead of a clear
+# refuse-to-boot (the same posture as the strong-credentials block above). Refuse the deploy instead.
+npx sequelize-cli db:migrate --env production || {
+  echo "[FATAL] DB migration failed; refusing to boot against a possibly broken schema." >&2
+  exit 1
+}
 exec "$@"
