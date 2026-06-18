@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import authorize from '../../utils/authorize';
 import resolveDomainAccess from '../../utils/domain-access';
 import type Account from '../../database/models/account';
@@ -16,7 +16,7 @@ import { suggestGoals, SuggestedGoal } from '../../utils/goal-suggester';
 type Resp = { domain?: string, suggestions?: SuggestedGoal[], note?: string, error?: string | null };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<Resp>) {
-   await db.sync();
+   await ensureSynced();
    const { authorized, account, error } = await authorize(req, res);
    if (!authorized) { return res.status(401).json({ error }); }
    if (req.method !== 'GET') { return res.status(405).json({ error: 'Method Not Allowed. Use GET.' }); }

@@ -27,7 +27,7 @@
  *   9. Guard rails: missing domain -> 400 (nothing read); non-GET -> 405.
  */
 
-jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
+jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
 
 // Stub Op so jest never has to transform sequelize's ESM deps. The models are mocked, so Op is only
 // a unique object key inside the findAll where-clause.

@@ -1,11 +1,12 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import authorize from '../../utils/authorize';
 import resolveDomainAccess from '../../utils/domain-access';
 import type Account from '../../database/models/account';
 import { crawlSite } from '../../utils/site-crawl';
 import { auditSite, SiteAuditResult } from '../../utils/site-audit';
 import * as reportCache from '../../utils/report-cache';
+import { allowCrawl } from '../../utils/crawl-rate-limit';
 
 // GET /api/site-audit?domain=...
 //
@@ -18,7 +19,7 @@ import * as reportCache from '../../utils/report-cache';
 type Resp = { domain?: string, report?: SiteAuditResult, note?: string, error?: string | null };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<Resp>) {
-   await db.sync();
+   await ensureSynced();
    const { authorized, account, error } = await authorize(req, res);
    if (!authorized) { return res.status(401).json({ error }); }
    if (req.method !== 'GET') { return res.status(405).json({ error: 'Method Not Allowed. Use GET.' }); }
@@ -41,6 +42,14 @@ const getSiteAudit = async (req: NextApiRequest, res: NextApiResponse<Resp>, acc
    if (!reportCache.wantsFresh(req)) {
       const hit = reportCache.get(cacheKey) as Resp | undefined;
       if (hit) { return res.status(200).json(hit); }
+   }
+
+   // Per-account crawl brake (audit area 2), applied only on a cache MISS (a HIT does no crawl, so it
+   // should not consume crawl budget). Bounds how often the live-crawl audit can be looped per tenant.
+   const rl = allowCrawl(account);
+   if (!rl.allowed) {
+      res.setHeader('Retry-After', Math.ceil(rl.retryAfterMs / 1000));
+      return res.status(429).json({ error: 'Too many crawl requests. Please slow down.' });
    }
 
    try {

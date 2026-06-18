@@ -41,9 +41,32 @@ const buildSubject = (type: InviteEmailType, domain?: string): string => {
    return 'You have been invited to s33k';
 };
 
+// Escape the three values that originate from an authenticated inviter before they are
+// interpolated into the email HTML (audit area 2, low). Without this, a malicious inviter could
+// inject arbitrary markup (a rewritten anchor, hidden content) into the email delivered to a
+// recipient they choose, weaponizing s33k's sending domain for a phishing payload.
+const escapeHtml = (value: string): string => String(value || '')
+   .replace(/&/g, '&amp;')
+   .replace(/</g, '&lt;')
+   .replace(/>/g, '&gt;')
+   .replace(/"/g, '&quot;');
+
+// The accept link is server-generated today, but assert it is an http(s) URL before emitting it
+// into an href, so a non-URL value can never become a javascript:/data: link. A bad link degrades
+// to '#' rather than shipping a dangerous scheme.
+const safeLink = (link: string): string => {
+   try {
+      const u = new URL(link);
+      return (u.protocol === 'https:' || u.protocol === 'http:') ? link : '#';
+   } catch {
+      return '#';
+   }
+};
+
 const buildHtml = (type: InviteEmailType, acceptLink: string, inviterName?: string, domain?: string): string => {
-   const who = inviterName && inviterName.trim() ? inviterName.trim() : 'Someone';
-   const site = domain && domain.trim() ? domain.trim() : 'a site';
+   const who = escapeHtml(inviterName && inviterName.trim() ? inviterName.trim() : 'Someone');
+   const site = escapeHtml(domain && domain.trim() ? domain.trim() : 'a site');
+   const link = safeLink(acceptLink);
    let lead: string;
    let cta: string;
    if (type === 'internal') {
@@ -61,9 +84,9 @@ const buildHtml = (type: InviteEmailType, acceptLink: string, inviterName?: stri
       '<div style="font-family: ui-sans-serif, system-ui, sans-serif; color: #0A0F1E; line-height: 1.6;">',
       `  <p style="font-size: 16px;">${lead}</p>`,
       `  <p style="font-size: 16px;">${cta}</p>`,
-      `  <p><a href="${acceptLink}" style="display: inline-block; background: #0095FF; color: #fff; `
+      `  <p><a href="${link}" style="display: inline-block; background: #0095FF; color: #fff; `
       + 'text-decoration: none; padding: 12px 24px; border-radius: 9999px; font-weight: 500;">Open s33k</a></p>',
-      `  <p style="font-size: 13px; color: #737373;">Or paste this link into your browser:<br />${acceptLink}</p>`,
+      `  <p style="font-size: 13px; color: #737373;">Or paste this link into your browser:<br />${escapeHtml(link)}</p>`,
       '</div>',
    ].join('\n');
 };

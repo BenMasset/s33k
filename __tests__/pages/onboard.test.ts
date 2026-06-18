@@ -21,7 +21,7 @@
  * threaded through the real route so owner stamping is proven, not re-asserted.
  */
 
-jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
+jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
 
 jest.mock('../../database/models/domain', () => ({
    __esModule: true,
@@ -220,6 +220,47 @@ describe('POST /api/onboard owner stamping', () => {
 
       expect(mockDomain.create.mock.calls[0][0].owner_id).toBeNull();
       expect(mockKeyword.bulkCreate.mock.calls[0][0][0].owner_id).toBeNull();
+   });
+});
+
+describe('POST /api/onboard canonicalization + cross-owner collision (cross-tenant-leak fix)', () => {
+   // The domain is canonicalized once up front and used for find + create, so a "www."/uppercase/
+   // trailing-dot variant resolves and stores the ONE canonical form. And before creating, a
+   // canonical name already registered by ANY account is rejected, so a canonical-colliding sibling
+   // can never become a second row under a different owner (the cross-tenant-leak precondition).
+   it('rejects a domain whose canonical form is already registered (by another owner) without creating', async () => {
+      process.env.MULTI_TENANT = 'true';
+      asCaller(TENANT);
+      // First findOne is the owner-scoped lookup (caller does NOT own it) -> null.
+      // Second findOne is the unscoped canonical existence check -> a row owned by someone else.
+      mockDomain.findOne
+         .mockResolvedValueOnce(null)
+         .mockResolvedValueOnce(domainRow({ ID: 99, domain: 'getmasset.com', owner_id: 7 }));
+
+      const res = makeRes();
+      // A trailing-dot variant of an already-registered canonical domain.
+      await onboardHandler(makeReq({ body: { domain: 'getmasset.com.' } }), res);
+
+      expect(res.statusCode).toBe(400);
+      expect((res.payload as { error?: string }).error).toMatch(/already registered/i);
+      expect(mockDomain.create).not.toHaveBeenCalled();
+   });
+
+   it('canonicalizes the create + find: a raw variant stores the bare canonical domain', async () => {
+      process.env.MULTI_TENANT = 'true';
+      asCaller(TENANT);
+      mockDomain.findOne.mockResolvedValue(null);
+      mockDomain.create.mockResolvedValue(domainRow({ ID: 40, domain: 'getmasset.com' }));
+      mockDiscover.mockResolvedValue({ domain: 'getmasset.com', candidates: [] });
+
+      const res = makeRes();
+      await onboardHandler(makeReq({ body: { domain: 'WWW.GetMasset.com.' } }), res);
+
+      expect(res.statusCode).toBe(201);
+      // The owner-scoped find AND the create both use the canonical bare host.
+      expect(mockDomain.findOne.mock.calls[0][0].where.domain).toBe('getmasset.com');
+      expect(mockDomain.create.mock.calls[0][0].domain).toBe('getmasset.com');
+      expect((res.payload as { domain?: string }).domain).toBe('getmasset.com');
    });
 });
 

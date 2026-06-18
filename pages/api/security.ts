@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import authorize from '../../utils/authorize';
 import { securityFacts, SecurityFacts } from '../../utils/securityFacts';
 
@@ -14,7 +14,7 @@ import { securityFacts, SecurityFacts } from '../../utils/securityFacts';
 type SecurityResponse = SecurityFacts | { error: string | null };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<SecurityResponse>) {
-   await db.sync();
+   await ensureSynced();
    const { authorized, error } = await authorize(req, res);
    if (!authorized) {
       return res.status(401).json({ error: error ?? null });

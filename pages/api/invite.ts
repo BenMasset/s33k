@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { Op } from 'sequelize';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import Account from '../../database/models/account';
 import Invite from '../../database/models/invite';
 import authorize from '../../utils/authorize';
@@ -65,7 +65,7 @@ const toSummary = (invite: Invite): InviteSummary => ({
 });
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-   await db.sync();
+   await ensureSynced();
    await ensureAdminAccount();
    const { authorized, account, role, error } = await authorize(req, res);
    if (!authorized || !account) {

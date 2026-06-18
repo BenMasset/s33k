@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { Op } from 'sequelize';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import authorize from '../../utils/authorize';
 import { scopeWhere } from '../../utils/scope';
 import resolveDomainAccess from '../../utils/domain-access';
@@ -34,7 +34,7 @@ type Resp = {
 };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<Resp>) {
-   await db.sync();
+   await ensureSynced();
    const { authorized, account, error } = await authorize(req, res);
    if (!authorized) { return res.status(401).json({ error }); }
    if (req.method !== 'GET') { return res.status(405).json({ error: 'Method Not Allowed. Use GET.' }); }

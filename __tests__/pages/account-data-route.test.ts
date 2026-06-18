@@ -21,7 +21,7 @@
  * The real scopeWhere is threaded through. No network, no DB.
  */
 
-jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
+jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
 
 jest.mock('sequelize', () => ({ __esModule: true, Op: { in: Symbol('in') } }));
 

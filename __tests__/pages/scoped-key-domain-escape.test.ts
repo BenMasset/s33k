@@ -20,7 +20,7 @@
  * key resolves for real through authorize().
  */
 
-jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
+jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
 
 // The two sibling domains the owner controls. resolveDomainAccess does Domain.findOne({ where:
 // { domain, ...scopeWhere(account) } }); we return a row ONLY for an exact domain-name match, so the
@@ -230,6 +230,41 @@ describe('a scoped key for example.com is still ALLOWED to read its own domain',
       await installInstructionsHandler(makeReq(SHARE_KEY_EXAMPLE, 'example.com', URLS.install), iiRes);
       expect(iiRes.statusCode).toBe(200);
       expect((iiRes.payload as { domain?: string }).domain).toBe('example.com');
+   });
+});
+
+describe('no slug-decode escape: the dotted sibling is NEVER queried, even on a canonical miss (d)', () => {
+   // The slug-decode fallback ("-" -> ".") was removed entirely (third adversarial review). Even if
+   // the canonical "a-b.com" row did NOT exist, the route must NOT fall back to looking up the dotted
+   // sibling "a.b.com". A scoped key for "a-b.com" whose canonical row is absent gets a clean 403 and
+   // touches no sibling row.
+   const assertNeverQueriedDottedSibling = () => {
+      const lookedUp = domainFindOne.mock.calls.map((c) => (c[0] as { where: { domain: string } }).where.domain);
+      expect(lookedUp).not.toContain('a.b.com');
+   };
+
+   it('insight: a scoped key for a-b.com never resolves a.b.com via a slug-decode on a canonical miss', async () => {
+      // Force the canonical "a-b.com" lookup to miss so the OLD code would have slug-decoded to a.b.com.
+      domainFindOne.mockImplementation(async ({ where }: { where: { domain: string } }) => (
+         where.domain === 'a.b.com' ? { domain: 'a.b.com', owner_id: 2, get: () => 'a.b.com' } : null
+      ));
+      wireShareKey(SHARE_KEY_AB, 'a-b.com');
+      const res = makeRes();
+      await insightHandler(makeReq(SHARE_KEY_AB, 'a-b.com', URLS.insight), res);
+      // Canonical row absent => 403, and crucially the dotted sibling was never queried.
+      expect(res.statusCode).toBe(403);
+      assertNeverQueriedDottedSibling();
+   });
+
+   it('searchconsole: same, no slug-decode to the dotted sibling on a canonical miss', async () => {
+      domainFindOne.mockImplementation(async ({ where }: { where: { domain: string } }) => (
+         where.domain === 'a.b.com' ? { domain: 'a.b.com', owner_id: 2, get: () => 'a.b.com' } : null
+      ));
+      wireShareKey(SHARE_KEY_AB, 'a-b.com');
+      const res = makeRes();
+      await searchconsoleHandler(makeReq(SHARE_KEY_AB, 'a-b.com', URLS.searchconsole), res);
+      expect(res.statusCode).toBe(403);
+      assertNeverQueriedDottedSibling();
    });
 });
 

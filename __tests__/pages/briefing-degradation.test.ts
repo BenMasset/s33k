@@ -35,7 +35,7 @@ import CrawlerHit from '../../database/models/crawlerHit';
 // tiny stub so jest does not have to transform sequelize's ESM uuid dependency
 // (the model layer is mocked anyway, so Op is never exercised against a real DB).
 jest.mock('sequelize', () => ({ __esModule: true, Op: { gte: Symbol('gte') } }));
-jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn().mockResolvedValue(undefined) } }));
+jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn().mockResolvedValue(undefined) }, ensureSynced: jest.fn().mockResolvedValue(undefined) }));
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('../../database/models/domain', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
 jest.mock('../../database/models/keyword', () => ({ __esModule: true, default: { findAll: jest.fn() } }));

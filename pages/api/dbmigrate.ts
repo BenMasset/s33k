@@ -2,7 +2,7 @@ import { Sequelize } from 'sequelize';
 import { Umzug, SequelizeStorage } from 'umzug';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import pg from 'pg';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import verifyUser from '../../utils/verifyUser';
 
 // Build a Sequelize instance for migrations: Postgres when DATABASE_URL is set, else SQLite.
@@ -22,7 +22,7 @@ type MigrationPostResponse = {
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
    const authorized = verifyUser(req, res);
    if (authorized === 'authorized' && req.method === 'GET') {
-      await db.sync();
+      await ensureSynced();
       return getMigrationStatus(req, res);
    }
    if (authorized === 'authorized' && req.method === 'POST') {

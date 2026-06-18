@@ -32,9 +32,32 @@ describe('isLikelyBotUA', () => {
    });
 });
 
-describe('clientIp', () => {
-   it('prefers the first x-forwarded-for entry', () => {
-      expect(clientIp({ 'x-forwarded-for': '203.0.113.5, 70.41.3.18' })).toBe('203.0.113.5');
+describe('clientIp (trusted-hop derivation)', () => {
+   it('takes the RIGHTMOST (trusted-edge) x-forwarded-for hop, not the spoofable leftmost', () => {
+      // Chain is `client, proxy1, proxy2`; with one trusted proxy the real client is the last hop.
+      // The leftmost (203.0.113.5) is what an attacker could spoof, so it must NOT be returned.
+      expect(clientIp({ 'x-forwarded-for': '203.0.113.5, 70.41.3.18' })).toBe('70.41.3.18');
+   });
+
+   it('a single-hop chain yields that one hop', () => {
+      expect(clientIp({ 'x-forwarded-for': '70.41.3.18' })).toBe('70.41.3.18');
+   });
+
+   it('honors TRUSTED_PROXY_HOPS for a deeper trusted topology', () => {
+      const prev = process.env.TRUSTED_PROXY_HOPS;
+      process.env.TRUSTED_PROXY_HOPS = '2';
+      // Chain `client, edge1, edge2` with the two RIGHTMOST hops trusted: the real client is at
+      // index length-2. The last two (8.8.8.8, 7.7.7.7) are the trusted edges; 9.9.9.9 is what the
+      // client SENT (spoofable) and must NOT be returned. index 3-2 = 1 -> 8.8.8.8.
+      expect(clientIp({ 'x-forwarded-for': '9.9.9.9, 8.8.8.8, 7.7.7.7' })).toBe('8.8.8.8');
+      if (prev === undefined) { delete process.env.TRUSTED_PROXY_HOPS; } else { process.env.TRUSTED_PROXY_HOPS = prev; }
+   });
+
+   it('clamps to the first hop when the chain is shorter than the configured trusted-hop count', () => {
+      const prev = process.env.TRUSTED_PROXY_HOPS;
+      process.env.TRUSTED_PROXY_HOPS = '5';
+      expect(clientIp({ 'x-forwarded-for': '5.5.5.5, 6.6.6.6' })).toBe('5.5.5.5');
+      if (prev === undefined) { delete process.env.TRUSTED_PROXY_HOPS; } else { process.env.TRUSTED_PROXY_HOPS = prev; }
    });
 
    it('falls back to x-real-ip then the socket address', () => {

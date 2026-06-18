@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import authorize from '../../utils/authorize';
 import ensureAdminAccount from '../../utils/ensureAdminAccount';
 import { ADMIN_ACCOUNT_ID } from '../../utils/scope';
@@ -16,7 +16,7 @@ type MeRes = {
 };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<MeRes>) {
-   await db.sync();
+   await ensureSynced();
    await ensureAdminAccount();
    const { authorized, account, error } = await authorize(req, res);
    if (!authorized || !account) {

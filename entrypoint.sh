@@ -11,17 +11,31 @@ DEMO_APIKEY="5saedXklbslhnapihe2pihp3pih4fdnakhjwq5"
 DEMO_SECRET="4715aed3216f7b0a38e6b534a958362654e96d10fbc04700770d572af3dce43625dd"
 DEMO_PASSWORD="0123456789"
 
+# Audit area 3 (CRITICAL): also reject THIS repo's own .env.example placeholders, not just the
+# upstream SerpBear demo values. An operator who copies .env.example and only changes the obvious
+# "change me" password would otherwise boot with a publicly-known SECRET (forge sessions, decrypt
+# every stored credential) and APIKEY (full admin). Belt-and-suspenders: a positive length floor
+# rejects any future short/weak example value too (real values are hex-34 / hex-24).
+EXAMPLE_SECRET="replace-with-openssl-rand-hex-34"
+EXAMPLE_APIKEY="replace-with-openssl-rand-hex-24"
+EXAMPLE_PASSWORD="change-me-to-a-strong-password"
+MIN_SECRET_LEN=40
+MIN_APIKEY_LEN=32
+
 if [ "$NODE_ENV" = "production" ]; then
   fail=0
-  if [ -z "$APIKEY" ] || [ "$APIKEY" = "$DEMO_APIKEY" ] || [ "${APIKEY#REGENERATE_ME}" != "$APIKEY" ]; then
-    echo "[SECURITY] Refusing to start: APIKEY is unset or set to a demo/placeholder value. Generate one: openssl rand -hex 24" >&2
+  if [ -z "$APIKEY" ] || [ "$APIKEY" = "$DEMO_APIKEY" ] || [ "$APIKEY" = "$EXAMPLE_APIKEY" ] \
+     || [ "${APIKEY#REGENERATE_ME}" != "$APIKEY" ] || [ "${#APIKEY}" -lt "$MIN_APIKEY_LEN" ]; then
+    echo "[SECURITY] Refusing to start: APIKEY is unset, a demo/placeholder value, or too short. Generate one: openssl rand -hex 24" >&2
     fail=1
   fi
-  if [ -z "$SECRET" ] || [ "$SECRET" = "$DEMO_SECRET" ] || [ "${SECRET#REGENERATE_ME}" != "$SECRET" ]; then
-    echo "[SECURITY] Refusing to start: SECRET is unset or set to a demo/placeholder value. Generate one: openssl rand -hex 34" >&2
+  if [ -z "$SECRET" ] || [ "$SECRET" = "$DEMO_SECRET" ] || [ "$SECRET" = "$EXAMPLE_SECRET" ] \
+     || [ "${SECRET#REGENERATE_ME}" != "$SECRET" ] || [ "${#SECRET}" -lt "$MIN_SECRET_LEN" ]; then
+    echo "[SECURITY] Refusing to start: SECRET is unset, a demo/placeholder value, or too short. Generate one: openssl rand -hex 34" >&2
     fail=1
   fi
-  if [ -z "$PASSWORD" ] || [ "$PASSWORD" = "$DEMO_PASSWORD" ] || [ "$PASSWORD" = "change-me-please" ]; then
+  if [ -z "$PASSWORD" ] || [ "$PASSWORD" = "$DEMO_PASSWORD" ] || [ "$PASSWORD" = "change-me-please" ] \
+     || [ "$PASSWORD" = "$EXAMPLE_PASSWORD" ]; then
     echo "[SECURITY] Refusing to start: PASSWORD is unset or set to a demo/placeholder value. Set a strong admin password." >&2
     fail=1
   fi

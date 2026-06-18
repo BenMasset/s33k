@@ -1,11 +1,12 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import db from '../../../database/database';
+import { ensureSynced } from '../../../database/database';
 import Account from '../../../database/models/account';
 import ApiKey from '../../../database/models/apiKey';
 import Invite from '../../../database/models/invite';
 import ensureAdminAccount from '../../../utils/ensureAdminAccount';
 import { generateApiKey, hashApiKey, apiKeyPrefix } from '../../../utils/resolveAccount';
 import { resolveBaseUrl } from '../../../utils/baseUrl';
+import { clientIp } from '../../../utils/collect-guards';
 
 // PUBLIC invite-accept endpoint. This route takes NO API key: the invite code IS the
 // credential. It is the one place outside the account-management routes that mints a real
@@ -44,12 +45,13 @@ const RATE_LIMIT_MAX = 10;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const attempts = new Map<string, { count: number, resetAt: number }>();
 
-const clientIp = (req: NextApiRequest): string => {
-   const fwd = req.headers['x-forwarded-for'];
-   if (typeof fwd === 'string' && fwd.length) { return fwd.split(',')[0].trim(); }
-   if (Array.isArray(fwd) && fwd.length) { return fwd[0]; }
-   return req.socket?.remoteAddress || 'unknown';
-};
+// Client IP for the brute-force brake. Derived via the SHARED collect-guards.clientIp helper so
+// both public-surface limiters key on the SAME trusted-hop logic: the rightmost (trusted-edge)
+// X-Forwarded-For hop, never the spoofable leftmost one (audit area 1).
+const ipFor = (req: NextApiRequest): string => clientIp(
+   req.headers as Record<string, string | string[] | undefined>,
+   req.socket?.remoteAddress,
+);
 
 // Returns true when the caller is over the limit. Counts every attempt; a successful accept is
 // rare and harmless to count. Opportunistically prunes the probed key when its window rolls.
@@ -74,19 +76,21 @@ type AcceptRes = {
 };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<AcceptRes>) {
-   await db.sync();
+   await ensureSynced();
    await ensureAdminAccount();
 
    if (req.method !== 'POST') {
       return res.status(405).json({ error: 'Method Not Allowed. Use POST.' });
    }
-   if (isRateLimited(clientIp(req))) {
+   if (isRateLimited(ipFor(req))) {
       return res.status(429).json({ error: 'Too many attempts. Try again shortly.' });
    }
 
    const body = (req.body && typeof req.body === 'object') ? req.body : {};
    const code = typeof body.code === 'string' ? body.code.trim() : '';
-   const name = typeof body.name === 'string' ? body.name.trim() : '';
+   // Cap the account display name so an authed-context write cannot push an unbounded blob into
+   // Account.name (audit area 1, low). A real name is short; 200 chars is generous.
+   const name = typeof body.name === 'string' ? body.name.trim().slice(0, 200) : '';
 
    // Reject an obviously malformed code fast, before any DB read, with the generic message.
    if (!code) {

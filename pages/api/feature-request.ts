@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import Account from '../../database/models/account';
 import FeatureRequest from '../../database/models/featureRequest';
 import authorize from '../../utils/authorize';
@@ -62,7 +62,7 @@ const toSummary = (row: FeatureRequest): FeatureRequestSummary => ({
 });
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-   await db.sync();
+   await ensureSynced();
    await ensureAdminAccount();
    const { authorized, account, error } = await authorize(req, res);
    if (!authorized || !account) {

@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import Domain from '../../database/models/domain';
 import {
    fetchDomainSCData,
@@ -13,7 +13,6 @@ import {
 import authorize from '../../utils/authorize';
 import { scopeWhere } from '../../utils/scope';
 import resolveDomainAccess from '../../utils/domain-access';
-import { canonicalizeDomain } from '../../utils/canonical-domain';
 import type Account from '../../database/models/account';
 
 type searchConsoleRes = {
@@ -33,7 +32,7 @@ type searchConsoleDisconnectRes = {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-   await db.sync();
+   await ensureSynced();
    const { authorized, account, error } = await authorize(req, res);
    if (!authorized) {
       return res.status(401).json({ error });
@@ -52,17 +51,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
 const getDomainSearchConsoleData = async (req: NextApiRequest, res: NextApiResponse<searchConsoleRes>, account?: Account | null) => {
    if (!req.query.domain && typeof req.query.domain !== 'string') return res.status(400).json({ data: null, error: 'Domain is Missing.' });
-   // Canonical-first resolution: look up the SAME canonical string the authorize() share-key gate
-   // checked, then fall back to the legacy slug-decode only when canonical matched nothing. This is
-   // the fix for the normalization-mismatch escape (a scoped key for "a-b.com" that decoded into the
-   // sibling "a.b.com"); see utils/canonical-domain.ts. The slug-decode runs only when the canonical
-   // form did not resolve, so it can never reach a domain the canonical form already owns.
-   const canonicalDomain = canonicalizeDomain(req.query.domain);
-   const slugDecodedDomain = (req.query.domain as string).replaceAll('-', '.').replaceAll('_', '-');
-   let foundDomain: Domain | null = canonicalDomain ? await resolveDomainAccess(account, canonicalDomain) : null;
-   if (!foundDomain && slugDecodedDomain !== canonicalDomain) {
-      foundDomain = await resolveDomainAccess(account, slugDecodedDomain);
-   }
+   // Resolve access by the CANONICAL domain only. The legacy slug-decode fallback ("-" -> ".",
+   // "_" -> "-") was removed (third adversarial review): resolveDomainAccess canonicalizes internally
+   // and registration stores canonical, so the decode is dead code AND a latent escape vector (it
+   // re-derived a different host after the share-key gate already checked canonical). resolveDomainAccess
+   // is the per-domain chokepoint and also guards the local-SC-file read driven off the resolved row.
+   const foundDomain: Domain | null = await resolveDomainAccess(account, req.query.domain as string);
    if (!foundDomain) {
       return res.status(403).json({ data: null, error: 'Domain not found for this account' });
    }
@@ -94,16 +88,11 @@ const getDomainSearchConsoleData = async (req: NextApiRequest, res: NextApiRespo
 // WRITE access to the domain, so a shared viewer (M2) or a foreign tenant can never disconnect it.
 const disconnectSearchConsole = async (req: NextApiRequest, res: NextApiResponse<searchConsoleDisconnectRes>, account?: Account | null) => {
    if (!req.query.domain || typeof req.query.domain !== 'string') return res.status(400).json({ disconnected: false, error: 'Domain is Missing.' });
-   // Same canonical-first resolution as the GET path, for consistency and defense-in-depth: resolve
-   // the row by the canonical domain first, then the legacy slug-decode only as a fallback, and clear
-   // the token off the RESOLVED row's actual domain. (Scoped share keys are GET-only and can never
-   // reach this DELETE, but the route still must not slug-decode past its own write gate.)
-   const canonicalDomain = canonicalizeDomain(req.query.domain);
-   const slugDecodedDomain = (req.query.domain as string).replaceAll('-', '.').replaceAll('_', '-');
-   let ownedDomain = canonicalDomain ? await resolveDomainAccess(account, canonicalDomain, { write: true }) : null;
-   if (!ownedDomain && slugDecodedDomain !== canonicalDomain) {
-      ownedDomain = await resolveDomainAccess(account, slugDecodedDomain, { write: true });
-   }
+   // Resolve by the canonical domain only (slug-decode fallback removed, third adversarial review).
+   // resolveDomainAccess canonicalizes internally and clears the token off the RESOLVED row's actual
+   // domain, so a raw variant can never reach a sibling. (Scoped share keys are GET-only and never
+   // reach this DELETE, but the write path still must not re-derive a different host past its gate.)
+   const ownedDomain = await resolveDomainAccess(account, req.query.domain as string, { write: true });
    if (!ownedDomain) {
       return res.status(403).json({ disconnected: false, error: 'Domain not found for this account' });
    }

@@ -1,9 +1,31 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import Waitlist from '../../database/models/waitlist';
 import authorize from '../../utils/authorize';
 import ensureAdminAccount from '../../utils/ensureAdminAccount';
 import { isAdminAccount } from '../../utils/scope';
+import { rateLimit } from '../../utils/rate-limit';
+import { clientIp } from '../../utils/collect-guards';
+
+// Hard length caps on the PUBLIC waitlist write (audit area 1). This is the least-defended
+// unauthenticated write surface, so cap every field before persisting: an email max is 254 (RFC
+// 5321), a domain max mirrors collect's MAX_DOMAIN_LEN, and the free-text note maps to a TEXT
+// column with no DB bound, so cap it tight so a stranger cannot write megabyte blobs row after row.
+const MAX_EMAIL_LEN = 254;
+const MAX_DOMAIN_LEN = 255;
+const MAX_NOTE_LEN = 500;
+
+// Per-IP request brake on the open POST, same shape collect.ts uses. Bounds how fast one source
+// can flood the waitlist table with junk rows. Generous for a human signing up; a hard brake on
+// a flood. Overridable via env. The IP is derived from the trusted-edge XFF hop (collect-guards).
+const WAITLIST_RATE_LIMIT = (() => {
+   const raw = parseInt(process.env.WAITLIST_RATE_LIMIT || '', 10);
+   return Number.isFinite(raw) && raw > 0 ? raw : 20;
+})();
+const WAITLIST_RATE_WINDOW_MS = (() => {
+   const raw = parseInt(process.env.WAITLIST_RATE_WINDOW_MS || '', 10);
+   return Number.isFinite(raw) && raw > 0 ? raw : 60 * 1000;
+})();
 
 // Waitlist routes.
 //
@@ -52,7 +74,7 @@ const toSummary = (row: Waitlist): WaitlistSummary => ({
 });
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-   await db.sync();
+   await ensureSynced();
    await ensureAdminAccount();
 
    if (req.method === 'POST') {
@@ -78,10 +100,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 }
 
 const joinWaitlist = async (req: NextApiRequest, res: NextApiResponse<WaitlistCreateRes>) => {
+   // Per-IP request brake FIRST, before any parsing/DB work, so a flood is cheapest to reject.
+   const ip = clientIp(req.headers as Record<string, string | string[] | undefined>, req.socket?.remoteAddress);
+   const rl = rateLimit(`waitlist:${ip}`, { limit: WAITLIST_RATE_LIMIT, windowMs: WAITLIST_RATE_WINDOW_MS });
+   if (!rl.allowed) {
+      res.setHeader('Retry-After', Math.ceil(rl.retryAfterMs / 1000));
+      return res.status(429).json({ error: 'Too many requests. Please slow down.' });
+   }
+
    const body = (req.body && typeof req.body === 'object') ? req.body : {};
-   const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
-   const domain = typeof body.domain === 'string' ? body.domain.trim() : '';
-   const note = typeof body.note === 'string' ? body.note.trim() : '';
+   // Trim THEN hard-cap every stored field. The note maps to an unbounded TEXT column, so the cap
+   // is the only thing standing between an open endpoint and arbitrarily large blobs.
+   const email = typeof body.email === 'string' ? body.email.trim().toLowerCase().slice(0, MAX_EMAIL_LEN) : '';
+   const domain = typeof body.domain === 'string' ? body.domain.trim().slice(0, MAX_DOMAIN_LEN) : '';
+   const note = typeof body.note === 'string' ? body.note.trim().slice(0, MAX_NOTE_LEN) : '';
 
    if (!email || !looksLikeEmail(email)) {
       return res.status(400).json({ error: 'A valid email is required.' });

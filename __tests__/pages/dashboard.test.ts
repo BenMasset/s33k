@@ -12,7 +12,7 @@
  * The analytics provider is mocked at utils/analytics so no real Umami/Lodd call happens. The DB
  * models and authorize are mocked per the repo route-test convention.
  */
-jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
+jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
 jest.mock('sequelize', () => ({
    __esModule: true,
    Op: { gte: Symbol('gte'), lt: Symbol('lt'), in: Symbol('in') },

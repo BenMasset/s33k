@@ -13,14 +13,14 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from 'next';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import authorize from '../../utils/authorize';
 import { searchKnowledge } from '../../utils/knowledge';
 
 type HelpResponse = ReturnType<typeof searchKnowledge> | { error: string | null };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<HelpResponse>) {
-   await db.sync();
+   await ensureSynced();
    const { authorized, error } = await authorize(req, res);
    if (!authorized) {
       return res.status(401).json({ error: error ?? null });

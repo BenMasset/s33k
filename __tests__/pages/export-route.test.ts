@@ -19,7 +19,7 @@
  * No network, no DB.
  */
 
-jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
+jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
 
 // export.ts imports { Op } from 'sequelize'. Stub it so jest never transforms sequelize's
 // ESM deps; the models are mocked, so Op.in is only a stable unique key in the where-clauses.

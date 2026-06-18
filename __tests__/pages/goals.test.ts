@@ -1,5 +1,5 @@
 /** goals route: create (ownership-gated), list, delete. */
-jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
+jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
 jest.mock('../../database/models/domain', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
 jest.mock('../../database/models/goal', () => ({
    __esModule: true, default: { create: jest.fn(), findAll: jest.fn(), findOne: jest.fn(), destroy: jest.fn(), update: jest.fn() },

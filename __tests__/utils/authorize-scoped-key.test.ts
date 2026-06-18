@@ -19,7 +19,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
  * No network, no DB: database/database is a no-op and the models are jest mocks.
  */
 
-jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
+jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
 
 jest.mock('../../database/models/apiKey', () => ({
    __esModule: true,

@@ -2,7 +2,7 @@
  * portfolio route: a multi-domain rollup that summarizes EVERY domain on the caller's account at
  * once. Mocks the models; the real keyword-distribution + striking-distance + sessionize logic runs.
  */
-jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
+jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
 jest.mock('sequelize', () => ({ __esModule: true, Op: { gte: Symbol('gte'), lt: Symbol('lt'), in: Symbol('in') } }));
 jest.mock('../../database/models/domain', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../database/models/keyword', () => ({ __esModule: true, default: { findAll: jest.fn() } }));

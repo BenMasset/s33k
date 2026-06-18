@@ -19,7 +19,7 @@
  * where-clause is the genuine flag-gated output. No network, no DB.
  */
 
-jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
+jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
 
 // The route imports { Op } from 'sequelize'. Stub it so jest never transforms sequelize's ESM
 // deps; the models are mocked, so Op is only a unique object key in the findAll where.

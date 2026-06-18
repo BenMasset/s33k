@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { Op } from 'sequelize';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import Keyword from '../../database/models/keyword';
 import Domain from '../../database/models/domain';
 import refreshAndUpdateKeywords from '../../utils/refresh';
@@ -28,7 +28,7 @@ type KeywordSearchResultRes = {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-   await db.sync();
+   await ensureSynced();
    const { authorized, account, error } = await authorize(req, res);
    if (!authorized) {
       return res.status(401).json({ error });

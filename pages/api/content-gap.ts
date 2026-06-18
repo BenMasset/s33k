@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import Domain from '../../database/models/domain';
 import Keyword from '../../database/models/keyword';
 import authorize from '../../utils/authorize';
@@ -9,6 +9,7 @@ import type Account from '../../database/models/account';
 import { crawlSite } from '../../utils/site-crawl';
 import type { PageSummary } from '../../utils/site-crawl';
 import { computeContentGaps, ContentGapItem } from '../../utils/content-gap';
+import { allowCrawl } from '../../utils/crawl-rate-limit';
 
 // GET /api/content-gap?domain=&competitor=
 //
@@ -60,7 +61,7 @@ const keywordsAsYourTopics = async (domain: string, account?: Account | null): P
 };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<Resp>) {
-   await db.sync();
+   await ensureSynced();
    const { authorized, account, error } = await authorize(req, res);
    if (!authorized) { return res.status(401).json({ error }); }
    if (req.method !== 'GET') { return res.status(405).json({ error: 'Method Not Allowed. Use GET.' }); }
@@ -80,6 +81,15 @@ const getContentGap = async (req: NextApiRequest, res: NextApiResponse<Resp>, ac
    // no ownership check.
    const owned = await resolveDomainAccess(account, domain);
    if (!owned) { return res.status(403).json({ error: 'Domain not found for this account' }); }
+
+   // Per-account crawl brake (audit area 2). content-gap is the heaviest crawl route: it fetches BOTH
+   // your site AND an arbitrary, unowned competitor (up to ~50 outbound fetches), so it is the prime
+   // amplifier candidate. Bound how often one account can run it.
+   const rl = allowCrawl(account);
+   if (!rl.allowed) {
+      res.setHeader('Retry-After', Math.ceil(rl.retryAfterMs / 1000));
+      return res.status(429).json({ error: 'Too many crawl requests. Please slow down.' });
+   }
 
    try {
       // Crawl both sites and pull your tracked-keyword topics in parallel. crawlSite never throws;

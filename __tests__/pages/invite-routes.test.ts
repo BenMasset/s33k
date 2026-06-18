@@ -26,7 +26,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
  * mocked per-test to inject the caller, and send-invite is mocked so no email is sent.
  */
 
-jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
+jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
 
 // Stub sequelize so importing the route does not pull the untransformed ESM uuid chain in via
 // `import { Op } from 'sequelize'`. The route only uses Op.in; a Symbol stand-in is enough.

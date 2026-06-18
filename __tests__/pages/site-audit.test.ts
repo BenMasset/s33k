@@ -2,7 +2,7 @@
  * site-audit route: a prioritized on-page SEO issue list from a crawl. Mocks the models, authorize,
  * and the network crawler (crawlSite); the real auditSite rule logic runs over fixture pages.
  */
-jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
+jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
 jest.mock('../../database/models/domain', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('../../utils/site-crawl', () => ({ __esModule: true, crawlSite: jest.fn() }));

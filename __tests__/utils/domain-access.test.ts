@@ -101,6 +101,53 @@ describe('resolveDomainAccess with MULTI_TENANT on', () => {
    });
 });
 
+describe('resolveDomainAccess canonicalizes the lookup (cross-tenant-leak fix)', () => {
+   // The third-adversarial-review fix: resolveDomainAccess MUST look the Domain up by its CANONICAL
+   // form, so a raw variant a caller sends ("getmasset.com.", "WWW.getmasset.com", "GETMASSET.com")
+   // resolves the SAME canonical owner row, never a sibling under a different owner. This pins that
+   // every non-canonical variant issues the SAME canonical where-clause the gate compares against.
+   beforeEach(() => { process.env.MULTI_TENANT = 'true'; });
+
+   it.each([
+      ['getmasset.com.', 'getmasset.com'],
+      ['WWW.getmasset.com', 'getmasset.com'],
+      ['GETMASSET.com', 'getmasset.com'],
+      ['https://getmasset.com/path?q=1', 'getmasset.com'],
+   ])('a raw variant %s resolves the canonical row %s (read gate)', async (raw, canonical) => {
+      const row = { ID: 9, domain: canonical, owner_id: TENANT_A.ID };
+      mockDomain.findOne.mockResolvedValue(row);
+
+      const result = await resolveDomainAccess(TENANT_A, raw);
+
+      expect(result).toBe(row);
+      // The lookup is keyed on the CANONICAL string, NOT the raw variant, so two canonical-equal
+      // strings can never resolve different rows.
+      expect(mockDomain.findOne.mock.calls[0][0].where).toEqual({ domain: canonical, owner_id: TENANT_A.ID });
+   });
+
+   it('a scoped key can never resolve a different-owner sibling: the canonical row is the only match', async () => {
+      // owner A owns the canonical "getmasset.com". A request for the raw variant "getmasset.com."
+      // canonicalizes to "getmasset.com" and is scoped to owner A, so a row owned by a DIFFERENT
+      // account is never reachable: the where-clause carries BOTH the canonical name AND owner A.
+      mockDomain.findOne.mockResolvedValue(null);
+
+      const result = await resolveDomainAccess(TENANT_B, 'getmasset.com.');
+
+      expect(result).toBeNull();
+      expect(mockDomain.findOne.mock.calls[0][0].where).toEqual({ domain: 'getmasset.com', owner_id: TENANT_B.ID });
+   });
+
+   it('an empty / non-string / unresolvable domain returns null WITHOUT a DB lookup', async () => {
+      const r1 = await resolveDomainAccess(TENANT_A, '');
+      const r2 = await resolveDomainAccess(TENANT_A, '   ');
+      expect(r1).toBeNull();
+      expect(r2).toBeNull();
+      // canonicalizeDomain('') === '' short-circuits before any Domain.findOne, so a junk param can
+      // never become an accidental unscoped lookup.
+      expect(mockDomain.findOne).not.toHaveBeenCalled();
+   });
+});
+
 describe('resolveDomainAccess with MULTI_TENANT off (single-tenant)', () => {
    beforeEach(() => { delete process.env.MULTI_TENANT; });
 

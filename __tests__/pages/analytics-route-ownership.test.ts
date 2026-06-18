@@ -19,7 +19,7 @@
  * genuine flag-gated output. No network, no DB.
  */
 
-jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
+jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
 
 // ai-crawlers.ts imports { Op } from 'sequelize' directly. Stub it so jest never has to
 // transform sequelize's ESM uuid dependency; the models are mocked, so Op is only used

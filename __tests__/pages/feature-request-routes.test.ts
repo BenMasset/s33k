@@ -24,7 +24,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
  * mock, authorize is mocked per-test, and notify is stubbed to a no-send result.
  */
 
-jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
+jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
 
 jest.mock('../../database/models/account', () => ({
    __esModule: true,

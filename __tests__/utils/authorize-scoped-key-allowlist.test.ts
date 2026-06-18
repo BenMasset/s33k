@@ -25,7 +25,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
  * exact dangerous shape. No network, no DB.
  */
 
-jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
+jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
 jest.mock('../../database/models/apiKey', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
 jest.mock('../../database/models/account', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
 

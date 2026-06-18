@@ -3,7 +3,7 @@
  * Verifies bot exclusion (is_bot), bounce rate (single-pageview sessions), entry/exit pages,
  * and exit-rate math (exits-on-page / pageviews-of-page).
  */
-jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
+jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
 jest.mock('sequelize', () => ({ __esModule: true, Op: { gte: Symbol('gte') } }));
 jest.mock('../../database/models/domain', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
 jest.mock('../../database/models/s33kEvent', () => ({ __esModule: true, default: { findAll: jest.fn() } }));

@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import db from '../../../database/database';
+import { ensureSynced } from '../../../database/database';
 import {
    getGSCOAuthConfig,
    buildGSCRedirectURL,
@@ -46,7 +46,7 @@ const htmlPage = (title: string, body: string): string => {
 };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-   await db.sync();
+   await ensureSynced();
    res.setHeader('Content-Type', 'text/html; charset=utf-8');
 
    if (req.method !== 'GET') {

@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import Keyword from '../../database/models/keyword';
 import parseKeywords from '../../utils/parseKeywords';
 import authorize from '../../utils/authorize';
@@ -14,7 +14,7 @@ type KeywordGetResponse = {
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
    const { authorized, account, error } = await authorize(req, res);
    if (authorized && req.method === 'GET') {
-      await db.sync();
+      await ensureSynced();
       return getKeyword(req, res, account);
    }
    return res.status(401).json({ error: error || 'Not authorized' });

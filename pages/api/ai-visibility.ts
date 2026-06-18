@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { Op } from 'sequelize';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import CrawlerHit from '../../database/models/crawlerHit';
 import authorize from '../../utils/authorize';
 import resolveDomainAccess from '../../utils/domain-access';
@@ -176,7 +176,7 @@ const periodToCutoff = (period: string): Date => {
 };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<AiVisibilityResponse>) {
-   await db.sync();
+   await ensureSynced();
    const { authorized, account, error } = await authorize(req, res);
    if (!authorized) {
       return res.status(401).json({ error });

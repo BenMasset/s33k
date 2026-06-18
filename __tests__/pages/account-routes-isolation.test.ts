@@ -21,7 +21,7 @@
  */
 
 // db.sync() is a no-op; ensureAdminAccount's findOrCreate is stubbed via the Account mock.
-jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
+jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
 
 // The model + authorize mocks are declared via factories (hoisted above any const), then
 // retrieved through the mocked default exports below so per-test assertions can inspect them.

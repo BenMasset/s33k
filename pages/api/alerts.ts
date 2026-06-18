@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { Op } from 'sequelize';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import Keyword from '../../database/models/keyword';
 import CrawlerHit from '../../database/models/crawlerHit';
 import S33kEvent from '../../database/models/s33kEvent';
@@ -210,7 +210,7 @@ const positionInWindow = (history: KeywordHistory, start: number, end: number): 
 };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<AlertsResponse>) {
-   await db.sync();
+   await ensureSynced();
    const { authorized, account, error } = await authorize(req, res);
    if (!authorized) {
       return res.status(401).json({ error: error || 'Not authorized' });

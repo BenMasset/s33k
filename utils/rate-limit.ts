@@ -41,6 +41,22 @@ const buckets = new Map<string, Bucket>();
 // Hard ceiling on tracked keys so a unique-key flood (spoofed IPs) cannot grow memory unbounded.
 const MAX_KEYS = 50000;
 
+// Global, all-keys request ceiling (defense in depth, audit area 1).
+//
+// The per-key limiter is bypassable by a flood of UNIQUE keys (spoofed X-Forwarded-For), where
+// every request opens a fresh bucket and passes its own first-hit. This global counter bounds the
+// TOTAL hits accepted across ALL keys per window, independent of how many distinct keys are used,
+// so a unique-key flood is capped regardless. It is intentionally generous (far above any honest
+// aggregate load) and exists only to put a hard ceiling under a determined spoofing attack. Set to
+// 0 (or a negative) via env to disable. Window is shared with the per-key window passed by callers.
+// Read from env on each call so an operator (and tests) can tune it without a rebuild.
+const globalMaxHitsPerWindow = (): number => {
+   const raw = parseInt(process.env.RATE_LIMIT_GLOBAL_MAX || '', 10);
+   return Number.isFinite(raw) && raw >= 0 ? raw : 100000;
+};
+let globalWindowStart = 0;
+let globalCount = 0;
+
 // Drop every entry whose window has already elapsed relative to `now`. Cheap O(n) sweep, only run
 // when the map crosses MAX_KEYS, so the steady-state hot path stays O(1).
 const evictExpired = (now: number): void => {
@@ -66,6 +82,21 @@ export const rateLimit = (key: string, options: RateLimitOptions, now = Date.now
    const limit = Number.isFinite(options.limit) && options.limit > 0 ? options.limit : 1;
    const windowMs = Number.isFinite(options.windowMs) && options.windowMs > 0 ? options.windowMs : 1000;
 
+   // Global all-keys ceiling FIRST (cheap, O(1)): a unique-key flood passes every per-key check but
+   // still increments this shared counter, so the aggregate is bounded no matter how many keys are
+   // spoofed. Disabled when the ceiling is <= 0.
+   const globalMax = globalMaxHitsPerWindow();
+   if (globalMax > 0) {
+      if (globalWindowStart === 0 || (now - globalWindowStart) >= windowMs) {
+         globalWindowStart = now;
+         globalCount = 0;
+      }
+      if (globalCount >= globalMax) {
+         return { allowed: false, retryAfterMs: Math.max(0, windowMs - (now - globalWindowStart)) };
+      }
+      globalCount += 1;
+   }
+
    const existing = buckets.get(key);
 
    // New key or elapsed window: start a fresh window counting this hit as the first.
@@ -85,5 +116,5 @@ export const rateLimit = (key: string, options: RateLimitOptions, now = Date.now
    return { allowed: true, retryAfterMs: 0 };
 };
 
-/** Test-only: clear all in-memory rate-limit state. */
-export const __resetGenericRateLimit = (): void => { buckets.clear(); };
+/** Test-only: clear all in-memory rate-limit state (per-key buckets and the global ceiling). */
+export const __resetGenericRateLimit = (): void => { buckets.clear(); globalWindowStart = 0; globalCount = 0; };

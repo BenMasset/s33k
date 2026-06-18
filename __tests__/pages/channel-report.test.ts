@@ -3,7 +3,7 @@
  * (plus conversions when a goal is given) per channel. Mocks the models; the real sessionize +
  * channel-mapping logic runs.
  */
-jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
+jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
 jest.mock('sequelize', () => ({ __esModule: true, Op: { gte: Symbol('gte') } }));
 jest.mock('../../database/models/domain', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
 jest.mock('../../database/models/goal', () => ({ __esModule: true, default: { findOne: jest.fn() } }));

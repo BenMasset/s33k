@@ -20,7 +20,7 @@
  * run for real too. authorize is mocked to inject the calling account/role. No network, no DB.
  */
 
-jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
+jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
 
 // Routes import { Op } from 'sequelize'. Stub it so jest never transforms sequelize's ESM deps;
 // the models are mocked, so Op symbols are only unique keys inside the asserted where-clauses.

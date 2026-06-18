@@ -19,7 +19,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
  * send-invite are jest mocks.
  */
 
-jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
+jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
 jest.mock('../../utils/ensureAdminAccount', () => ({ __esModule: true, default: jest.fn(async () => undefined) }));
 
 // resolveAccount (imported transitively for the key-mint helpers) pulls in the Account model;

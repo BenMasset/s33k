@@ -1,11 +1,12 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { Op } from 'sequelize';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import Keyword from '../../database/models/keyword';
 import Domain from '../../database/models/domain';
 import { getAppSettings } from './settings';
 import authorize from '../../utils/authorize';
 import { scopeWhere, ownerIdFor } from '../../utils/scope';
+import { canonicalizeDomain } from '../../utils/canonical-domain';
 import { MAX_KEYWORDS_PER_REQUEST, MAX_KEYWORDS_PER_DOMAIN } from '../../utils/limits';
 import type Account from '../../database/models/account';
 import parseKeywords from '../../utils/parseKeywords';
@@ -26,7 +27,7 @@ type KeywordsDeleteRes = {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-   await db.sync();
+   await ensureSynced();
    const { authorized, account, error } = await authorize(req, res);
    if (!authorized) {
       return res.status(401).json({ error });
@@ -97,7 +98,15 @@ const addKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGet
       // MULTI_TENANT is off (so this just requires the domain to exist, which is correct),
       // and enforces owner_id when on (so a tenant cannot add keywords against another
       // tenant's domain string, burn the operator's SERP quota, or skew their stats).
-      const requestedDomains = Array.from(new Set(keywords.map((k: KeywordAddPayload) => k.domain.trim())));
+      // Canonicalize every requested domain so the ownership check, the per-domain cap, and the
+      // stored keyword.domain all key off the ONE canonical form Domain rows are registered under
+      // (third adversarial review). Without this, a keyword payload for "www.example.com" would miss
+      // the owned "example.com" row (wrongly rejected) or, if it slipped through, store a keyword
+      // under a non-canonical domain that never joins back to its Domain row.
+      const requestedDomains = Array.from(new Set(keywords.map((k: KeywordAddPayload) => canonicalizeDomain(k.domain))));
+      if (requestedDomains.some((d) => !d)) {
+         return res.status(400).json({ error: 'A keyword names an invalid domain.' });
+      }
       const ownedDomains = await Domain.findAll({ where: { domain: { [Op.in]: requestedDomains }, ...scopeWhere(account) } });
       const ownedDomainSet = new Set(ownedDomains.map((d) => d.domain));
       const unowned = requestedDomains.filter((d) => !ownedDomainSet.has(d));
@@ -109,7 +118,10 @@ const addKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGet
       // own knowledge facts is enforced here. Count existing tracked keywords per domain
       // and reject if this request would push any domain over the cap.
       const newByDomain: Record<string, number> = {};
-      for (const k of keywords as KeywordAddPayload[]) { newByDomain[k.domain.trim()] = (newByDomain[k.domain.trim()] || 0) + 1; }
+      for (const k of keywords as KeywordAddPayload[]) {
+         const d = canonicalizeDomain(k.domain);
+         newByDomain[d] = (newByDomain[d] || 0) + 1;
+      }
       for (const domain of requestedDomains) {
          // eslint-disable-next-line no-await-in-loop
          const existing = await Keyword.count({ where: { domain, ...scopeWhere(account) } });
@@ -127,8 +139,11 @@ const addKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGet
       const seen = new Set<string>();
 
       keywords.forEach((kwrd: KeywordAddPayload) => {
-         const { keyword, device, country, domain, tags, city, target_page } = kwrd;
-         const dedupeKey = `${(keyword || '').trim().toLowerCase()}|${device}|${country}|${domain.trim()}`;
+         const { keyword, device, country, tags, city, target_page } = kwrd;
+         // Store the keyword against the CANONICAL domain so it joins back to its Domain row and the
+         // per-domain scoreboard, and dedupe on that same canonical key.
+         const domain = canonicalizeDomain(kwrd.domain);
+         const dedupeKey = `${(keyword || '').trim().toLowerCase()}|${device}|${country}|${domain}`;
          if (seen.has(dedupeKey)) { return; }
          seen.add(dedupeKey);
          const tagsArray = tags ? tags.split(',').map((item:string) => item.trim()) : [];

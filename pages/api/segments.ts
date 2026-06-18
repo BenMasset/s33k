@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import authorize from '../../utils/authorize';
 import resolveDomainAccess from '../../utils/domain-access';
 import { scopeWhere, ownerIdFor } from '../../utils/scope';
@@ -33,7 +33,7 @@ const toPlainSegment = (s: Segment): Record<string, unknown> => {
 };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<SegmentsResponse>) {
-   await db.sync();
+   await ensureSynced();
    const { authorized, account, error } = await authorize(req, res);
    if (!authorized) { return res.status(401).json({ error }); }
    if (req.method === 'GET') { return listSegments(req, res, account); }

@@ -3,7 +3,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { readFile, writeFile } from 'fs/promises';
 import Cryptr from 'cryptr';
 import getConfig from 'next/config';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import verifyUser from '../../utils/verifyUser';
 import { getAdwordsCredentials, getAdwordsKeywordIdeas } from '../../utils/adwords';
 
@@ -13,7 +13,7 @@ type adwordsValidateResp = {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-   await db.sync();
+   await ensureSynced();
    // Skip auth check for OAuth callback from Google (GET with code param).
    // The code exchange is secured server-side via client_secret.
    // This prevents 401 errors when cookies aren't sent on cross-origin redirects.
@@ -68,12 +68,17 @@ const getAdwordsRefreshToken = async (req: NextApiRequest, res: NextApiResponse<
             }
             return res.status(400).send('Error Getting the Google Ads Refresh Token. Please Try Again!');
          } catch (error:any) {
-            let errorMsg = error?.response?.data?.error;
-            if (errorMsg.includes('redirect_uri_mismatch')) {
-               errorMsg += ` Redirected URL: ${redirectURL}`;
-            }
-            console.log('[Error] Getting Google Ads Refresh Token! Reason: ', errorMsg);
-            return res.status(400).send(`Error Saving the Google Ads Refresh Token ${errorMsg ? `. Details: ${errorMsg}` : ''}. Please Try Again!`);
+            // Guard the .includes (audit area 4): error?.response?.data?.error is undefined for a
+            // non-axios error, so calling .includes on it threw a TypeError (swallowed by the outer
+            // catch, but still wrong). Type-check first. And do NOT reflect Google's raw error string
+            // or the computed redirectURL back to the caller on this PUBLIC callback route: log the
+            // detail server-side, return a generic message (mirroring searchconsole/callback.ts).
+            const errorMsg = error?.response?.data?.error;
+            const detail = (typeof errorMsg === 'string' && errorMsg.includes('redirect_uri_mismatch'))
+               ? `${errorMsg} Redirected URL: ${redirectURL}`
+               : errorMsg;
+            console.log('[Error] Getting Google Ads Refresh Token! Reason: ', detail);
+            return res.status(400).send('Error Saving the Google Ads Refresh Token. Please Try Again!');
          }
       } else {
          return res.status(400).send('No Code Provided By Google. Please Try Again!');

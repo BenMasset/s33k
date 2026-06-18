@@ -28,7 +28,7 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from 'next';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import Domain from '../../database/models/domain';
 import Keyword from '../../database/models/keyword';
 import authorize from '../../utils/authorize';
@@ -77,7 +77,7 @@ type EntryPagesResponse = {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<EntryPagesResponse>) {
-   await db.sync();
+   await ensureSynced();
    const { authorized, account, error } = await authorize(req, res);
    if (!authorized) {
       return res.status(401).json({ error });

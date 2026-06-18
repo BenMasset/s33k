@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import Account from '../../database/models/account';
 import ApiKey from '../../database/models/apiKey';
 import authorize from '../../utils/authorize';
@@ -32,7 +32,7 @@ type KeyDeleteRes = {
 const isAdmin = isAdminAccount;
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-   await db.sync();
+   await ensureSynced();
    await ensureAdminAccount();
    const { authorized, account, error } = await authorize(req, res);
    if (!authorized) {

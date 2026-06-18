@@ -1,12 +1,14 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { Op } from 'sequelize';
 import Cryptr from 'cryptr';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import Domain from '../../database/models/domain';
 import Keyword from '../../database/models/keyword';
 import getdomainStats from '../../utils/domains';
 import authorize from '../../utils/authorize';
 import { scopeWhere, ownerIdFor } from '../../utils/scope';
 import resolveDomainAccess from '../../utils/domain-access';
+import { canonicalizeDomain } from '../../utils/canonical-domain';
 import type Account from '../../database/models/account';
 import { checkSerchConsoleIntegration, removeLocalSCData } from '../../utils/searchConsole';
 import { removeFromRetryQueue } from '../../utils/scraper';
@@ -34,7 +36,7 @@ type DomainsUpdateRes = {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-   await db.sync();
+   await ensureSynced();
    const { authorized, account, error } = await authorize(req, res);
    if (!authorized) {
       return res.status(401).json({ error });
@@ -75,18 +77,45 @@ export const getDomains = async (req: NextApiRequest, res: NextApiResponse<Domai
 const addDomain = async (req: NextApiRequest, res: NextApiResponse<DomainsAddResponse>, account?: Account | null) => {
    const { domains } = req.body;
    if (domains && Array.isArray(domains) && domains.length > 0) {
-      const domainsToAdd: any = [];
       const owner_id = ownerIdFor(account);
 
-      domains.forEach((domain: string) => {
-         domainsToAdd.push({
-            domain: domain.trim(),
-            slug: domain.trim().replaceAll('-', '_').replaceAll('.', '-').replaceAll('/', '-'),
-            lastUpdated: new Date().toJSON(),
-            added: new Date().toJSON(),
-            owner_id,
-         });
-      });
+      // Store the CANONICAL domain form, never the raw trimmed string (third adversarial review).
+      // The cross-tenant leak existed because two canonical-equal names ("getmasset.com" and
+      // "getmasset.com." / "WWW.getmasset.com") could coexist as separate rows under DIFFERENT
+      // owners (the @Unique index is on raw bytes). A scoped share key for one could then resolve
+      // the sibling. Canonicalizing at write time means a canonical-colliding variant can never be
+      // stored as a second row, so a canonical name belongs to exactly one account. We also reject
+      // any input that canonicalizes to empty, and dedupe within the same request batch.
+      const domainsToAdd: any = [];
+      const seenCanonical = new Set<string>();
+      for (const domain of domains as string[]) {
+         const canonical = canonicalizeDomain(domain);
+         if (!canonical) {
+            return res.status(400).json({ domains: [], error: 'A submitted domain is not valid.' });
+         }
+         // Skip an in-request duplicate (same canonical twice in one batch) rather than inserting it.
+         if (!seenCanonical.has(canonical)) {
+            seenCanonical.add(canonical);
+            domainsToAdd.push({
+               domain: canonical,
+               slug: canonical.replaceAll('-', '_').replaceAll('.', '-').replaceAll('/', '-'),
+               lastUpdated: new Date().toJSON(),
+               added: new Date().toJSON(),
+               owner_id,
+            });
+         }
+      }
+
+      // Duplicate check on the CANONICAL form. Registering a canonical-equal variant of an existing
+      // domain (whether the caller's own or, in a multi-tenant world, anyone's, since the column is
+      // globally @Unique) is rejected as a duplicate rather than attempted as a second insert. This
+      // makes the intent explicit and returns a clean 400 instead of a generic unique-constraint 400.
+      const existing = await Domain.findAll({ where: { domain: { [Op.in]: Array.from(seenCanonical) } } });
+      if (existing.length > 0) {
+         const dupes = existing.map((d) => d.domain).join(', ');
+         return res.status(400).json({ domains: [], error: `Domain already exists: ${dupes}` });
+      }
+
       try {
          const newDomains:Domain[] = await Domain.bulkCreate(domainsToAdd);
          const formattedDomains = newDomains.map((el) => el.get({ plain: true }));
@@ -105,7 +134,6 @@ export const deleteDomain = async (req: NextApiRequest, res: NextApiResponse<Dom
       return res.status(400).json({ domainRemoved: 0, keywordsRemoved: 0, SCDataRemoved: false, error: 'Domain is Required!' });
    }
    try {
-      const { domain } = req.query || {};
       const scope = scopeWhere(account);
       // OWNERSHIP GATE (security review #5): confirm the caller actually owns a domain row
       // BEFORE touching anything, so a tenant cannot delete another tenant's keywords or
@@ -114,15 +142,20 @@ export const deleteDomain = async (req: NextApiRequest, res: NextApiResponse<Dom
       // check; with it on, it enforces owner_id.
       // Deleting a domain (and cascading its keywords + SC cache) is an owner-only mutation,
       // so use the WRITE gate. A shared read-only viewer (M2) can never delete the owner's domain.
-      const owned = await resolveDomainAccess(account, domain as string, { write: true });
+      const owned = await resolveDomainAccess(account, req.query.domain as string, { write: true });
       if (!owned) {
          return res.status(404).json({ domainRemoved: 0, keywordsRemoved: 0, SCDataRemoved: false, error: 'Domain not found for this account' });
       }
+      // Drive every cascade off the RESOLVED row's canonical domain, never the raw req.query.domain.
+      // resolveDomainAccess looks up by the canonical form, so a raw variant ("getmasset.com.") that
+      // passes the gate must not then be used as the destroy key (it would match nothing and orphan
+      // the row's keywords). Using owned.domain keeps the gate and the mutation on one canonical string.
+      const { domain } = owned;
       await Promise.all((await Keyword.findAll({ where: { domain, ...scope } })).map((keyword) => removeFromRetryQueue(keyword.ID)));
       const removedDomCount: number = await Domain.destroy({ where: { domain, ...scope } });
       const removedKeywordCount: number = await Keyword.destroy({ where: { domain, ...scope } });
       // Only clear the local Search Console cache once a scoped domain was actually removed.
-      const SCDataRemoved = removedDomCount > 0 ? await removeLocalSCData(domain as string) : false;
+      const SCDataRemoved = removedDomCount > 0 ? await removeLocalSCData(domain) : false;
 
       return res.status(200).json({ domainRemoved: removedDomCount, keywordsRemoved: removedKeywordCount, SCDataRemoved });
    } catch (error) {

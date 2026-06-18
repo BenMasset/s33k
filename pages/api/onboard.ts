@@ -22,11 +22,12 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from 'next';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import Domain from '../../database/models/domain';
 import Keyword from '../../database/models/keyword';
 import authorize from '../../utils/authorize';
 import { scopeWhere, ownerIdFor } from '../../utils/scope';
+import { canonicalizeDomain } from '../../utils/canonical-domain';
 import type Account from '../../database/models/account';
 import parseKeywords from '../../utils/parseKeywords';
 import refreshAndUpdateKeywords from '../../utils/refresh';
@@ -59,7 +60,7 @@ type OnboardResponse = {
 };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<OnboardResponse>) {
-   await db.sync();
+   await ensureSynced();
    const { authorized, account, error } = await authorize(req, res);
    if (!authorized) {
       return res.status(401).json({ error });
@@ -70,20 +71,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
    return onboardDomain(req, res, account);
 }
 
-/**
- * Normalize a domain input to a bare hostname (no scheme, no www, no path).
- * @param {unknown} input - Raw domain value from the request body.
- * @returns {string} The bare domain, possibly empty.
- */
-const bareDomainOf = (input: unknown): string => String(input || '')
-   .trim()
-   .toLowerCase()
-   .replace(/^https?:\/\//, '')
-   .replace(/^www\./, '')
-   .replace(/\/.*$/, '');
-
 const onboardDomain = async (req: NextApiRequest, res: NextApiResponse<OnboardResponse>, account?: Account | null) => {
-   const domain = bareDomainOf(req.body?.domain);
+   // Canonicalize the domain ONCE, up front, and use that single canonical form for the find, the
+   // create, and every downstream step (third adversarial review). Storing canonical is what keeps a
+   // canonical-colliding sibling ("getmasset.com." vs "getmasset.com") from ever becoming a second
+   // row under a different owner, which is the cross-tenant-leak precondition. canonicalizeDomain is
+   // identity-preserving (lowercase, strip scheme/www/path/trailing-dot, never slug-decode).
+   const domain = canonicalizeDomain(req.body?.domain);
    if (!domain) {
       return res.status(400).json({ error: 'A domain is required, e.g. "getmasset.com".' });
    }
@@ -93,6 +87,14 @@ const onboardDomain = async (req: NextApiRequest, res: NextApiResponse<OnboardRe
       const owner_id = ownerIdFor(account);
       let domainRow: Domain | null = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
       if (!domainRow) {
+         // Before creating, reject a canonical name already owned by ANY account (the column is
+         // globally @Unique). Without this, a tenant onboarding a canonical-equal variant of an
+         // existing domain would hit a raw unique-constraint 400; checking explicitly returns a
+         // clean message and guarantees we never attempt a colliding insert.
+         const existingElsewhere = await Domain.findOne({ where: { domain } });
+         if (existingElsewhere) {
+            return res.status(400).json({ error: 'This domain is already registered.' });
+         }
          domainRow = await Domain.create({
             domain,
             slug: domain.replaceAll('-', '_').replaceAll('.', '-').replaceAll('/', '-'),

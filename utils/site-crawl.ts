@@ -23,6 +23,27 @@ import { lookup } from 'dns/promises';
 /** Maximum number of pages summarized in a single crawl. */
 export const MAX_PAGES = 25;
 
+// undici is loaded LAZILY (a cached require), never at module top.
+//
+// Importing undici statically eagerly pulls in its web/fetch internals, which reference globals
+// (MessagePort) absent in the jsdom test environment and risk the same standalone-bundle footgun
+// CLAUDE.md documents for runtime requires. We only need its Agent to PIN the SSRF-validated IP, so
+// we require it on first use and cache it. If it cannot load (e.g. jsdom under jest), we degrade to
+// the still-strong resolve-and-revalidate guard (isResolvedHostPublic + per-redirect re-checks),
+// so the code is correct everywhere and pins for real in production.
+type UndiciAgentCtor = new (opts: unknown) => { close: () => Promise<void> };
+let undiciAgent: UndiciAgentCtor | null | undefined;
+const loadUndiciAgent = (): UndiciAgentCtor | null => {
+   if (undiciAgent !== undefined) { return undiciAgent; }
+   try {
+      // eslint-disable-next-line global-require, import/no-extraneous-dependencies
+      undiciAgent = require('undici').Agent as UndiciAgentCtor;
+   } catch {
+      undiciAgent = null;
+   }
+   return undiciAgent;
+};
+
 /** Per-request fetch timeout in milliseconds. */
 const FETCH_TIMEOUT_MS = 10000;
 
@@ -157,6 +178,64 @@ export const isResolvedHostPublic = async (hostname: string): Promise<boolean> =
 };
 
 /**
+ * Resolve a hostname to a SINGLE validated public IP and return an undici dispatcher that PINS the
+ * connection to exactly that IP.
+ *
+ * SECURITY (DNS-rebinding TOCTOU, audit area 2): validating a hostname with a DNS lookup and then
+ * calling fetch() by hostname lets fetch re-resolve, so an attacker domain with a low TTL can answer
+ * the guard's lookup with a public IP and answer fetch's lookup milliseconds later with a private /
+ * metadata IP. Pinning fetch to the address WE validated closes that window: the dispatcher's
+ * connect.lookup ignores any later DNS answer and connects only to the pre-validated IP, while TLS
+ * still uses the original hostname for SNI and certificate validation. Returns null when no resolved
+ * address is public (the host fails the guard), so the caller refuses the fetch.
+ * @param {string} hostname - The URL hostname to resolve and pin.
+ * @returns {Promise<{ dispatcher: Agent } | null>} A pinned dispatcher, or null if unsafe.
+ */
+type PinResult = { dispatcher: { close: () => Promise<void> } | null, ok: boolean };
+const pinnedDispatcherFor = async (hostname: string): Promise<PinResult> => {
+   const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+   if (!host) { return { dispatcher: null, ok: false }; }
+   // Explicit name reject FIRST (mirrors isResolvedHostPublic): localhost and the .local / .localhost
+   // suffixes never reach a public address and must be refused before any DNS lookup.
+   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) {
+      return { dispatcher: null, ok: false };
+   }
+   // A literal IP host cannot be rebound (no DNS step), so validate it directly and pin to itself.
+   const looksLikeIp = /^[0-9.]+$/.test(host) || host.includes(':');
+   let pinnedIp: string;
+   let family: number;
+   if (looksLikeIp) {
+      if (isPrivateIp(host)) { return { dispatcher: null, ok: false }; }
+      pinnedIp = host;
+      family = host.includes(':') ? 6 : 4;
+   } else {
+      let addresses;
+      try { addresses = await lookup(host, { all: true }); } catch { return { dispatcher: null, ok: false }; }
+      if (!addresses || addresses.length === 0) { return { dispatcher: null, ok: false }; }
+      // EVERY resolved address must be public (a mixed answer is treated as hostile), then pin to
+      // the first. Pinning to one means fetch connects to exactly the IP we vetted, not a re-resolve.
+      if (!addresses.every((a) => !isPrivateIp(a.address))) { return { dispatcher: null, ok: false }; }
+      pinnedIp = addresses[0].address;
+      family = addresses[0].family;
+   }
+   // Host validated. Build the pinned dispatcher if undici is available: its connect.lookup is called
+   // by undici instead of system DNS and returns ONLY the pre-validated IP, so no later DNS answer
+   // can take effect (closes the rebind window). If undici is not loadable (jsdom/test), ok stays
+   // true (the host IS validated) with a null dispatcher, and the caller fetches via the normal path
+   // already guarded by this same resolve-and-revalidate logic.
+   const AgentCtor = loadUndiciAgent();
+   if (!AgentCtor) { return { dispatcher: null, ok: true }; }
+   const dispatcher = new AgentCtor({
+      connect: {
+         lookup: (_h: string, _opts: unknown, cb: (err: Error | null, address: string, fam: number) => void) => {
+            cb(null, pinnedIp, family);
+         },
+      },
+   });
+   return { dispatcher, ok: true };
+};
+
+/**
  * Fetch a URL as text with a timeout. Never throws; returns null on any failure
  * or non-2xx response. Refuses non-http(s) schemes and non-public hosts (SSRF
  * guard) before making any network call.
@@ -173,8 +252,12 @@ export const safeFetchText = async (url: string, accept?: string): Promise<strin
       let parsed: URL;
       try { parsed = new URL(current); } catch { return null; }
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') { return null; }
+      // Resolve + validate ONCE and pin the connection to that exact IP, so the fetch below cannot
+      // re-resolve to a different (internal) address between the check and the connect (audit area 2).
+      // pinned.ok is the SSRF gate (host validated); pinned.dispatcher pins the IP when available.
       // eslint-disable-next-line no-await-in-loop
-      if (!await isResolvedHostPublic(parsed.hostname)) { return null; }
+      const pinned = await pinnedDispatcherFor(parsed.hostname);
+      if (!pinned.ok) { return null; }
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
       try {
@@ -183,10 +266,15 @@ export const safeFetchText = async (url: string, accept?: string): Promise<strin
             headers: { 'User-Agent': USER_AGENT, ...(accept ? { Accept: accept } : {}) },
             signal: controller.signal,
             redirect: 'manual',
-         });
+            // dispatcher pins the validated IP when undici is available; omitted otherwise. It is a
+            // valid undici fetch option not present in the lib DOM RequestInit types, so the options
+            // object is widened to carry it without a type error.
+            ...(pinned.dispatcher ? { dispatcher: pinned.dispatcher } : {}),
+         } as RequestInit & { dispatcher?: unknown });
          if (res.status >= 300 && res.status < 400) {
             const location = res.headers.get('location');
             if (!location) { return null; }
+            // Resolve the next hop relative to current, then loop so it is re-validated and re-pinned.
             current = new URL(location, current).toString();
             continue;
          }
@@ -197,6 +285,9 @@ export const safeFetchText = async (url: string, accept?: string): Promise<strin
          return null;
       } finally {
          clearTimeout(timer);
+         // Close the per-hop pinned dispatcher (if any) so its sockets do not leak. Best-effort.
+         // eslint-disable-next-line no-await-in-loop
+         if (pinned.dispatcher) { await pinned.dispatcher.close().catch(() => {}); }
       }
    }
    return null; // exceeded MAX_REDIRECTS

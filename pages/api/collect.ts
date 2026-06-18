@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import Domain from '../../database/models/domain';
 import S33kEvent from '../../database/models/s33kEvent';
 import { sanitizeBatch, sanitizeSession, sanitizeText, looksLikePII, cleanEventPath, sanitizeSource } from '../../utils/event-sanitize';
@@ -8,6 +8,7 @@ import { isDatacenterIp } from '../../utils/datacenter-ip';
 import { deviceFromUA, countryFromHeaders } from '../../utils/request-segments';
 import { rateLimit } from '../../utils/rate-limit';
 import { MAX_EVENTS_PER_BATCH } from '../../utils/limits';
+import { canonicalizeDomain } from '../../utils/canonical-domain';
 
 // Per-IP request-rate brake for this PUBLIC endpoint, layered ON TOP of the existing
 // per-(ip+domain) EVENT-count limiter in collect-guards. The two guard different things:
@@ -133,7 +134,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       return res.status(405).json({ error: 'Method Not Allowed. Use POST.' });
    }
 
-   await db.sync();
+   await ensureSynced();
    return collect(req, res);
 }
 
@@ -149,8 +150,13 @@ const collect = async (req: NextApiRequest, res: NextApiResponse<CollectResponse
       }
 
       const body = (req.body && typeof req.body === 'object') ? req.body : {};
+      // Canonicalize the reported domain so the allowlist lookup AND the stored event rows use the
+      // ONE canonical form every Domain row is now registered under (third adversarial review). The
+      // install snippet already emits the canonical domain, so real clients are unaffected; this just
+      // ensures a "www."/trailing-dot/uppercase variant resolves the same row and stores under the
+      // same key, never splitting one site's analytics across two keys or missing the allowlist.
       const domain = typeof body.domain === 'string'
-         ? sanitizeText(body.domain, MAX_DOMAIN_LEN).toLowerCase()
+         ? canonicalizeDomain(sanitizeText(body.domain, MAX_DOMAIN_LEN))
          : '';
       const session = sanitizeSession(body.session);
       // Session-level UTM / campaign tags, sanitized once and stamped on every row below. Absent

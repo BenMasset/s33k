@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import ApiKey from '../../database/models/apiKey';
 import authorize from '../../utils/authorize';
 import ensureAdminAccount from '../../utils/ensureAdminAccount';
@@ -7,7 +7,6 @@ import resolveDomainAccess from '../../utils/domain-access';
 import { resolveBaseUrl } from '../../utils/baseUrl';
 import { sendInviteEmail } from '../../utils/send-invite';
 import { generateApiKey, hashApiKey, apiKeyPrefix } from '../../utils/resolveAccount';
-import { canonicalizeDomain } from '../../utils/canonical-domain';
 import type Account from '../../database/models/account';
 
 // Per-domain read-only SHARING.
@@ -71,7 +70,7 @@ const toSummary = (key: ApiKey): ShareSummary => ({
 });
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-   await db.sync();
+   await ensureSynced();
    await ensureAdminAccount();
    const { authorized, account, error } = await authorize(req, res);
    if (!authorized || !account) {
@@ -114,21 +113,23 @@ const createShare = async (req: NextApiRequest, res: NextApiResponse<ShareCreate
       // req.query.domain) can never be defeated by a non-canonical stored value. If scoped_domain
       // were stored as e.g. "www.example.com", a request for "www.example.com" would canonicalize
       // to "example.com" on the request side but compare against a raw "www.example.com" scoped
-      // value, opening exactly the mismatch this feature must avoid. Canonicalizing at mint time
-      // guarantees both sides of the gate share one normal form.
+      // value, opening exactly the mismatch this feature must avoid. We use the resolved row's own
+      // canonical domain (owned.domain is already canonical now that registration canonicalizes),
+      // so the stored scope, the gate, the access grant, and list/revoke all share one normal form.
+      const canonicalDomain = owned.domain;
       const created = await ApiKey.create({
          account_id: ownerAccountId,
          name: email ? `share:${email}` : 'share',
          key_prefix: apiKeyPrefix(fullKey),
          key_hash: hashApiKey(fullKey),
          role: 'member',
-         scoped_domain: canonicalizeDomain(domain),
+         scoped_domain: canonicalDomain,
       });
 
       const baseUrl = resolveBaseUrl(req);
       const mcpConfig = { S33K_BASE_URL: baseUrl, S33K_API_KEY: fullKey };
-      const instruction = `Read-only access to ${domain} on s33k. Add s33k to your LLM client with `
-         + `S33K_BASE_URL=${baseUrl} and S33K_API_KEY=<the key above>. This key can only read ${domain}.`;
+      const instruction = `Read-only access to ${canonicalDomain} on s33k. Add s33k to your LLM client with `
+         + `S33K_BASE_URL=${baseUrl} and S33K_API_KEY=<the key above>. This key can only read ${canonicalDomain}.`;
 
       // Best-effort email; if Resend is unconfigured or fails, the caller keeps the returned key
       // and instruction and we never fail the share for it.
@@ -147,7 +148,7 @@ const createShare = async (req: NextApiRequest, res: NextApiResponse<ShareCreate
       return res.status(201).json({
          apiKey: fullKey,
          keyId: created.ID,
-         scopedDomain: domain,
+         scopedDomain: canonicalDomain,
          mcpConfig,
          instruction,
          emailSent,
@@ -169,8 +170,12 @@ const listShares = async (req: NextApiRequest, res: NextApiResponse<ShareListRes
       return res.status(403).json({ error: 'You do not own this domain.' });
    }
    try {
+      // Query scoped_domain by the CANONICAL form, because mint stores scoped_domain canonical
+      // (createShare above). Matching the raw ?domain= here would miss every share whenever the
+      // caller passes a non-canonical variant ("WWW.example.com" vs the stored "example.com"),
+      // making list/revoke inconsistent with mint. Resolve off the owned row's canonical domain.
       const shares = await ApiKey.findAll({
-         where: { scoped_domain: domain },
+         where: { scoped_domain: owned.domain },
          order: [['ID', 'DESC']],
       });
       return res.status(200).json({ shares: shares.map(toSummary) });

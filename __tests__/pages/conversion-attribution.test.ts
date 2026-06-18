@@ -2,7 +2,7 @@
  * conversion-attribution route: the cross-pillar join with optional goal-value revenue. Mocks the
  * models; the real sessionize + attributeConversions logic runs.
  */
-jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
+jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
 jest.mock('sequelize', () => ({ __esModule: true, Op: { gte: Symbol('gte') } }));
 jest.mock('../../database/models/domain', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
 jest.mock('../../database/models/goal', () => ({ __esModule: true, default: { findOne: jest.fn() } }));

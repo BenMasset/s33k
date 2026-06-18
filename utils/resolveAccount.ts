@@ -85,7 +85,7 @@ const resolveAccount = async (req: NextApiRequest, res: NextApiResponse): Promis
    // Cookie session: admin account in wave 1 (no users table yet).
    if (token && process.env.SECRET) {
       let valid = false;
-      jwt.verify(token, process.env.SECRET, (err) => { valid = !err; });
+      jwt.verify(token, process.env.SECRET, { algorithms: ['HS256'] }, (err) => { valid = !err; });
       if (valid) { return { authorized: true, account: adminAccount(), role: 'admin' }; }
    }
 

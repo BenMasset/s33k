@@ -5,6 +5,9 @@ const nextConfig = {
   reactStrictMode: true,
   swcMinify: false,
   output: 'standalone',
+  // Do not advertise the framework (audit area 4). X-Powered-By: Next.js lets an attacker
+  // fingerprint the exact stack; suppress it. No functional effect.
+  poweredByHeader: false,
   serverRuntimeConfig: {
     appURL: process.env.NEXT_PUBLIC_APP_URL || '',
   },

@@ -18,7 +18,7 @@
  * path is exercised for real, not stubbed.
  */
 
-jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
+jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('../../utils/domain-access', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('../../utils/searchConsole', () => ({ __esModule: true, storeSearchConsoleOAuthToken: jest.fn() }));

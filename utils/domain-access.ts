@@ -22,6 +22,7 @@
 
 import Domain from '../database/models/domain';
 import { scopeWhere } from './scope';
+import { canonicalizeDomain } from './canonical-domain';
 import type Account from '../database/models/account';
 
 export type DomainAccessOptions = {
@@ -51,9 +52,21 @@ const resolveDomainAccess = async (
    // eslint-disable-next-line @typescript-eslint/no-unused-vars
    opts?: DomainAccessOptions,
 ): Promise<Domain | null> => {
+   // Look the Domain up by its CANONICAL form, never the raw caller-supplied string. This is the
+   // load-bearing half of the cross-tenant-leak fix (third adversarial review): the authorize()
+   // share-key gate already compares CANONICAL ?domain= against the CANONICAL scoped_domain, so the
+   // access grant MUST resolve over the same canonical string or the two can diverge. Because every
+   // Domain row is also WRITTEN canonical (pages/api/domains.ts, pages/api/onboard.ts), the @Unique
+   // index makes a canonical name belong to exactly one account, so any raw variant a caller sends
+   // ("getmasset.com.", "WWW.getmasset.com", "GETMASSET.com") resolves to the SAME canonical owner
+   // row, never a sibling under a different owner. Canonicalizing here also makes the leak
+   // structurally impossible even if a non-canonical row somehow existed: we never query by raw.
+   // canonicalizeDomain is identity-preserving (no slug-decode), so "a-b.com" stays "a-b.com".
+   const canonicalDomain = canonicalizeDomain(domain);
+   if (!canonicalDomain) { return null; }
    // M1: owner-only for both read and write. The `opts.write` distinction is documented and
    // accepted but has no behavioral effect yet; M2 introduces the shared-read branch here.
-   const owned = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+   const owned = await Domain.findOne({ where: { domain: canonicalDomain, ...scopeWhere(account) } });
    return owned || null;
 };
 

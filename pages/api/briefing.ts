@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { Op } from 'sequelize';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import Keyword from '../../database/models/keyword';
 import CrawlerHit from '../../database/models/crawlerHit';
 import Domain from '../../database/models/domain';
@@ -122,7 +122,7 @@ const pct = (share: number): number => Math.round(share * 1000) / 10;
 const secs = (n: number | undefined): string => (typeof n === 'number' && Number.isFinite(n) ? `${Math.round(n)}s` : 'n/a');
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<BriefingResponse>) {
-   await db.sync();
+   await ensureSynced();
    const { authorized, account, error } = await authorize(req, res);
    if (!authorized) {
       return res.status(401).json({ error: error || 'Not authorized' });

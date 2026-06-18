@@ -45,6 +45,7 @@ import type {
 import { cleanPath } from './lodd';
 import { classifyReferrer, classifySourceClass, SourceClass } from './ai-sources';
 import Domain from '../database/models/domain';
+import { canonicalizeDomain } from './canonical-domain';
 
 /**
  * Load the per-domain Umami website id stored on the Domain row, if any.
@@ -59,7 +60,10 @@ import Domain from '../database/models/domain';
  */
 const loadDomainWebsiteId = async (domain: string): Promise<string | null> => {
    try {
-      const wanted = String(domain || '').trim().toLowerCase().replace(/^www\./, '');
+      // Canonicalize so this matches the ONE form Domain rows are registered under (and the form
+      // resolveDomainAccess looks up). Previously this stripped www + lowercased but not the trailing
+      // dot, so a "example.com." caller could miss its own row and fall back to the env website id.
+      const wanted = canonicalizeDomain(domain);
       if (!wanted) { return null; }
       const row = await Domain.findOne({ where: { domain: wanted } });
       const id = row?.umami_website_id ? String(row.umami_website_id).trim() : '';

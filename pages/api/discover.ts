@@ -1,8 +1,9 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import db from '../../database/database';
+import { ensureSynced } from '../../database/database';
 import authorize from '../../utils/authorize';
 import resolveDomainAccess from '../../utils/domain-access';
 import { crawlSite, SiteCrawlResult } from '../../utils/site-crawl';
+import { allowCrawl } from '../../utils/crawl-rate-limit';
 
 type DiscoverResponse = SiteCrawlResult | { error: string };
 
@@ -24,7 +25,7 @@ type DiscoverResponse = SiteCrawlResult | { error: string };
 export default async function handler(req: NextApiRequest, res: NextApiResponse<DiscoverResponse>) {
    // Warm the DB connection like every other model-touching route, so a cold-start
    // request does not hit ModelNotInitializedError before the first query.
-   await db.sync();
+   await ensureSynced();
    const { authorized, account, error } = await authorize(req, res);
    if (!authorized) {
       return res.status(401).json({ error: error || 'Not authorized' });
@@ -40,6 +41,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
    const owned = await resolveDomainAccess(account, domain);
    if (!owned) {
       return res.status(403).json({ error: 'Domain not found for this account' });
+   }
+
+   // Per-account crawl brake (audit area 2): bound how many outbound-fetch crawls one account can
+   // run per window so the server cannot be looped into a crawl/DoS amplifier from its egress IP.
+   const rl = allowCrawl(account);
+   if (!rl.allowed) {
+      res.setHeader('Retry-After', Math.ceil(rl.retryAfterMs / 1000));
+      return res.status(429).json({ error: 'Too many crawl requests. Please slow down.' });
    }
 
    try {

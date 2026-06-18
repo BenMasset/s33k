@@ -18,7 +18,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
  * mocks, and authorize is mocked per-test to inject the caller for the admin GET.
  */
 
-jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) } }));
+jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
 
 jest.mock('../../database/models/account', () => ({
    __esModule: true,
@@ -40,6 +40,8 @@ import AccountModel from '../../database/models/account';
 import WaitlistModel from '../../database/models/waitlist';
 // eslint-disable-next-line import/first
 import authorizeFn from '../../utils/authorize';
+// eslint-disable-next-line import/first
+import { __resetGenericRateLimit } from '../../utils/rate-limit';
 
 const mockAccount = AccountModel as unknown as { findOrCreate: jest.Mock, findOne: jest.Mock };
 const mockWaitlist = WaitlistModel as unknown as { create: jest.Mock, findOne: jest.Mock, findAll: jest.Mock };
@@ -51,11 +53,12 @@ const asCaller = (account: unknown) => {
    mockAuthorize.mockResolvedValue({ authorized: true, account, role: 'admin' });
 };
 
-const makeReq = (opts: { method?: string, body?: unknown } = {}): NextApiRequest => ({
+const makeReq = (opts: { method?: string, body?: unknown, ip?: string } = {}): NextApiRequest => ({
    method: opts.method || 'POST',
    body: opts.body || {},
    query: {},
-   headers: {},
+   // A per-test IP keeps each test on its OWN rate-limit bucket so they never interfere.
+   headers: opts.ip ? { 'x-forwarded-for': opts.ip } : {},
 } as unknown as NextApiRequest);
 
 const makeRes = () => {
@@ -63,11 +66,13 @@ const makeRes = () => {
    res.statusCode = 200;
    res.status = jest.fn((code: number) => { res.statusCode = code; return res; });
    res.json = jest.fn((payload: unknown) => { res.payload = payload; return res; });
+   res.setHeader = jest.fn(() => res);
    return res as unknown as NextApiResponse & { statusCode: number, payload: Record<string, unknown> };
 };
 
 beforeEach(() => {
    jest.clearAllMocks();
+   __resetGenericRateLimit();
    process.env = { ...ORIGINAL_ENV };
    process.env.MULTI_TENANT = 'true';
    mockAccount.findOrCreate.mockResolvedValue([{ ID: ADMIN_ACCOUNT_ID }, false]);
@@ -153,6 +158,62 @@ describe('POST /api/waitlist: validation', () => {
 
       expect(res.statusCode).toBe(400);
       expect(mockWaitlist.create).not.toHaveBeenCalled();
+   });
+});
+
+describe('POST /api/waitlist: length caps (audit area 1)', () => {
+   it('hard-caps domain (<=255) and note (<=500) before persisting', async () => {
+      mockWaitlist.findOne.mockResolvedValue(null);
+      mockWaitlist.create.mockResolvedValue({ ID: 9 });
+      // A valid email, an over-long domain, and a megabyte-ish note. The caps must clamp the two
+      // free-text fields before the row is written, so neither can bloat the (TEXT) columns.
+      const req = makeReq({
+         method: 'POST',
+         ip: '203.0.113.10',
+         body: { email: 'ok@person.com', domain: 'd'.repeat(1000), note: 'n'.repeat(5000) },
+      });
+      const res = makeRes();
+
+      await waitlistHandler(req, res);
+
+      expect(res.statusCode).toBe(201);
+      const arg = mockWaitlist.create.mock.calls[0][0];
+      expect(arg.domain.length).toBe(255);
+      expect(arg.note.length).toBe(500);
+   });
+
+   it('rejects an email longer than the 254 cap (cap applies before validation)', async () => {
+      mockWaitlist.findOne.mockResolvedValue(null);
+      // The email cap truncates mid-string, which strips the domain part, so an over-long email is
+      // no longer a valid shape and is correctly 400'd. This proves the cap runs before persisting.
+      const req = makeReq({ method: 'POST', ip: '203.0.113.11', body: { email: `${'a'.repeat(300)}@person.com` } });
+      const res = makeRes();
+
+      await waitlistHandler(req, res);
+
+      expect(res.statusCode).toBe(400);
+      expect(mockWaitlist.create).not.toHaveBeenCalled();
+   });
+});
+
+describe('POST /api/waitlist: per-IP rate limit (audit area 1)', () => {
+   it('429s once the per-IP brake (default 20/window) is exceeded and stops creating rows', async () => {
+      mockWaitlist.findOne.mockResolvedValue(null);
+      mockWaitlist.create.mockResolvedValue({ ID: 1 });
+      const ip = '203.0.113.20';
+
+      // The default WAITLIST_RATE_LIMIT is 20 per window. The first 20 from one IP are accepted.
+      for (let i = 0; i < 20; i += 1) {
+         const ok = makeRes();
+         // eslint-disable-next-line no-await-in-loop
+         await waitlistHandler(makeReq({ ip, body: { email: `ok${i}@person.com` } }), ok);
+         expect(ok.statusCode).toBe(201);
+      }
+      // The 21st from the same IP is rejected before any DB write.
+      const blocked = makeRes();
+      await waitlistHandler(makeReq({ ip, body: { email: 'over@person.com' } }), blocked);
+      expect(blocked.statusCode).toBe(429);
+      expect(mockWaitlist.create).toHaveBeenCalledTimes(20);
    });
 });
 
