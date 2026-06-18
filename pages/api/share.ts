@@ -1,12 +1,13 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { ensureSynced } from '../../database/database';
 import ApiKey from '../../database/models/apiKey';
+import Invite from '../../database/models/invite';
 import authorize from '../../utils/authorize';
 import ensureAdminAccount from '../../utils/ensureAdminAccount';
 import resolveDomainAccess from '../../utils/domain-access';
 import { resolveBaseUrl } from '../../utils/baseUrl';
 import { sendInviteEmail } from '../../utils/send-invite';
-import { generateApiKey, hashApiKey, apiKeyPrefix } from '../../utils/resolveAccount';
+import { generateApiKey, hashApiKey, apiKeyPrefix, generateInviteCode } from '../../utils/resolveAccount';
 import type Account from '../../database/models/account';
 
 // Per-domain read-only SHARING.
@@ -17,9 +18,15 @@ import type Account from '../../database/models/account';
 // domain restriction, applied centrally in authorize() (GET-only AND req.query.domain must
 // equal scoped_domain). This route is the management surface for those keys.
 //
-//   POST   /api/share { domain, email? }  - owner mints a read-only share key for an OWNED
-//          domain. Returns the full key ONCE + an mcpConfig + a human instruction. If email is
-//          given, best-effort sends the connect instructions (never blocks).
+//   POST   /api/share { domain }          - owner mints a read-only share key for an OWNED
+//          domain NOW and returns it ONCE (apiKey + mcpConfig + instruction). The owner asked
+//          for the key, so returning it in the API response to the authenticated owner is fine.
+//   POST   /api/share { domain, email }   - owner shares the domain with a collaborator WITHOUT
+//          ever putting a key in the email. Instead of minting now, this creates a one-time
+//          'share' INVITE carrying the canonical scoped_domain + the owner account to mint
+//          against, and emails a one-time activation LINK (no key). The key is minted only when
+//          the recipient clicks the link (mint-on-accept), shown once, never stored in plaintext
+//          and never emailed. Returns { invited: true, emailSent } (NO key in this branch).
 //   GET    /api/share?domain=...          - owner lists active+revoked shares for an OWNED domain.
 //   DELETE /api/share?id=...              - owner revokes one share key, but ONLY a key whose
 //          scoped_domain the caller OWNS. A foreign key returns 404 (no existence leak).
@@ -40,11 +47,14 @@ type ShareSummary = {
 };
 
 type ShareCreateRes = {
+   // The no-email (direct-mint) branch returns the key ONCE to the authenticated owner.
    apiKey?: string,
    keyId?: number,
    scopedDomain?: string,
    mcpConfig?: { S33K_BASE_URL: string, S33K_API_KEY: string },
    instruction?: string,
+   // The email branch returns invited:true and never includes a key: the key is minted on accept.
+   invited?: boolean,
    emailSent?: boolean,
    error?: string | null,
 };
@@ -103,6 +113,30 @@ const createShare = async (req: NextApiRequest, res: NextApiResponse<ShareCreate
       return res.status(403).json({ error: 'You do not own this domain.' });
    }
 
+   // Two distinct flows, gated on whether an email recipient was given:
+   //
+   //   email present -> mint NOTHING now. Create a one-time 'share' INVITE and email an
+   //   activation LINK with NO key. The scoped key is minted only when the recipient clicks the
+   //   link (mint-on-accept, see pages/api/invite/accept.ts acceptShare). This is the safe path:
+   //   no key ever rides in the email or sits in our send pipeline.
+   //
+   //   no email -> the OWNER explicitly asked for the key for themselves, so mint it now and
+   //   return it once in the API response. This is the unchanged, pre-existing behavior.
+   if (email) {
+      return createShareInvite(req, res, account, owned, email);
+   }
+   return mintShareKey(req, res, account, owned);
+};
+
+// Mint the scoped key NOW and return it once. Only the no-email path reaches here: the owner is
+// authenticated and asked for the key, so returning it in the response to THEM is fine. No key is
+// emailed on this path (there is no recipient).
+const mintShareKey = async (
+   req: NextApiRequest,
+   res: NextApiResponse<ShareCreateRes>,
+   account: Account,
+   owned: { domain: string, owner_id?: number | null },
+) => {
    try {
       // Mint the share key ON THE OWNER's account (owned.owner_id when set, else the caller's
       // own account: that covers an admin-owned domain whose owner_id is null). The key is a
@@ -119,7 +153,7 @@ const createShare = async (req: NextApiRequest, res: NextApiResponse<ShareCreate
       const canonicalDomain = owned.domain;
       const created = await ApiKey.create({
          account_id: ownerAccountId,
-         name: email ? `share:${email}` : 'share',
+         name: 'share',
          key_prefix: apiKeyPrefix(fullKey),
          key_hash: hashApiKey(fullKey),
          role: 'member',
@@ -129,7 +163,7 @@ const createShare = async (req: NextApiRequest, res: NextApiResponse<ShareCreate
       const baseUrl = resolveBaseUrl(req);
       const mcpConfig = { S33K_BASE_URL: baseUrl, S33K_API_KEY: fullKey };
       // The zero-install connect path: one line adds the hosted MCP endpoint with this key, so the
-      // recipient pastes it into their LLM client and is done (no local server). The manual
+      // owner pastes it into their LLM client and is done (no local server). The manual
       // S33K_BASE_URL / S33K_API_KEY env pair stays as the fallback for self-hosters.
       const connectCommand = `claude mcp add --transport http s33k ${baseUrl}/api/mcp `
          + `--header "Authorization: Bearer ${fullKey}"`;
@@ -137,32 +171,59 @@ const createShare = async (req: NextApiRequest, res: NextApiResponse<ShareCreate
          + `Or set S33K_BASE_URL=${baseUrl} and S33K_API_KEY=<the key above> in your MCP client. This key can `
          + `only read ${canonicalDomain}.`;
 
-      // Best-effort email; if Resend is unconfigured or fails, the caller keeps the returned key
-      // and instruction and we never fail the share for it. The email is self-contained: it carries
-      // the one-line connect command (key embedded) so the recipient does not need anything else.
-      let emailSent = false;
-      if (email) {
-         const result = await sendInviteEmail({
-            to: email,
-            acceptLink: baseUrl,
-            type: 'share',
-            inviterName: account.name,
-            domain,
-            connect: { command: connectCommand, baseUrl, apiKey: fullKey },
-         });
-         emailSent = result.sent;
-      }
-
       return res.status(201).json({
          apiKey: fullKey,
          keyId: created.ID,
          scopedDomain: canonicalDomain,
          mcpConfig,
          instruction,
-         emailSent,
       });
    } catch (error) {
       console.log('[ERROR] Creating Share: ', error);
+      return res.status(400).json({ error: 'Error Creating Share.' });
+   }
+};
+
+// Email path: DO NOT mint or return the key. Create a one-time 'share' invite that records the
+// canonical scoped domain + the owner account to mint against, then email the activation LINK
+// (no key). The recipient's click triggers the mint (acceptShare). Best-effort email: if Resend
+// is unconfigured or fails, the invite still exists and the link is the recoverable artifact, so
+// we never fail the share for it.
+const createShareInvite = async (
+   req: NextApiRequest,
+   res: NextApiResponse<ShareCreateRes>,
+   account: Account,
+   owned: { domain: string, owner_id?: number | null },
+   email: string,
+) => {
+   try {
+      // Mint-on-accept needs to know WHICH account to mint the scoped key on: the domain owner.
+      // owned.owner_id when set, else the acting account (an admin-owned domain has owner_id null).
+      const ownerAccountId = (owned.owner_id ?? account.ID) as number;
+      const canonicalDomain = owned.domain;
+      const invite = await Invite.create({
+         code: generateInviteCode(),
+         inviter_account_id: account.ID,
+         type: 'share',
+         email,
+         // The account the scoped key is minted ON when the link is accepted.
+         target_account_id: ownerAccountId,
+         scoped_domain: canonicalDomain,
+         status: 'pending',
+      });
+
+      const acceptLink = `${resolveBaseUrl(req)}/invite/${invite.code}`;
+      const result = await sendInviteEmail({
+         to: email,
+         acceptLink,
+         type: 'share',
+         inviterName: account.name,
+         domain: canonicalDomain,
+      });
+
+      return res.status(201).json({ invited: true, emailSent: result.sent });
+   } catch (error) {
+      console.log('[ERROR] Creating Share Invite: ', error);
       return res.status(400).json({ error: 'Error Creating Share.' });
    }
 };

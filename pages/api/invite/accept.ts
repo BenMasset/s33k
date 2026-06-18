@@ -25,6 +25,11 @@ import { clientIp } from '../../../utils/collect-guards';
 //   External invite -> create a NEW admin account + mint an ADMIN key on it.
 //   Internal invite -> mint a read-only MEMBER key (role 'member') on the invite's
 //                      target_account_id (the inviting admin's account).
+//   Share invite    -> mint a read-only MEMBER key (role 'member') SCOPED to the invite's
+//                      scoped_domain, on the invite's target_account_id (the domain owner's
+//                      account). This is the mint-on-accept half of share-by-email: the share
+//                      email carried only this activation link, never a key, so the scoped key
+//                      first exists here, shown once, and is never stored in plaintext.
 //
 // The full API key is returned exactly once, with the MCP config the recipient needs to wire
 // up their LLM client. Only the key's prefix + hash are ever persisted.
@@ -124,6 +129,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       if (invite.type === 'internal') {
          return acceptInternal(req, res, invite);
       }
+      if (invite.type === 'share') {
+         return acceptShare(req, res, invite);
+      }
       // Unknown invite type should never happen; treat as a generic reject.
       return res.status(400).json({ error: GENERIC_REJECT });
    } catch (error) {
@@ -168,6 +176,9 @@ const externalHint = 'Paste the command above into Claude Code, then ask s33k to
    + 'discover keywords and start tracking rankings.';
 const internalHint = 'Paste the command above into Claude Code. This is a read-only member key: you can view '
    + 'rankings, analytics, and AI visibility, but not make changes.';
+const shareHint = (domain: string): string => 'Paste the command above into Claude Code. This is a read-only key '
+   + `for ${domain} only: you can view its rankings, analytics, and AI visibility, but not make changes and not `
+   + 'see any other site.';
 
 const acceptExternal = async (req: NextApiRequest, res: NextApiResponse<AcceptRes>, invite: Invite, name: string) => {
    // Claim the invite FIRST, before minting anything. If a concurrent request already claimed
@@ -234,5 +245,53 @@ const acceptInternal = async (req: NextApiRequest, res: NextApiResponse<AcceptRe
       mcpConfig: mcpFor(req, fullKey),
       mcpCommand: commandFor(req, fullKey),
       onboardingHint: internalHint,
+   });
+};
+
+// A share invite mints a read-only MEMBER key SCOPED to invite.scoped_domain, on the domain
+// owner's account (invite.target_account_id), and returns it ONCE. This is the mint-on-accept
+// half of share-by-email: the share email carried only the activation link, so the scoped key
+// first comes into existence right here, is shown once, and only its prefix + hash are persisted.
+// authorize() then holds the key to GET-only on exactly that one domain, identical to a key minted
+// by /api/share directly. Mirrors acceptInternal: validate the target, claim atomically (single
+// use), mint, stamp, reveal.
+const acceptShare = async (req: NextApiRequest, res: NextApiResponse<AcceptRes>, invite: Invite) => {
+   const targetId = invite.target_account_id;
+   const scopedDomain = invite.scoped_domain;
+   // A share invite must carry both the owner account to mint on and the domain to scope to. A
+   // missing either (a malformed row) is a generic reject: never mint an UNSCOPED key.
+   if (!targetId || !scopedDomain) {
+      return res.status(400).json({ error: GENERIC_REJECT });
+   }
+   // Confirm the owner account still exists and is active before minting. If not, generic reject
+   // so we never leak which account ids exist.
+   const target = await Account.findOne({ where: { ID: targetId } });
+   if (!target || target.status !== 'active') {
+      return res.status(400).json({ error: GENERIC_REJECT });
+   }
+   // Claim the invite atomically before minting. A concurrent replay flips 0 rows here and is
+   // rejected, so a share link mints at most one scoped key.
+   if (!(await claimInvite(invite.ID))) {
+      return res.status(400).json({ error: GENERIC_REJECT });
+   }
+   const fullKey = generateApiKey();
+   await ApiKey.create({
+      account_id: target.ID,
+      name: 'share',
+      key_prefix: apiKeyPrefix(fullKey),
+      key_hash: hashApiKey(fullKey),
+      role: 'member',
+      // scoped_domain is stored canonical by /api/share at invite-creation time, so it carries
+      // straight onto the key and matches the authorize() canonicalized request gate.
+      scoped_domain: scopedDomain,
+   });
+   await stampAcceptedBy(invite.ID, target.ID);
+   return res.status(201).json({
+      apiKey: fullKey,
+      accountId: target.ID,
+      role: 'member',
+      mcpConfig: mcpFor(req, fullKey),
+      mcpCommand: commandFor(req, fullKey),
+      onboardingHint: shareHint(scopedDomain),
    });
 };

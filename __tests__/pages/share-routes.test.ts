@@ -30,6 +30,12 @@ jest.mock('../../database/models/apiKey', () => ({
    __esModule: true,
    default: { create: jest.fn(), findOne: jest.fn(), findAll: jest.fn() },
 }));
+// share.ts now imports the Invite model (the email path creates a one-time 'share' invite instead
+// of minting a key). Mock it so jest never transforms sequelize's ESM uuid chain.
+jest.mock('../../database/models/invite', () => ({
+   __esModule: true,
+   default: { create: jest.fn(), findOne: jest.fn() },
+}));
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('../../utils/domain-access', () => ({ __esModule: true, default: jest.fn() }));
 // send-invite must never touch the network; stub it to a no-send result.
@@ -46,6 +52,8 @@ import { ADMIN_ACCOUNT_ID } from '../../utils/scope';
 // eslint-disable-next-line import/first
 import ApiKeyModel from '../../database/models/apiKey';
 // eslint-disable-next-line import/first
+import InviteModel from '../../database/models/invite';
+// eslint-disable-next-line import/first
 import authorizeFn from '../../utils/authorize';
 // eslint-disable-next-line import/first
 import resolveDomainAccessFn from '../../utils/domain-access';
@@ -53,6 +61,7 @@ import resolveDomainAccessFn from '../../utils/domain-access';
 import { sendInviteEmail } from '../../utils/send-invite';
 
 const mockApiKey = ApiKeyModel as unknown as { create: jest.Mock, findOne: jest.Mock, findAll: jest.Mock };
+const mockInvite = InviteModel as unknown as { create: jest.Mock, findOne: jest.Mock };
 const mockAuthorize = authorizeFn as unknown as jest.Mock;
 const mockResolveDomainAccess = resolveDomainAccessFn as unknown as jest.Mock;
 const mockSendInvite = sendInviteEmail as unknown as jest.Mock;
@@ -91,6 +100,9 @@ beforeEach(() => {
    process.env.MULTI_TENANT = 'true';
    process.env.NEXT_PUBLIC_APP_URL = 'https://s33k.example';
    mockSendInvite.mockResolvedValue({ sent: false });
+   // The email path creates a one-time share invite; default it to a row carrying a code so the
+   // activation link can be built. Individual tests override as needed.
+   mockInvite.create.mockResolvedValue({ ID: 1, code: 'shareinvitecode123' });
 });
 
 afterEach(() => { process.env = { ...ORIGINAL_ENV }; });
@@ -145,20 +157,33 @@ describe('POST /api/share (mint a share key)', () => {
       expect(mockApiKey.create.mock.calls[0][0].account_id).toBe(ADMIN_ACCOUNT_ID);
    });
 
-   it('best-effort emails the collaborator when an email is given (never blocks)', async () => {
+   it('email path creates a one-time share invite and emails a LINK, never a key', async () => {
       asCaller(TENANT_A);
       mockResolveDomainAccess.mockResolvedValue({ ID: 9, domain: 'tenant-a.com', owner_id: TENANT_A.ID });
-      mockApiKey.create.mockResolvedValue({ ID: 502 });
       mockSendInvite.mockResolvedValue({ sent: true });
       const res = makeRes();
 
       await shareHandler(makeReq({ method: 'POST', body: { domain: 'tenant-a.com', email: 'client@acme.com' } }), res);
 
       expect(res.statusCode).toBe(201);
-      expect(mockSendInvite).toHaveBeenCalledWith(expect.objectContaining({
-         to: 'client@acme.com', type: 'share', domain: 'tenant-a.com',
-      }));
+      // The safe path: mint NOTHING now. A 'share' invite is created carrying the canonical scoped
+      // domain + the owner account to mint against on accept.
+      const inviteArg = mockInvite.create.mock.calls[0][0];
+      expect(inviteArg.type).toBe('share');
+      expect(inviteArg.scoped_domain).toBe('tenant-a.com');
+      expect(inviteArg.target_account_id).toBe(TENANT_A.ID);
+      expect(inviteArg.email).toBe('client@acme.com');
+      expect(mockApiKey.create).not.toHaveBeenCalled();
+      // The email carries an activation LINK to the invite code, type 'share', and NO key.
+      const sendArg = mockSendInvite.mock.calls[0][0];
+      expect(sendArg).toEqual(expect.objectContaining({ to: 'client@acme.com', type: 'share', domain: 'tenant-a.com' }));
+      expect(sendArg.acceptLink).toContain('shareinvitecode123');
+      expect(sendArg.connect).toBeUndefined();
+      // The response reports the invite was sent and NEVER returns a key.
+      expect(res.payload.invited).toBe(true);
       expect(res.payload.emailSent).toBe(true);
+      expect(res.payload.apiKey).toBeUndefined();
+      expect(res.payload.mcpConfig).toBeUndefined();
    });
 
    it('400s when no domain is given', async () => {
