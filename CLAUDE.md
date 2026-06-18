@@ -20,10 +20,14 @@ hard-won lesson, so the next session never relearns it.
   line: `export NVM_DIR="$HOME/.nvm"; source "$NVM_DIR/nvm.sh"; nvm use 20 >/dev/null 2>&1;`
 - **Tests:** `npx jest --ci` (one-shot). `npm run test` is WATCH mode, do not use it for verification.
 - **Lint:** `npm run lint` must be clean. **Build:** `npm run build` must print "Compiled successfully".
-- **MCP server:** `cd mcp && npm run build`, then probe over a real stdio handshake. 76 tools + 5
-  resources today. Banner reads "76 tools and 5 resources registered." Smoke harness: `npm run smoke`
+- **MCP server:** `cd mcp && npm run build`, then probe over a real stdio handshake. 82 tools + 5
+  resources today. Banner reads "82 tools and 5 resources registered." Smoke harness: `npm run smoke`
   from `mcp/`. The smoke test's EXPECTED_TOOLS and the registered set are kept in lockstep by a jest
   guard (`__tests__/utils/knowledge-coverage.test.ts`), so this count cannot silently rot.
+- **Two MCP transports, one tool set.** The 82 tools live in `mcp/src/tools.ts` (`registerS33kTools`).
+  `mcp/src/index.ts` is the thin stdio entry; `pages/api/mcp/[[...slug]].ts` is the hosted Streamable
+  HTTP endpoint at `/api/mcp` (connect with a URL + Bearer key, no install). Both register the SAME
+  tools, each binding its own per-connection key. See section D below.
 - **Do not touch a running dev server or `.env`.** `.env` is gitignored and must stay untracked.
 
 ---
@@ -86,7 +90,9 @@ hard-won lesson, so the next session never relearns it.
 - Add a `CapabilityEntry` to `utils/knowledge.ts` for any new tool, or the knowledge-coverage jest
   test FAILS the build. This is the self-support durability guarantee: a user's own LLM must be able
   to answer any question about the tool, so the answers can never silently rot.
-- Tools are registered in `mcp/src/index.ts` (76 tools + 5 resources today).
+- Tools are registered in `mcp/src/tools.ts` (`registerS33kTools`, 82 tools + 5 resources today),
+  shared by the stdio entry (`mcp/src/index.ts`) and the hosted HTTP route (`pages/api/mcp`). The
+  knowledge-coverage jest guard parses `tools.ts`, so any new tool there still needs a knowledge entry.
 - Whitelist any new authed API route in `utils/allowedApiRoutes.ts`. Keep that file
   DEPENDENCY-FREE: no DB-model imports. Importing a model drags sequelize/uuid ESM into jest and
   breaks suites. That exact regression happened and was fixed. Do not reintroduce it.
@@ -165,12 +171,63 @@ hard-won lesson, so the next session never relearns it.
 
 ---
 
+## D. Hosted HTTP MCP endpoint (`pages/api/mcp`) and its key-isolation crux
+
+- **What it is.** A remote MCP endpoint at `/api/mcp` (Streamable HTTP, SDK
+  `StreamableHTTPServerTransport`). A client connects with a URL + a Bearer key and NO local install:
+  `claude mcp add --transport http s33k <base-url>/api/mcp --header "Authorization: Bearer <key>"`.
+  It exposes the SAME 82 tools as the stdio server via the shared `mcp/src/tools.ts`.
+- **THE SECURITY CRUX (do not regress).** The route reads `Authorization: Bearer <key>` off the
+  incoming request and binds a per-request fetchImpl to THAT key. Every tool call therefore hits the
+  real s33k REST API carrying ONLY the connecting client's key, never `process.env.APIKEY` or any
+  admin key. The API's `authorize()` then does all the scoping, so a scoped share key over the hosted
+  MCP is held to GET-only + the per-domain allowlist + its one domain, identical to a direct REST
+  call. No-Bearer is rejected 401 before any MCP server is built. If you ever touch this route, the
+  only acceptable design is: a connection uses NOTHING but its own key. Proof: `__tests__/pages/
+  hosted-mcp-scope.test.ts` drives a real in-memory client and asserts allow/deny using the PRODUCTION
+  gate (`isScopedKeyAllowedRoute`).
+- **Stateless on purpose.** A fresh McpServer + transport + key-bound fetch are built PER REQUEST
+  (`sessionIdGenerator: undefined`) and closed on `res.on('close')`. This makes cross-connection key
+  leakage structurally impossible. Do not switch to a shared/long-lived session without re-proving
+  isolation.
+- **The route is NOT in `allowedApiRoutes.ts`.** It does not call `authorize()` itself (it is the MCP
+  transport, guarded by requiring a Bearer key); the scope check happens when its tools call the real
+  `/api/*` routes, which DO go through `authorize()`. Do not whitelist `/api/mcp` there.
+- **The loopback base URL is HEADER-INDEPENDENT, always `http://127.0.0.1:${PORT}` (do not regress).**
+  `resolveBaseUrl()` in this route takes NO request and never reads `x-forwarded-host`/`host`. An
+  earlier version derived the base from request headers when `NEXT_PUBLIC_APP_URL` was unset; a forged
+  `X-Forwarded-Host` would then redirect the loopback fetch (which carries the CONNECTING CLIENT'S
+  Bearer key) to an attacker host = key exfiltration + SSRF. The API we proxy is always THIS local
+  process, so there is never a reason to consult headers. Keep it header-free. (The separate
+  `utils/baseUrl.ts` resolver keeps its header logic on purpose: it builds USER-FACING share/invite
+  links, not a key-bearing loopback.) Caught by the pre-launch adversarial review, 2026-06-18.
+- **Per-key rate brake.** The handler runs `rateLimit('mcp:'+bearer, { limit: 240, windowMs: 60000 })`
+  AFTER the no-Bearer 401 (so anonymous floods take the cheaper rejection) and before building the
+  server, so one leaked/runaway key cannot fan out unbounded loopback work. Reuses `utils/rate-limit.ts`
+  (its global ceiling also bounds a unique-key flood). 429 + Retry-After when exhausted.
+- **Build-toolchain lesson (hard-won).** The hosted route pulls `zod` (via tools.ts) into the Next
+  type-check. Root TypeScript was **4.8.4**, which cannot PARSE zod 3.25's `const`-type-param `.d.cts`
+  (a syntax error `skipLibCheck` does not suppress). Bumping to TS **5.9** type-checked but OOM'd the
+  build at the 4GB default heap. The durable fix shipped: pin root TS to **~5.4.5** (the same version
+  the mcp workspace uses) AND set `NODE_OPTIONS=--max-old-space-size=8192` in the root `build` script.
+  Do not bump root TS to 5.9+ casually; do not drop the heap bump. The mcp workspace keeps its own TS.
+- **jest:** `modulePathIgnorePatterns: ['<rootDir>/.next/']` was added so the standalone build copy
+  (`.next/standalone/mcp/package.json`) does not collide with `mcp/package.json` in jest-haste-map.
+- **Importing the shared module into Next.** `pages/api/mcp` imports `../../../mcp/src/tools` even
+  though root tsconfig EXCLUDES `mcp/`. exclude only drops files from the default include glob, not
+  from import resolution, so webpack bundles it. The SDK `.js` ESM subpaths resolve via its `exports`
+  `./*` wildcard; the eslint import resolver does not understand the wildcard, hence the two
+  `eslint-disable import/extensions, import/no-unresolved` lines on the SDK imports. Keep them.
+
+---
+
 ## Quick map
 
 - `database/database.ts`, `database/config.js` · Postgres-or-SQLite selection via `DATABASE_URL`.
 - `utils/authorize.ts`, `utils/scope.ts` · the multi-tenant auth + scoping seam.
 - `utils/allowedApiRoutes.ts` · API-route whitelist (keep dependency-free).
 - `utils/knowledge.ts` · single source of truth for tool docs; the coverage test gates it.
-- `mcp/src/index.ts` · MCP tool + resource registration (76 + 5).
+- `mcp/src/tools.ts` · the SHARED MCP tool + resource registration (82 + 5). `mcp/src/index.ts` is
+  the stdio entry; `pages/api/mcp/[[...slug]].ts` is the hosted HTTP endpoint. Both call into tools.ts.
 - `SECURITY.md` · the verifiable trust facts (no-training, isolation, export/delete, cookieless).
 - `BUILD_PLAN.md` · the phased plan + decision log. `NIGHT_REPORT.md` · the build-session log.

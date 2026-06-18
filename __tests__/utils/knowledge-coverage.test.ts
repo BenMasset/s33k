@@ -27,7 +27,11 @@ import path from 'path';
 // eslint-disable-next-line import/no-relative-packages
 import knowledge, { searchKnowledge, crossCheckCapability, CapabilityEntry } from '../../utils/knowledge';
 
-const MCP_INDEX_PATH = path.resolve(__dirname, '../../mcp/src/index.ts');
+// The tool registrations were extracted from mcp/src/index.ts into the SHARED mcp/src/tools.ts
+// (registerS33kTools), so the stdio entry and the hosted Streamable HTTP transport register the
+// exact same set. The authoritative registry to parse is therefore tools.ts now, not index.ts
+// (which is the thin stdio wiring and registers nothing itself).
+const MCP_TOOLS_PATH = path.resolve(__dirname, '../../mcp/src/tools.ts');
 
 /**
  * Parse the names of every tool registered in the MCP server straight from its source. The first
@@ -36,7 +40,7 @@ const MCP_INDEX_PATH = path.resolve(__dirname, '../../mcp/src/index.ts');
  * connects a stdio transport at import time) makes this a static, side-effect-free enumeration.
  */
 const readRegisteredToolNames = (): string[] => {
-   const src = fs.readFileSync(MCP_INDEX_PATH, 'utf8');
+   const src = fs.readFileSync(MCP_TOOLS_PATH, 'utf8');
    const names: string[] = [];
    // Matches: server.registerTool(\n   'tool_name', ...  (single or double quotes, any whitespace).
    const re = /server\.registerTool\(\s*['"]([a-zA-Z0-9_]+)['"]/g;

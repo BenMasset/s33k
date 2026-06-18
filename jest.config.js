@@ -14,6 +14,11 @@ const customJestConfig = {
   // if using TypeScript with a baseUrl set to the root directory then you need the below for alias' to work
   moduleDirectories: ['node_modules', '<rootDir>/'],
   testEnvironment: 'jest-environment-jsdom',
+  // The standalone build (output: 'standalone') copies the mcp workspace into
+  // .next/standalone/mcp, whose package.json collides with the real mcp/package.json under
+  // jest-haste-map. Ignore the build output so the collision warning never appears and a stale
+  // copy can never shadow the real module during resolution.
+  modulePathIgnorePatterns: ['<rootDir>/.next/'],
 };
 
 // MSW 2.x and parts of its dependency chain (notably until-async, which is

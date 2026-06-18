@@ -2,11 +2,16 @@
 
 This is the MCP (Model Context Protocol) control layer for s33k. It lets an LLM client such as Claude Code or Cursor operate s33k entirely over a single connection: track keywords and read live Google rankings, detect AI visibility from referral and crawler data, read owned analytics, and pull the cross-pillar briefing and scoreboard.
 
-The server is a thin wrapper over the s33k REST API. It speaks stdio transport and authenticates with the s33k Bearer API key, so it runs fully headless with no login cookie.
+The server is a thin wrapper over the s33k REST API. It authenticates with the s33k Bearer API key, so it runs fully headless with no login cookie.
+
+There are two ways to connect, and they expose the EXACT same tools (the registrations are shared in `src/tools.ts`):
+
+- **Local (stdio).** Run the compiled `dist/index.js` as a stdio child of your MCP client. Best for a self-hoster who runs s33k themselves. Uses `S33K_API_KEY` from the environment. See [Register it in Claude Code](#register-it-in-claude-code).
+- **Hosted (HTTP).** Connect to a running s33k server's `/api/mcp` endpoint with one URL plus a Bearer key. NO local install. Best for sharing: a scoped share key over the hosted endpoint is automatically read-only and single-domain, because the same server-side `authorize()` enforces it per connection. See [Connect over the hosted HTTP endpoint](#connect-over-the-hosted-http-endpoint).
 
 ## Tools
 
-The server registers 76 tools and 5 knowledge resources, grouped by pillar. The authoritative source is `src/index.ts`; the per-tool descriptions live in `utils/knowledge.ts` in the root repo. Most read tools take `domain` and an optional `period` (e.g. `30d`); the per-tool specifics are below.
+The server registers 82 tools and 5 knowledge resources, grouped by pillar. The authoritative source is `src/tools.ts` (the shared `registerS33kTools`, used by both transports); the per-tool descriptions live in `utils/knowledge.ts` in the root repo. Most read tools take `domain` and an optional `period` (e.g. `30d`); the per-tool specifics are below.
 
 ### Cross-pillar
 
@@ -180,15 +185,46 @@ Or add this block to a Claude Code MCP JSON config (for example `.mcp.json` at t
 
 After registering, restart Claude Code (or reload MCP servers) and the s33k tools become available. Confirm with `claude mcp list`.
 
+## Connect over the hosted HTTP endpoint
+
+A running s33k server exposes the SAME tools over a remote Streamable HTTP MCP endpoint at `/api/mcp`. A recipient connects with one URL plus a Bearer key and NO local install. This is what makes sharing one-click.
+
+The key crux: every tool call the hosted endpoint makes carries ONLY the connecting client's Bearer key, never a server-side or admin key. The s33k API's `authorize()` then enforces that key's scope per connection. So a scoped share key (an `ApiKey` with `scoped_domain` set) connecting over the hosted MCP is automatically held to GET-only, the per-domain allowlist, and its one domain, exactly as a direct REST call would be. A request with no Bearer key is rejected with 401.
+
+**Claude Code:**
+
+```bash
+claude mcp add --transport http s33k https://s33k-production.up.railway.app/api/mcp \
+  --header "Authorization: Bearer YOUR_S33K_API_KEY"
+```
+
+**Claude Code MCP JSON config** (`.mcp.json` or `~/.claude.json` under `mcpServers`):
+
+```json
+{
+  "mcpServers": {
+    "s33k": {
+      "type": "http",
+      "url": "https://s33k-production.up.railway.app/api/mcp",
+      "headers": { "Authorization": "Bearer YOUR_S33K_API_KEY" }
+    }
+  }
+}
+```
+
+**Claude.ai connectors / Cursor:** add a custom MCP (HTTP) connector with the URL `https://s33k-production.up.railway.app/api/mcp` and an `Authorization: Bearer YOUR_S33K_API_KEY` header. Any MCP client that speaks Streamable HTTP works the same way.
+
+The endpoint runs stateless: a fresh MCP server, transport, and key-bound fetch are built per request and torn down when the response finishes, so no key or session state is ever shared across connections.
+
 ## Run it directly (manual check)
 
-The server speaks stdio and waits for a client, so running it by hand will print a startup line to stderr and then block:
+The stdio server waits for a client, so running it by hand will print a startup line to stderr and then block:
 
 ```bash
 S33K_API_KEY=... S33K_BASE_URL=http://localhost:3000 node dist/index.js
 ```
 
-A clean boot prints `s33k-mcp connected (base URL: ...). 76 tools and 5 resources registered.` to stderr. Press Ctrl-C to stop.
+A clean boot prints `s33k-mcp connected (base URL: ...). 82 tools and 5 resources registered.` to stderr. Press Ctrl-C to stop.
 
 ## End-to-end smoke test
 

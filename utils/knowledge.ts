@@ -1056,9 +1056,13 @@ const capabilities: CapabilityEntry[] = [
 // ---------------------------------------------------------------------------
 const setup = {
    summary: 'Install s33k from source (clone, npm install, set the .env, npm run build, npm start) or run the bundled '
-      + 'docker-compose stack (s33k + Umami + Postgres). Then connect your LLM by adding the MCP server with your s33k '
-      + 'API key as S33K_API_KEY and your instance URL as S33K_BASE_URL. Full steps live in README.md, DEPLOY.md, and '
-      + 'mcp/README.md in the repository.',
+      + 'docker-compose stack (s33k + Umami + Postgres). Then connect your LLM one of two ways, both exposing the same '
+      + 'tools: (1) LOCAL stdio, by adding the MCP server with your s33k API key as S33K_API_KEY and your instance URL '
+      + 'as S33K_BASE_URL; or (2) HOSTED HTTP, with no local install, by adding the running server\'s /api/mcp endpoint '
+      + 'as an HTTP MCP server with an Authorization: Bearer <api key> header (claude mcp add --transport http s33k '
+      + '<base-url>/api/mcp --header "Authorization: Bearer <key>"). The hosted path is how a scoped share key is shared: '
+      + 'it is automatically read-only and single-domain because the same server-side auth enforces it per connection. '
+      + 'Full steps live in README.md, DEPLOY.md, and mcp/README.md in the repository.',
    fiveMinutesToValue: 'The bar is install-to-real-data in about five minutes. The fastest path is the onboard capability: '
       + 'give s33k one bare domain and it creates the domain, discovers keywords, queues live Google rank scrapes, '
       + 'provisions an analytics website, and hands back the tracking snippet. Rankings appear shortly after onboarding '
