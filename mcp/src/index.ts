@@ -757,6 +757,50 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// causal_links
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'causal_links',
+   {
+      title: 'Did my SEO pay off: which rank change LIKELY drove which traffic change (the over-time cross-pillar join)',
+      description:
+         'The temporal cross-pillar join no single tool can do. For each page that has BOTH tracked-keyword '
+         + 'rank history (SEO) AND first-party landing sessions (analytics), it correlates the two series '
+         + 'over time and reports which rank change LIKELY drove which traffic change. Ahrefs has rank '
+         + 'history but not YOUR sessions; Plausible has sessions but not rank; s33k holds both for one '
+         + 'domain in one store. It detects a material rank move (default 3+ positions) and a subsequent '
+         + 'traffic move (default 30%+) within a lag window (default 7 days) and classifies each page as one '
+         + 'of: rank-gain-drove-traffic, rank-loss-cut-traffic, rank-up-no-traffic (rank improved but traffic '
+         + 'flat: a demand or snippet problem), or traffic-fell-rank-flat (traffic dropped with no rank '
+         + 'change: check another source, e.g. an AI referral that dried up). CRITICAL: this is CORRELATION, '
+         + 'NOT proof. Every link says "likely", attaches both series as evidence, and NEVER asserts '
+         + 'causation. When a page lacks enough history it says "not enough history yet" rather than guess. '
+         + 'Human-only by default. RULES-BASED: the s33k server does NOT call any LLM; it does the join with '
+         + 'transparent thresholds and YOU narrate the links, always framing them as correlation, never cause.',
+      inputSchema: {
+         domain: z.string().describe('The domain, e.g. "getmasset.com".'),
+         period: z.string().optional().describe('Reporting window for the traffic side, e.g. "30d", "90d". Defaults to "30d".'),
+      },
+   },
+   async ({ domain, period }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         const data = await s33kFetch('/api/causal-links', { query });
+         return jsonResult({
+            domain: data.domain,
+            period: data.period,
+            links: data.links,
+            note: data.note,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // suggest_goals
 // ---------------------------------------------------------------------------
 server.registerTool(
@@ -2950,7 +2994,7 @@ async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
    process.stderr.write(
-      `s33k-mcp connected (base URL: ${BASE_URL}). 77 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
+      `s33k-mcp connected (base URL: ${BASE_URL}). 78 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
    );
 }
 

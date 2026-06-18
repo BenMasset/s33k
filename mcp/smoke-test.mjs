@@ -91,6 +91,7 @@ const EXPECTED_TOOLS = [
    'daily_brief',
    'campaign_report',
    'cannibalization_detection',
+   'causal_links',
    'channel_report',
    'competitor_visibility',
    'connect_search_console',
@@ -455,6 +456,7 @@ async function main() {
    await callAndAssert(client, 'form_submissions', { domain: READ_DOMAIN, period: PERIOD });
    await callAndAssert(client, 'scroll_depth', { domain: READ_DOMAIN, period: PERIOD });
    await callAndAssert(client, 'page_engagement', { domain: READ_DOMAIN, period: PERIOD });
+   await callAndAssert(client, 'causal_links', { domain: READ_DOMAIN, period: PERIOD });
 
    // 3d. Knowledge / account / trust read tools. These take no domain (or a
    // static question) and are pure reads. help and security_facts have no
