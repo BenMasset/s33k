@@ -32,7 +32,7 @@ export type CapabilityEntry = {
    /** The registered MCP tool name (same as id; kept explicit for the coverage test). */
    toolName: string,
    /** Which s33k pillar this belongs to. */
-   category: 'seo' | 'aeo' | 'analytics' | 'cross-pillar' | 'onboarding' | 'account' | 'security',
+   category: 'seo' | 'aeo' | 'analytics' | 'cross-pillar' | 'onboarding' | 'account' | 'security' | 'sharing',
    /** Short human title. */
    title: string,
    /** What the capability does, in one or two plain sentences. */
@@ -792,6 +792,41 @@ const capabilities: CapabilityEntry[] = [
       whenToUse: 'Use to review pending demand before deciding who to send external invites to.',
       examplePrompt: 'Who is on the s33k waitlist?',
    },
+   // --- Per-domain read-only sharing ---
+   {
+      id: 'share_domain',
+      toolName: 'share_domain',
+      category: 'sharing',
+      title: 'Share one site read-only',
+      description: 'Shares a SINGLE domain you own, read-only, with a collaborator (like sharing one Google Analytics property). Mints a new '
+         + 'read-only key limited to exactly that one domain: the collaborator can read its rankings, analytics, and AI visibility but sees no '
+         + 'other domain, no no-domain views (portfolio, domain list, account), and can change nothing. Optional email delivers the connect '
+         + 'instructions. The key is shown once.',
+      whenToUse: 'Use to let a teammate or client watch one site read-only. You must own the domain; sharing one you do not own is rejected.',
+      examplePrompt: 'Share example.com read-only with my client at client@acme.com.',
+   },
+   {
+      id: 'list_domain_shares',
+      toolName: 'list_domain_shares',
+      category: 'sharing',
+      title: 'List who a site is shared with',
+      description: 'Lists every read-only share created for ONE domain you own, so you can audit who can currently view that site. Each share '
+         + 'returns an ID (for revoking), key prefix, name (carries the collaborator email when one was given), created/last-used timestamps, and '
+         + 'whether it is revoked.',
+      whenToUse: 'Use to review or audit who has read-only access to a site before revoking. You must own the domain.',
+      examplePrompt: 'Who can see example.com in s33k?',
+   },
+   {
+      id: 'revoke_domain_share',
+      toolName: 'revoke_domain_share',
+      category: 'sharing',
+      title: 'Revoke a read-only share',
+      description: 'Revokes one read-only share by its ID (from list_domain_shares), immediately cutting off that collaborator. You can only revoke '
+         + 'a share whose domain you own; a share id you do not own (or that does not exist) is reported as not found, so other accounts\' keys '
+         + 'cannot be probed.',
+      whenToUse: 'Use when a collaborator should no longer be able to view a site you shared.',
+      examplePrompt: 'Revoke the share with id 12 on example.com.',
+   },
    // --- Security / data ownership ---
    {
       id: 'export_data',
@@ -916,6 +951,24 @@ const capabilities: CapabilityEntry[] = [
       whenToUse: 'The FIRST thing to reach for when the user says "show me an overview" or "show me my dashboard", asks how their site is doing, or '
          + 'does not know what to ask. Use it to orient, then offer the suggestedQuestions it returns.',
       examplePrompt: 'Show me an overview of getmasset.com',
+   },
+   {
+      // Worded with "crawl" (not the past-tense "crawled") on purpose: "crawled" is a distinctive
+      // verb that ai_crawlers owns, so using it here made crossCheckCapability tie aeo_roi with
+      // ai_crawlers on the "which AI crawlers crawled my site" request and route it to neither.
+      // aeo_roi still expresses crawling via "crawls"/"crawler"; this keeps the routing clean.
+      id: 'aeo_roi',
+      toolName: 'aeo_roi',
+      category: 'cross-pillar',
+      title: 'The AI Visibility P&L: does AI search make me money',
+      description: 'The flagship cross-pillar report no AEO tool can produce: it closes the loop from AI crawls to AI-referred traffic to conversions '
+         + 'to revenue, per page. For a named goal it joins which AI bots crawl each page, which AI engines then referred real visitors there, which '
+         + 'converted, and what each conversion is worth. Returns a per-page funnel (crawls, AI-referred sessions, conversions, AI versus organic '
+         + 'conversion rate, revenue when the goal has a value) plus the money moves (pages AI crawls but never refers, pages where AI out-converts '
+         + 'organic, pages AI sends traffic to that never convert). When a layer has no data it says so rather than fabricate a rate off a zero baseline.',
+      whenToUse: 'Use to prove or disprove that AI visibility pays: the end-to-end return from AI crawls through to revenue, per page, and the single '
+         + 'highest-value AEO move. This is the join across AI crawler hits, AI referral traffic, and conversion goals that no standalone AEO tool has.',
+      examplePrompt: 'Is AI search making me money?',
    },
 ];
 
@@ -1113,7 +1166,7 @@ export const searchKnowledge = (q: string, topic?: string) => {
       return terms.reduce((score, term) => (hay.includes(term) ? score + 1 : score), 0);
    };
 
-   const isCategory = (['seo', 'aeo', 'analytics', 'cross-pillar', 'onboarding', 'account', 'security'] as const)
+   const isCategory = (['seo', 'aeo', 'analytics', 'cross-pillar', 'onboarding', 'account', 'security', 'sharing'] as const)
       .some((c) => c === wantTopic);
 
    // Capabilities: filter by topic when a category topic is given, then rank by query overlap.
@@ -1215,21 +1268,57 @@ const META_TOOL_IDS = new Set(['help', 'request_feature', 'list_feature_requests
  * @param {string} request - The user's feature-request text.
  * @returns {CapabilityMatch} Whether it matches an existing capability, and which one.
  */
+// The matchable (non-meta) capabilities and their significant-term haystacks, computed once.
+// significantTerms is pure and the catalog is a module constant, so this is safe to memoize.
+const matchableCapabilities = capabilities.filter((c) => !META_TOOL_IDS.has(c.id));
+const capabilityHaystacks: Set<string>[] = matchableCapabilities.map(
+   (c) => new Set(significantTerms([c.toolName, c.title, c.description, c.whenToUse, c.examplePrompt].join(' '))),
+);
+
+// Document frequency of every term across the matchable haystacks. A term in FEW capability docs
+// is distinctive (it points at a specific tool); a term in many is generic filler. We use this only
+// as a TIE-BREAK so a raw-count tie resolves to the capability whose matched terms are rarer, i.e.
+// the genuinely more specific tool. Example: "which AI crawlers like GPTBot crawled my site" ties
+// ai_crawlers and a generic report on raw count, and the rarer terms (crawlers, gptbot) pick
+// ai_crawlers. This NEVER changes the matched/novel boundary (that still rests on raw count below).
+const documentFrequency = ((): Map<string, number> => {
+   const df = new Map<string, number>();
+   for (const hay of capabilityHaystacks) {
+      for (const term of hay) { df.set(term, (df.get(term) || 0) + 1); }
+   }
+   return df;
+})();
+
+// Inverse-document-frequency weight of one term: rarer terms weigh more. Smoothed so a term that
+// is unseen (df 0) still gets a positive, finite weight and the function never divides by zero.
+const idfWeight = (term: string): number => {
+   const total = capabilityHaystacks.length;
+   const df = documentFrequency.get(term) || 0;
+   return Math.log((total + 1) / (df + 1)) + 1;
+};
+
 export const crossCheckCapability = (request: string): CapabilityMatch => {
    const terms = significantTerms(request);
    if (terms.length === 0) {
       return { matched: false, capability: null, score: 0 };
    }
    const unique = Array.from(new Set(terms));
-   const ranked = capabilities
-      .filter((c) => !META_TOOL_IDS.has(c.id))
-      .map((c) => {
-         const hay = significantTerms([c.toolName, c.title, c.description, c.whenToUse, c.examplePrompt].join(' '));
-         const haySet = new Set(hay);
-         const score = unique.reduce((acc, term) => (haySet.has(term) ? acc + 1 : acc), 0);
-         return { entry: c, score };
+   const ranked = matchableCapabilities
+      .map((c, i) => {
+         const haySet = capabilityHaystacks[i];
+         // score = raw count of overlapping significant terms (the gate metric, unchanged).
+         // weight = idf-summed overlap (the tie-break metric only): rarer overlaps weigh more.
+         let score = 0;
+         let weight = 0;
+         for (const term of unique) {
+            if (haySet.has(term)) { score += 1; weight += idfWeight(term); }
+         }
+         return { entry: c, score, weight };
       })
-      .sort((a, b) => b.score - a.score);
+      // Primary sort by raw overlap count (preserves the matched gate). Break ties by idf weight so
+      // an equal-count tie selects the more DISTINCTIVE capability, not whichever happened to be
+      // first in the catalog. The tie-break changes only WHICH tool is named, never matched-ness.
+      .sort((a, b) => (b.score - a.score) || (b.weight - a.weight));
 
    const best = ranked[0];
    const runnerUp = ranked[1] ? ranked[1].score : 0;

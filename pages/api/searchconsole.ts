@@ -13,6 +13,7 @@ import {
 import authorize from '../../utils/authorize';
 import { scopeWhere } from '../../utils/scope';
 import resolveDomainAccess from '../../utils/domain-access';
+import { canonicalizeDomain } from '../../utils/canonical-domain';
 import type Account from '../../database/models/account';
 
 type searchConsoleRes = {
@@ -51,12 +52,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
 const getDomainSearchConsoleData = async (req: NextApiRequest, res: NextApiResponse<searchConsoleRes>, account?: Account | null) => {
    if (!req.query.domain && typeof req.query.domain !== 'string') return res.status(400).json({ data: null, error: 'Domain is Missing.' });
-   const domainname = (req.query.domain as string).replaceAll('-', '.').replaceAll('_', '-');
-   const foundDomain:Domain| null = await resolveDomainAccess(account, domainname);
+   // Canonical-first resolution: look up the SAME canonical string the authorize() share-key gate
+   // checked, then fall back to the legacy slug-decode only when canonical matched nothing. This is
+   // the fix for the normalization-mismatch escape (a scoped key for "a-b.com" that decoded into the
+   // sibling "a.b.com"); see utils/canonical-domain.ts. The slug-decode runs only when the canonical
+   // form did not resolve, so it can never reach a domain the canonical form already owns.
+   const canonicalDomain = canonicalizeDomain(req.query.domain);
+   const slugDecodedDomain = (req.query.domain as string).replaceAll('-', '.').replaceAll('_', '-');
+   let foundDomain: Domain | null = canonicalDomain ? await resolveDomainAccess(account, canonicalDomain) : null;
+   if (!foundDomain && slugDecodedDomain !== canonicalDomain) {
+      foundDomain = await resolveDomainAccess(account, slugDecodedDomain);
+   }
    if (!foundDomain) {
       return res.status(403).json({ data: null, error: 'Domain not found for this account' });
    }
    const domainObj: DomainType = foundDomain.get({ plain: true });
+   // Drive downstream SC-file reads/logs off the resolved row's domain, not the request string.
+   const domainname = foundDomain.domain;
    // Surface connection state (oauth | service-account | null) alongside the data so a caller can
    // tell whether/how GSC is connected for this domain without ever seeing the credentials.
    const status = await getSearchConsoleConnectionStatus(domainObj);
@@ -82,11 +94,20 @@ const getDomainSearchConsoleData = async (req: NextApiRequest, res: NextApiRespo
 // WRITE access to the domain, so a shared viewer (M2) or a foreign tenant can never disconnect it.
 const disconnectSearchConsole = async (req: NextApiRequest, res: NextApiResponse<searchConsoleDisconnectRes>, account?: Account | null) => {
    if (!req.query.domain || typeof req.query.domain !== 'string') return res.status(400).json({ disconnected: false, error: 'Domain is Missing.' });
-   const domainname = (req.query.domain as string).replaceAll('-', '.').replaceAll('_', '-');
-   const ownedDomain = await resolveDomainAccess(account, domainname, { write: true });
+   // Same canonical-first resolution as the GET path, for consistency and defense-in-depth: resolve
+   // the row by the canonical domain first, then the legacy slug-decode only as a fallback, and clear
+   // the token off the RESOLVED row's actual domain. (Scoped share keys are GET-only and can never
+   // reach this DELETE, but the route still must not slug-decode past its own write gate.)
+   const canonicalDomain = canonicalizeDomain(req.query.domain);
+   const slugDecodedDomain = (req.query.domain as string).replaceAll('-', '.').replaceAll('_', '-');
+   let ownedDomain = canonicalDomain ? await resolveDomainAccess(account, canonicalDomain, { write: true }) : null;
+   if (!ownedDomain && slugDecodedDomain !== canonicalDomain) {
+      ownedDomain = await resolveDomainAccess(account, slugDecodedDomain, { write: true });
+   }
    if (!ownedDomain) {
       return res.status(403).json({ disconnected: false, error: 'Domain not found for this account' });
    }
+   const domainname = ownedDomain.domain;
    // Scope the clear to the exact owned row (its globally-unique domain name plus the owner scope),
    // so the write can only ever touch the caller's own domain.
    const cleared = await clearSearchConsoleOAuthToken({ domain: domainname, ...scopeWhere(account) });

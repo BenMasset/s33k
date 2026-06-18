@@ -52,6 +52,7 @@ export const allowedApiRoutes = [
    'GET:/api/executive-summary',
    'GET:/api/seo-report',
    'GET:/api/aeo-report',
+   'GET:/api/aeo-roi',
    'GET:/api/campaign-report',
    'GET:/api/dashboard',
    'GET:/api/portfolio',
@@ -92,6 +93,9 @@ export const allowedApiRoutes = [
    'GET:/api/waitlist',
    'POST:/api/feature-request',
    'GET:/api/feature-request',
+   'POST:/api/share',
+   'GET:/api/share',
+   'DELETE:/api/share',
 ];
 
 export const isAllowedApiRoute = (req: NextApiRequest): boolean => Boolean(

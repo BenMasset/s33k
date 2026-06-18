@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import db from '../../../database/database';
 import authorize from '../../../utils/authorize';
 import resolveDomainAccess from '../../../utils/domain-access';
+import { canonicalizeDomain } from '../../../utils/canonical-domain';
 import { ownerIdFor } from '../../../utils/scope';
 import type Account from '../../../database/models/account';
 import {
@@ -44,13 +45,24 @@ const startConnect = async (req: NextApiRequest, res: NextApiResponse<connectRes
    if (!req.query.domain || typeof req.query.domain !== 'string') {
       return res.status(400).json({ error: 'Domain is Missing.' });
    }
-   const domainname = (req.query.domain as string).replaceAll('-', '.').replaceAll('_', '-');
+   // Canonical-first resolution (same fix as insight.ts / searchconsole.ts): a scoped share key is
+   // GET-only and CAN reach this GET, so it must not be able to slug-decode "a-b.com" into a sibling
+   // "a.b.com" the owner also owns and start an OAuth connect on it. Resolve the canonical domain
+   // first, fall back to the legacy slug-decode only when canonical matched nothing, and bind the
+   // signed state to the RESOLVED row's domain so the callback stores the credential on the right one.
+   const canonicalDomain = canonicalizeDomain(req.query.domain);
+   const slugDecodedDomain = (req.query.domain as string).replaceAll('-', '.').replaceAll('_', '-');
 
    // Owner-only: connecting attaches a credential to the domain, so it requires WRITE access.
-   const ownedDomain = await resolveDomainAccess(account, domainname, { write: true });
+   let ownedDomain = canonicalDomain ? await resolveDomainAccess(account, canonicalDomain, { write: true }) : null;
+   if (!ownedDomain && slugDecodedDomain !== canonicalDomain) {
+      ownedDomain = await resolveDomainAccess(account, slugDecodedDomain, { write: true });
+   }
    if (!ownedDomain) {
       return res.status(403).json({ error: 'Domain not found for this account' });
    }
+   // Bind the rest of the flow (signed state, instructions) to the RESOLVED row's domain.
+   const domainname = ownedDomain.domain;
 
    // If the operator never set up the OAuth app, fail friendly instead of building a broken client.
    const config = getGSCOAuthConfig();

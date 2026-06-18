@@ -118,6 +118,10 @@ const EXPECTED_TOOLS = [
    'help',
    'request_feature',
    'list_feature_requests',
+   // Per-domain read-only sharing.
+   'share_domain',
+   'list_domain_shares',
+   'revoke_domain_share',
 ];
 
 // Genuinely mutating / side-effectful new tools NOT exercised in the default smoke.
@@ -147,6 +151,15 @@ const SKIPPED_MUTATORS = [
       name: 'delete_account_data',
       reason: 'IRREVERSIBLE: hard-deletes the entire account. Never safe in a smoke. '
          + 'Needs a dedicated throwaway account that exists only to be destroyed.',
+   },
+   {
+      name: 'share_domain',
+      reason: 'Mints a durable read-only share key scoped to a domain. '
+         + 'Needs a throwaway owned domain whose minted key can be revoked afterward.',
+   },
+   {
+      name: 'revoke_domain_share',
+      reason: 'Revokes a share key by id. Needs a known share id from a prior share_domain fixture.',
    },
 ];
 

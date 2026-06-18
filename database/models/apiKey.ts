@@ -44,6 +44,16 @@ class ApiKey extends Model {
    // Only meaningful with MULTI_TENANT on (members only exist there).
    @Column({ type: DataType.STRING, allowNull: true, defaultValue: 'admin' })
    role!: string;
+
+   // When set, this key is a per-domain SHARE key: read-only and limited to exactly ONE
+   // domain (the value here). It is minted on the domain OWNER's account, so scopeWhere(owner)
+   // and every pillar query work unchanged; authorize() applies the only new enforcement,
+   // denying any non-GET and any request whose `domain` param is not this exact value. A
+   // normal key has this null and is unrestricted (subject to its role). Nullable so every
+   // existing key keeps null and is unaffected. Only meaningful with MULTI_TENANT on.
+   // TEXT (not the default VARCHAR(255)) per the prod Postgres widen-to-TEXT convention.
+   @Column({ type: DataType.TEXT, allowNull: true })
+   scoped_domain!: string | null;
 }
 
 export default ApiKey;

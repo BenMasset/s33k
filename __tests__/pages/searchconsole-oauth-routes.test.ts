@@ -113,7 +113,7 @@ describe('GET /api/searchconsole/connect ownership gate', () => {
 describe('GET /api/searchconsole/connect configuration', () => {
    it('returns an authUrl with a signed state when configured and owned', async () => {
       asCaller({ ID: 1 });
-      mockResolveDomainAccess.mockResolvedValue({ get: () => ({ domain: 'getmasset.com' }) });
+      mockResolveDomainAccess.mockResolvedValue({ domain: 'getmasset.com', get: () => ({ domain: 'getmasset.com' }) });
       const res = makeRes();
       await connectHandler(makeReq({ query: { domain: 'getmasset.com' } }), res);
 
@@ -127,7 +127,7 @@ describe('GET /api/searchconsole/connect configuration', () => {
    it('returns a clear "not configured" message (no crash) when GSC_OAUTH_CLIENT_ID is unset', async () => {
       delete process.env.GSC_OAUTH_CLIENT_ID;
       asCaller({ ID: 1 });
-      mockResolveDomainAccess.mockResolvedValue({ get: () => ({ domain: 'getmasset.com' }) });
+      mockResolveDomainAccess.mockResolvedValue({ domain: 'getmasset.com', get: () => ({ domain: 'getmasset.com' }) });
       const res = makeRes();
       await connectHandler(makeReq({ query: { domain: 'getmasset.com' } }), res);
 

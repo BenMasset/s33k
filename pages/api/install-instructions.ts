@@ -15,6 +15,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import db from '../../database/database';
 import authorize from '../../utils/authorize';
 import resolveDomainAccess from '../../utils/domain-access';
+import { canonicalizeDomain } from '../../utils/canonical-domain';
 import type Account from '../../database/models/account';
 import { getInstallGuides, InstallGuides } from '../../utils/install-guides';
 
@@ -46,12 +47,13 @@ const getInstructions = async (
    if (!req.query.domain || typeof req.query.domain !== 'string') {
       return res.status(400).json({ error: 'Domain is Required!' });
    }
-   const domain = String(req.query.domain)
-      .trim()
-      .toLowerCase()
-      .replace(/^https?:\/\//, '')
-      .replace(/^www\./, '')
-      .replace(/\/.*$/, '');
+   // Use the shared canonicalizer so this route's lookup matches the authorize() share-key gate
+   // EXACTLY. Previously this route canonicalized inline (lowercase / strip protocol / www / path)
+   // while the gate compared the raw param, so a non-canonical scoped_domain could pass the gate
+   // and then resolve to a different (canonicalized) domain. Canonicalizing both sides the same way
+   // closes that mismatch. canonicalizeDomain is identity-preserving (no slug-decode), so it never
+   // turns "a-b.com" into "a.b.com".
+   const domain = canonicalizeDomain(req.query.domain);
 
    try {
       // Verify the caller owns the domain before exposing its install details.

@@ -2198,6 +2198,97 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// share_domain
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'share_domain',
+   {
+      title: 'Share ONE site read-only with a collaborator',
+      description:
+         'Share a SINGLE domain you OWN, read-only, with a collaborator (like sharing one Google Analytics '
+         + 'property). This mints a NEW read-only key that is LIMITED to exactly that one domain: the collaborator '
+         + 'can read its SEO rankings, analytics, and AI visibility, but cannot see any of your other domains, '
+         + 'cannot reach no-domain views (your portfolio, your domain list, your account), and cannot change '
+         + 'anything. Use it to let a teammate or client watch one site. You must OWN the domain; sharing a domain '
+         + 'you do not own is rejected. Optionally pass an email to have the connect instructions delivered '
+         + '(best-effort, when email is configured). Returns { apiKey, keyId, scopedDomain, mcpConfig, instruction, '
+         + 'emailSent }: the apiKey is shown ONCE, so give it (or the mcpConfig) to the collaborator now. Requires '
+         + 'an admin API key; a read-only key is rejected.',
+      inputSchema: {
+         domain: z.string().describe('The domain to share, e.g. "example.com". You must own it. Required.'),
+         email: z
+            .string()
+            .optional()
+            .describe('Optional email of the collaborator. If given, the connect instructions are emailed to them.'),
+      },
+   },
+   async ({ domain, email }) => {
+      try {
+         const body: Record<string, unknown> = { domain };
+         if (email) { body.email = email; }
+         const data = await s33kFetch('/api/share', { method: 'POST', body });
+         return jsonResult(data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// list_domain_shares
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'list_domain_shares',
+   {
+      title: 'List who a site is shared with',
+      description:
+         'List every read-only share you have created for ONE domain you OWN, so you can see who can currently '
+         + 'view that site. Use this to audit access before revoking. Returns { shares } where each share has ID '
+         + '(pass it to revoke_domain_share), key_prefix, name (carries the collaborator email when one was given), '
+         + 'scoped_domain, created, last_used_at, and revoked (true once revoked). You must OWN the domain; '
+         + 'requesting a domain you do not own is rejected. Requires an admin API key; a read-only key is rejected.',
+      inputSchema: {
+         domain: z.string().describe('The domain whose shares to list, e.g. "example.com". You must own it. Required.'),
+      },
+   },
+   async ({ domain }) => {
+      try {
+         const data = await s33kFetch('/api/share', { query: { domain } });
+         return jsonResult(data.shares ?? data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// revoke_domain_share
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'revoke_domain_share',
+   {
+      title: 'Revoke a read-only share',
+      description:
+         'Revoke ONE read-only share by its ID (from list_domain_shares), immediately cutting off that '
+         + 'collaborator\'s access to the shared site. Use this when someone should no longer be able to view a '
+         + 'site you shared. You can only revoke a share whose domain you OWN; a share id you do not own (or that '
+         + 'does not exist) is reported as not found, so you cannot probe other accounts\' keys. Returns '
+         + '{ revoked: true } on success. Requires an admin API key; a read-only key is rejected.',
+      inputSchema: {
+         id: z.number().describe('The share ID to revoke, from list_domain_shares. Required.'),
+      },
+   },
+   async ({ id }) => {
+      try {
+         const data = await s33kFetch('/api/share', { method: 'DELETE', query: { id: String(id) } });
+         return jsonResult(data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // export_data
 // ---------------------------------------------------------------------------
 server.registerTool(
@@ -2692,6 +2783,45 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// aeo_roi
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'aeo_roi',
+   {
+      title: 'The AI Visibility P&L: does AI search actually make me money (the flagship cross-pillar join)',
+      description:
+         'The cross-pillar report no AEO tool can produce: it closes the loop from AI crawls to '
+         + 'AI-referred traffic to conversions to revenue, PER PAGE. For a named goal it joins which AI '
+         + 'bots crawled each page, which AI engines then referred real visitors there, which of those '
+         + 'visitors converted, and what each conversion is worth, so you see the actual return on AI '
+         + 'visibility. Returns byPage (crawls, crawler engines, AI-referred sessions, conversions, AI vs '
+         + 'organic conversion rate, and revenue when the goal has a value) and opportunities (the money '
+         + 'moves: pages AI crawls but never refers, pages where AI out-converts organic, and pages AI '
+         + 'sends traffic to that never convert). Honest by design: when a layer has no data (e.g. the AI '
+         + 'crawler feed is not populated yet) it says so rather than fabricate a rate. Requires the '
+         + 'tracking script installed and at least one goal.',
+      inputSchema: {
+         domain: z.string().describe('The domain, e.g. "getmasset.com".'),
+         period: z.string().optional().describe('Reporting window, e.g. "30d". Defaults to "30d".'),
+         goal: z.string().optional().describe('The goal NAME (or pass goalId), e.g. "Demo Booked".'),
+         goalId: z.number().optional().describe('The goal id (alternative to goal name).'),
+      },
+   },
+   async ({ domain, period, goal, goalId }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         if (goal) { query.goal = goal; }
+         if (goalId !== undefined) { query.goalId = String(goalId); }
+         const data = await s33kFetch('/api/aeo-roi', { query });
+         return jsonResult({ goal: data.goal, aeoRoi: data.aeoRoi, note: data.note, error: data.error });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // MCP resources: listable/readable knowledge docs.
 //
 // These expose the SAME single product-knowledge source the `help` tool reads, so a client can
@@ -2774,7 +2904,7 @@ async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
    process.stderr.write(
-      `s33k-mcp connected (base URL: ${BASE_URL}). 72 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
+      `s33k-mcp connected (base URL: ${BASE_URL}). 76 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
    );
 }
 

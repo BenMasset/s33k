@@ -28,6 +28,11 @@ export type ResolvedAccount = {
    // read-only member key (internal-invite seat). Undefined when no key resolved. authorize()
    // reads this to reject writes from member keys. Only members exist with MULTI_TENANT on.
    role?: 'admin' | 'member',
+   // When set, the authorizing key is a per-domain SHARE key: read-only and limited to exactly
+   // this one domain. authorize() enforces it (GET-only AND req.query.domain === scopedDomain).
+   // Null/undefined for legacy, cookie, admin, and ordinary per-account keys (the unrestricted
+   // case). Only ever set with MULTI_TENANT on, where the per-account key path runs.
+   scopedDomain?: string | null,
    error?: string,
 };
 
@@ -115,7 +120,12 @@ const resolveAccount = async (req: NextApiRequest, res: NextApiResponse): Promis
             // Surface the key's role so authorize() can hold a member key to GET-only.
             // Legacy keys (and keys minted before the role column existed) default to admin.
             const role: 'admin' | 'member' = candidate.role === 'member' ? 'member' : 'admin';
-            return { authorized: true, account, role };
+            // Surface the key's scoped_domain so authorize() can enforce the per-domain share
+            // restriction. A normal key has null here (no restriction); a share key carries the
+            // one domain it may read. Keys minted before the column existed read undefined,
+            // which is treated as null (unrestricted), identical to today.
+            const scopedDomain: string | null = candidate.scoped_domain ?? null;
+            return { authorized: true, account, role, scopedDomain };
          }
       }
       return { authorized: false, account: null, error: 'Invalid API Key Provided.' };
