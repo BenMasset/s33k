@@ -20,6 +20,8 @@ export const allowedApiRoutes = [
    'POST:/api/notify',
    'POST:/api/searchconsole',
    'GET:/api/searchconsole',
+   'DELETE:/api/searchconsole',
+   'GET:/api/searchconsole/connect',
    'GET:/api/insight',
    'GET:/api/insights',
    'GET:/api/scoreboard',

@@ -192,9 +192,23 @@ const capabilities: CapabilityEntry[] = [
       toolName: 'get_insight',
       category: 'seo',
       title: 'Get Search Console insight',
-      description: 'Reads Google Search Console insight for a domain: top pages, top keywords, top countries, and aggregate stats.',
+      description: 'Reads Google Search Console insight for a domain: top pages, top keywords, top countries, and aggregate stats. Once Search Console '
+         + 'is connected (see connect_search_console), this returns the real queries each page actually ranks for, the authoritative answer to '
+         + '"what am I ranking for".',
       whenToUse: 'Use for real impression and click data from Google, beyond the keywords you explicitly track. Requires Search Console connected.',
       examplePrompt: 'What are my top Search Console pages for getmasset.com?',
+   },
+   {
+      id: 'connect_search_console',
+      toolName: 'connect_search_console',
+      category: 'onboarding',
+      title: 'Connect Google Search Console',
+      description: 'Starts the click-to-authorize Google Search Console connection for a domain you own and returns a Google consent link. Approving '
+         + 'it lets s33k read your real Search Console data, so get_insight returns the real queries each page ranks for, the authoritative answer '
+         + 'to "what am I ranking for". This replaces pasting a service-account JSON: you just click the link and approve.',
+      whenToUse: 'Use when a user wants their real Google ranking queries, or get_insight reports Search Console is not integrated. Connecting '
+         + 'requires write access to the domain (you must own it). Show the user the returned link to open and approve.',
+      examplePrompt: 'Connect Google Search Console for getmasset.com.',
    },
    // --- AEO (AI answer-engine visibility) ---
    {

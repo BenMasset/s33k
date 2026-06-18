@@ -20,8 +20,8 @@ hard-won lesson, so the next session never relearns it.
   line: `export NVM_DIR="$HOME/.nvm"; source "$NVM_DIR/nvm.sh"; nvm use 20 >/dev/null 2>&1;`
 - **Tests:** `npx jest --ci` (one-shot). `npm run test` is WATCH mode, do not use it for verification.
 - **Lint:** `npm run lint` must be clean. **Build:** `npm run build` must print "Compiled successfully".
-- **MCP server:** `cd mcp && npm run build`, then probe over a real stdio handshake. 71 tools + 5
-  resources today. Banner reads "71 tools and 5 resources registered." Smoke harness: `npm run smoke`
+- **MCP server:** `cd mcp && npm run build`, then probe over a real stdio handshake. 72 tools + 5
+  resources today. Banner reads "72 tools and 5 resources registered." Smoke harness: `npm run smoke`
   from `mcp/`.
 - **Do not touch a running dev server or `.env`.** `.env` is gitignored and must stay untracked.
 
@@ -110,6 +110,27 @@ hard-won lesson, so the next session never relearns it.
   a micro-optimization not worth a prod-breaking footgun. To reproduce a bundle-only bug like this:
   `npm run build`, copy `data/database.sqlite` into `.next/standalone/data/`, `export
   ANALYTICS_PROVIDER=umami`, run `node .next/standalone/server.js`, and curl the route.
+
+### OAuth callbacks are public routes secured by a SIGNED state, not the API-key whitelist
+- The "Connect Google Search Console" flow is two routes: `/api/searchconsole/connect` (GET,
+  authed + owner-gated via `resolveDomainAccess(account, domain, { write: true })`) returns a Google
+  consent URL, and `/api/searchconsole/callback` (GET) is hit by GOOGLE's redirect with NO API key
+  and NO cookie. The callback therefore SKIPS `authorize()` (the same pattern `pages/api/adwords.ts`
+  uses for its GET-with-code callback) and is NOT in `allowedApiRoutes.ts`. Do not add it; whitelisting
+  a route the callback bypasses would be cargo-culting.
+- Security is re-established by a SIGNED state: `/connect` signs a compact state (HMAC-SHA256 of the
+  domain + owner id + nonce + timestamp, keyed by the app SECRET) in `utils/searchConsoleOAuth.ts`.
+  `/callback` re-verifies that signature (constant-time compare, 15-minute TTL) before trusting the
+  domain/owner. The state carries NO secret. The refresh token (the actual secret) is exchanged
+  server-side and stored cryptr-encrypted on the owned Domain's `search_console` blob under
+  `oauth_refresh_token`, scoped to `{ domain, owner_id }` from the verified state, so a forged state
+  for a domain you do not own resolves to no row and stores nothing.
+- The SC read path (`utils/searchConsole.ts`) prefers the OAuth refresh token (build an
+  `OAuth2Client`, `setCredentials({ refresh_token })`) and falls back to the service-account JWT when
+  there is none. Keep that fallback: it is the back-compat path for the env/service-account setup.
+- The two OAuth env vars are `GSC_OAUTH_CLIENT_ID` / `GSC_OAUTH_CLIENT_SECRET`; the redirect URI is
+  `${NEXT_PUBLIC_APP_URL}/api/searchconsole/callback`. If they are unset, `/connect` returns a
+  friendly "not configured" message, it does not crash.
 
 ### No server-side LLM, ever (a verified-true trust property)
 - The AI features (`briefing`, `insights`, `ai_visibility`, `alerts`, `entry_pages`) are

@@ -251,6 +251,40 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// connect_search_console
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'connect_search_console',
+   {
+      title: 'Connect Google Search Console',
+      description:
+         'Start the click-to-authorize Google Search Console connection for a domain you own. Returns a Google consent link to open and approve, '
+         + 'plus a one-line instruction to show the user. Once approved, get_insight returns the real queries each page actually ranks for, the '
+         + 'authoritative answer to "what am I ranking for". This replaces pasting a service-account JSON. Connecting requires write access to the '
+         + 'domain. If the instance has no GSC OAuth app configured, the response says so.',
+      inputSchema: {
+         domain: z.string().describe('The domain to connect Google Search Console for, e.g. "getmasset.com". You must own it.'),
+      },
+   },
+   async ({ domain }) => {
+      try {
+         const data = await s33kFetch('/api/searchconsole/connect', { query: { domain } });
+         if (data && data.authUrl) {
+            return jsonResult({
+               authUrl: data.authUrl,
+               instruction: 'Open this link to connect Google Search Console, approve access, then come back.',
+               details: data.instructions,
+            });
+         }
+         // No authUrl means OAuth is not configured (or another soft error); surface the message.
+         return jsonResult(data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // page_scoreboard
 // ---------------------------------------------------------------------------
 server.registerTool(
@@ -2740,7 +2774,7 @@ async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
    process.stderr.write(
-      `s33k-mcp connected (base URL: ${BASE_URL}). 71 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
+      `s33k-mcp connected (base URL: ${BASE_URL}). 72 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
    );
 }
 

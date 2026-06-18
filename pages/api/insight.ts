@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import db from '../../database/database';
 import { getCountryInsight, getKeywordsInsight, getPagesInsight } from '../../utils/insight';
-import { fetchDomainSCData, getSearchConsoleApiInfo, readLocalSCData } from '../../utils/searchConsole';
+import { fetchDomainSCData, getSearchConsoleApiInfo, readLocalSCData, hasSearchConsoleCredentials } from '../../utils/searchConsole';
 import authorize from '../../utils/authorize';
 import resolveDomainAccess from '../../utils/domain-access';
 import type Account from '../../database/models/account';
@@ -60,7 +60,7 @@ const getDomainSearchConsoleInsight = async (req: NextApiRequest, res: NextApiRe
    try {
       const domainObj: DomainType = ownedDomain.get({ plain: true });
       const scDomainAPI = await getSearchConsoleApiInfo(domainObj);
-      if (!(scDomainAPI.client_email && scDomainAPI.private_key)) {
+      if (!hasSearchConsoleCredentials(scDomainAPI)) {
          return res.status(200).json({ data: null, error: 'Google Search Console is not Integrated.' });
       }
       const scData = await fetchDomainSCData(domainObj, scDomainAPI);

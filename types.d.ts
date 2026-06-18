@@ -101,6 +101,10 @@ type DomainSearchConsole = {
    url: string,
    client_email:string,
    private_key:string,
+   // Encrypted (cryptr + SECRET) Google OAuth refresh token set by the click-to-authorize GSC
+   // flow (/api/searchconsole/connect -> /callback). When present, the SC reads use OAuth instead
+   // of the service-account JWT. Additive and optional, so existing blobs stay valid.
+   oauth_refresh_token?: string,
 }
 
 type DomainSettings = {
