@@ -37,6 +37,7 @@ jest.mock('../../database/models/s33kEvent', () => modelStub);
 jest.mock('../../database/models/featureRequest', () => modelStub);
 jest.mock('../../database/models/goal', () => modelStub);
 jest.mock('../../database/models/segment', () => modelStub);
+jest.mock('../../database/models/promptCheck', () => modelStub);
 
 describe('ensureSynced', () => {
    beforeEach(() => {

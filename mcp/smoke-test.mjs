@@ -135,6 +135,10 @@ const EXPECTED_TOOLS = [
    'page_scoreboard',
    'period_compare',
    'portfolio_summary',
+   'prompt_list',
+   'prompt_radar',
+   'prompt_record',
+   'prompt_track',
    'refresh_keywords',
    'request_feature',
    'revoke_domain_share',
@@ -196,6 +200,16 @@ const SKIPPED_MUTATORS = [
    {
       name: 'revoke_domain_share',
       reason: 'Revokes a share key by id. Needs a known share id from a prior share_domain fixture.',
+   },
+   {
+      name: 'prompt_track',
+      reason: 'Writes a durable tracked-prompt row on the read domain. '
+         + 'Needs a fixture that deletes the created prompt_check id afterward; not driven in the default smoke.',
+   },
+   {
+      name: 'prompt_record',
+      reason: 'Mutates a tracked-prompt row with a citation result. '
+         + 'Needs a known prompt_check id from a prior prompt_track fixture; not driven in the default smoke.',
    },
 ];
 
@@ -457,6 +471,8 @@ async function main() {
    await callAndAssert(client, 'scroll_depth', { domain: READ_DOMAIN, period: PERIOD });
    await callAndAssert(client, 'page_engagement', { domain: READ_DOMAIN, period: PERIOD });
    await callAndAssert(client, 'causal_links', { domain: READ_DOMAIN, period: PERIOD });
+   await callAndAssert(client, 'prompt_list', { domain: READ_DOMAIN });
+   await callAndAssert(client, 'prompt_radar', { domain: READ_DOMAIN, period: PERIOD });
 
    // 3d. Knowledge / account / trust read tools. These take no domain (or a
    // static question) and are pure reads. help and security_facts have no

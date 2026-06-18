@@ -242,6 +242,53 @@ const capabilities: CapabilityEntry[] = [
          + 'engines as the work to do.',
       examplePrompt: 'How visible is getmasset.com in AI search, and where are the gaps?',
    },
+   {
+      id: 'prompt_track',
+      toolName: 'prompt_track',
+      category: 'aeo',
+      title: 'Track a buyer prompt to watch for AI citations',
+      description: 'Saves a buyer prompt (e.g. "best AI-ready DAM for B2B marketing teams") to watch for AI-engine citations. It only STORES the '
+         + 'prompt: s33k has NO server-side LLM and never queries an AI engine itself. After tracking, YOU (the assistant) run the prompt against '
+         + 'the engines and record what you find with prompt_record.',
+      whenToUse: 'Use to start watching whether AI engines cite this site for a buyer prompt that matters. Track the prompts your buyers actually '
+         + 'ask, then run and record them.',
+      examplePrompt: 'Track the buyer prompt "best AI-ready DAM for B2B marketing teams" for getmasset.com.',
+   },
+   {
+      id: 'prompt_record',
+      toolName: 'prompt_record',
+      category: 'aeo',
+      title: 'Record an AI-citation result for a tracked prompt',
+      description: 'After YOU (the assistant) query an AI engine (ChatGPT, Claude, Perplexity, Gemini) with a tracked prompt, call this to record '
+         + 'whether s33k\'s domain was cited, at what position, and the cited URL. s33k does NOT query engines itself: it has no server-side LLM, so '
+         + 'this is how a result enters s33k. Target the prompt by id or by domain+prompt.',
+      whenToUse: 'Use right after you run a tracked prompt against an AI engine, to save what you saw (cited or not, position, the cited URL) so '
+         + 'prompt_radar can join it to conversions. You supply the result; s33k stores it.',
+      examplePrompt: 'I asked ChatGPT that prompt and it cited getmasset.com/software at position 2: record that.',
+   },
+   {
+      id: 'prompt_list',
+      toolName: 'prompt_list',
+      category: 'aeo',
+      title: 'List tracked buyer prompts and their results',
+      description: 'Lists a domain\'s tracked buyer prompts and the latest recorded citation result for each (engine, cited or not, position, cited '
+         + 'URL, when checked). Prompts with no result yet show as not-yet-recorded.',
+      whenToUse: 'Use to see which buyer prompts are being watched and which still need you to run and record them with prompt_record.',
+      examplePrompt: 'What buyer prompts am I tracking for getmasset.com, and which have results?',
+   },
+   {
+      id: 'prompt_radar',
+      toolName: 'prompt_radar',
+      category: 'aeo',
+      title: 'Prompt radar: AI citations joined to conversions',
+      description: 'The money join only s33k can do: for the tracked buyer prompts that have a RECORDED citation, it joins each cited page to that '
+         + 'page\'s conversion count and rate (when a goal is named) and its AI-referral sessions, from owned first-party data. It surfaces the gap '
+         + 'between being cited and converting (e.g. "your best-converting page is cited in 0 of your buyer prompts", or "you are cited in N of M '
+         + 'prompts"). Honest when nothing is recorded yet. s33k never queries an engine; it narrates results the user\'s LLM recorded.',
+      whenToUse: 'Use to answer "are AI engines citing me for my buyer prompts, and do those cited pages actually convert?" Pass a goal to fold in '
+         + 'conversion rate per cited page. Track and record prompts first (prompt_track, then prompt_record) so there is data to join.',
+      examplePrompt: 'For getmasset.com, are AI engines citing me for my buyer prompts, and do those cited pages convert my Demo Booked goal?',
+   },
    // --- Analytics (traffic + autocapture engagement) ---
    {
       id: 'traffic_summary',

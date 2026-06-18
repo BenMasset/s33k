@@ -12,8 +12,9 @@ import S33kEvent from './models/s33kEvent';
 import FeatureRequest from './models/featureRequest';
 import Goal from './models/goal';
 import Segment from './models/segment';
+import PromptCheck from './models/promptCheck';
 
-const models = [Domain, Keyword, CrawlerHit, Account, ApiKey, Invite, Waitlist, S33kEvent, FeatureRequest, Goal, Segment];
+const models = [Domain, Keyword, CrawlerHit, Account, ApiKey, Invite, Waitlist, S33kEvent, FeatureRequest, Goal, Segment, PromptCheck];
 const pool = { max: 5, min: 0, idle: 10000 };
 
 // Use Postgres when DATABASE_URL is set (hosted deploy), otherwise SQLite (local dev).

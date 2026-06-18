@@ -757,6 +757,144 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// prompt_track
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'prompt_track',
+   {
+      title: 'Track a buyer prompt to watch for AI citations',
+      description:
+         'Save a buyer prompt (e.g. "best AI-ready DAM for B2B marketing teams") to watch for '
+         + 'AI-engine citations. This ONLY STORES the prompt: s33k has NO server-side LLM and NEVER '
+         + 'queries an AI engine itself. After tracking, YOU (the assistant) run the prompt against the '
+         + 'engines (ChatGPT, Claude, Perplexity, Gemini) and record what you find with prompt_record. '
+         + 'Track the prompts your buyers actually ask.',
+      inputSchema: {
+         domain: z.string().describe('The domain the prompt is tracked for, e.g. "getmasset.com".'),
+         prompt: z.string().describe('The buyer prompt to watch, e.g. "best AI-ready DAM for B2B marketing teams".'),
+      },
+   },
+   async ({ domain, prompt }) => {
+      try {
+         const data = await s33kFetch('/api/prompt-checks', { method: 'POST', body: { domain, prompt } });
+         return jsonResult({ promptCheck: data.promptCheck, error: data.error });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// prompt_record
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'prompt_record',
+   {
+      title: 'Record an AI-citation result for a tracked prompt',
+      description:
+         'After YOU (the assistant) query an AI engine with a tracked prompt, call this to record '
+         + 'whether s33k\'s domain was cited, at what position, and the cited URL. s33k does NOT query '
+         + 'engines itself: it has no server-side LLM, so this is the ONLY way a citation result enters '
+         + 's33k. You supply the result; s33k stores it. Target the prompt by id (from prompt_list) or by '
+         + 'domain+prompt. When cited is false, position and cited_url are ignored.',
+      inputSchema: {
+         id: z.number().optional().describe('The tracked prompt id (from prompt_list). Alternative to domain+prompt.'),
+         domain: z.string().optional().describe('The domain (with prompt) to identify the tracked prompt, if no id.'),
+         prompt: z.string().optional().describe('The tracked prompt text (with domain) to identify it, if no id.'),
+         engine: z.enum(['chatgpt', 'claude', 'perplexity', 'gemini', 'copilot']).describe('The AI engine you queried.'),
+         cited: z.boolean().describe('Was this domain cited in the engine\'s answer?'),
+         position: z.number().optional().describe('Citation position (1 = first cited source), when cited and known.'),
+         cited_url: z.string().optional().describe('The exact URL the engine cited for this domain, when given.'),
+      },
+   },
+   async ({ id, domain, prompt, engine, cited, position, cited_url: citedUrl }) => {
+      try {
+         const body: Record<string, unknown> = { engine, cited };
+         if (id !== undefined) { body.id = id; }
+         if (domain) { body.domain = domain; }
+         if (prompt) { body.prompt = prompt; }
+         if (position !== undefined) { body.position = position; }
+         if (citedUrl) { body.cited_url = citedUrl; }
+         const data = await s33kFetch('/api/prompt-record', { method: 'POST', body });
+         return jsonResult({ updated: data.updated, promptCheck: data.promptCheck, error: data.error });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// prompt_list
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'prompt_list',
+   {
+      title: 'List tracked buyer prompts and their results',
+      description:
+         'List a domain\'s tracked buyer prompts and the latest recorded citation result for each '
+         + '(engine, cited or not, position, cited URL, when checked). Prompts with no result yet show as '
+         + 'not-yet-recorded, the ones still needing you to run and record them with prompt_record.',
+      inputSchema: {
+         domain: z.string().describe('The domain whose tracked prompts to list, e.g. "getmasset.com".'),
+      },
+   },
+   async ({ domain }) => {
+      try {
+         const data = await s33kFetch('/api/prompt-checks', { query: { domain } });
+         return jsonResult({ promptChecks: data.promptChecks, error: data.error });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// prompt_radar
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'prompt_radar',
+   {
+      title: 'Prompt radar: AI citations joined to conversions (the cross-pillar money join)',
+      description:
+         'The money join only s33k can do: for the tracked buyer prompts that have a RECORDED citation, '
+         + 'it joins each cited page to that page\'s conversion count and rate (when a goal is named) and '
+         + 'its AI-referral sessions, all from owned first-party data. It surfaces the gap between being '
+         + 'CITED and CONVERTING (e.g. "you are cited in N of M prompts", "your best-converting cited page '
+         + 'is X", or "none of the cited pages converted"). Honest when nothing is recorded yet. s33k NEVER '
+         + 'queries an engine: it narrates the results YOU recorded with prompt_record. Track and record '
+         + 'prompts first so there is data to join.',
+      inputSchema: {
+         domain: z.string().describe('The domain, e.g. "getmasset.com".'),
+         period: z.string().optional().describe('Reporting window for the conversion/referral join, e.g. "30d". Defaults to "30d".'),
+         goal: z.string().optional().describe('A goal NAME (or pass goalId) to join conversion rate per cited page, e.g. "Demo Booked".'),
+         goalId: z.number().optional().describe('The goal id (alternative to goal name).'),
+      },
+   },
+   async ({ domain, period, goal, goalId }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         if (goal) { query.goal = goal; }
+         if (goalId !== undefined) { query.goalId = String(goalId); }
+         const data = await s33kFetch('/api/prompt-radar', { query });
+         return jsonResult({
+            domain: data.domain,
+            period: data.period,
+            goal: data.goal,
+            summary: data.summary,
+            citedFor: data.citedFor,
+            uncited: data.uncited,
+            moneyInsight: data.moneyInsight,
+            note: data.note,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // causal_links
 // ---------------------------------------------------------------------------
 server.registerTool(
@@ -2994,7 +3132,7 @@ async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
    process.stderr.write(
-      `s33k-mcp connected (base URL: ${BASE_URL}). 78 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
+      `s33k-mcp connected (base URL: ${BASE_URL}). 82 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
    );
 }
 
