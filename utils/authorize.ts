@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import resolveAccount, { ResolvedAccount } from './resolveAccount';
-import { isAllowedApiRoute } from './allowedApiRoutes';
+import { isAllowedApiRoute, isScopedKeyAllowedRoute } from './allowedApiRoutes';
 import { canonicalizeDomain } from './canonical-domain';
 
 // authorize is the multi-tenant-aware entry point for data routes. It resolves the
@@ -21,27 +21,32 @@ const authorize = async (req: NextApiRequest, res: NextApiResponse): Promise<Res
       return { authorized: false, account: null, error: 'Read-only member' };
    }
 
-   // Per-domain SHARE key enforcement (the ONLY new enforcement for the sharing feature).
-   // A share key lives on the OWNER's account, so scopeWhere(owner) and every pillar query
-   // already work unchanged; the restriction is applied here, centrally, AFTER resolution.
-   // A scoped key carries the single domain it may read; anything else is denied.
-   //   - It is READ-ONLY regardless of role: reject any non-GET (same shape as the member
-   //     rejection above). Defense in depth even though share keys are minted as members.
-   //   - The request MUST target that exact domain. We CANONICALIZE both req.query.domain and the
-   //     scoped domain and 403 unless they are equal. Canonicalizing both sides (instead of a raw
-   //     byte compare) closes the normalization-mismatch escape: a route that re-derived the domain
-   //     after this gate (slug-decode, www/protocol strip) used to check one string and look up a
-   //     DIFFERENT one, letting a scoped key for "a-b.com" reach the sibling "a.b.com". Now the gate
-   //     and every fixed route reason over the same canonical form, so they cannot diverge. A
-   //     missing/array/non-string domain canonicalizes to '' and is denied, which keeps the prior
-   //     behavior of blocking every no-domain route (portfolio, domains list, account, me, briefing
-   //     without a domain) and every other domain.
-   // Scoped keys only exist with MULTI_TENANT on (the per-account key path), so the flag-off
-   // path never reaches here. When in doubt this path DENIES.
+   // Per-domain SHARE key enforcement. A share key (resolved.scopedDomain set) is the highest-risk
+   // credential s33k mints: a read-only link to ONE domain's data. The enforcement here is a POSITIVE
+   // ALLOWLIST, not a blacklist-by-presence. The prior gate only checked that ?domain= matched the
+   // scoped domain, which let a share key reach routes that IGNORE req.query.domain (export, portfolio,
+   // domains GET, account, me, invite, ...) and return account- or instance-wide data via
+   // scopeWhere(account). Worse, a share key minted on the admin account inherited admin scope (we now
+   // also strip that in resolveAccount, defense in depth), so those routes dumped the whole instance.
+   // A scoped key is now allowed ONLY when ALL of the following hold; any failure DENIES:
+   //   1. The method is GET. Share keys never write (same shape as the member rejection above).
+   //   2. The route is in the curated positive allowlist of per-domain-gated GET reads
+   //      (isScopedKeyAllowedRoute). Anything not proven to gate on req.query.domain is denied.
+   //   3. The canonical ?domain= equals the key's canonical scoped_domain. We canonicalize BOTH
+   //      sides (not a raw byte compare) to close the normalization-mismatch escape: a route that
+   //      re-derived the domain after this gate (slug-decode, www/protocol strip) used to check one
+   //      string and look up a DIFFERENT one, letting a scoped key for "a-b.com" reach the sibling
+   //      "a.b.com". Now the gate and every fixed route reason over the same canonical form. A
+   //      missing / array / non-string domain canonicalizes to '' and is denied.
+   // Scoped keys only exist with MULTI_TENANT on (the per-account key path), so the flag-off path
+   // never reaches here. When in doubt this path DENIES.
    const { scopedDomain } = resolved;
    if (scopedDomain) {
       if (req.method !== 'GET') {
          return { authorized: false, account: null, error: 'Read-only member' };
+      }
+      if (!isScopedKeyAllowedRoute(req)) {
+         return { authorized: false, account: null, error: 'This Route cannot be accessed with a share key.' };
       }
       const requestedDomain = canonicalizeDomain(req.query.domain);
       if (!requestedDomain || requestedDomain !== canonicalizeDomain(scopedDomain)) {

@@ -4,7 +4,7 @@ import Account from '../../database/models/account';
 import ApiKey from '../../database/models/apiKey';
 import authorize from '../../utils/authorize';
 import ensureAdminAccount from '../../utils/ensureAdminAccount';
-import { ADMIN_ACCOUNT_ID } from '../../utils/scope';
+import { isAdminAccount } from '../../utils/scope';
 import { generateApiKey, hashApiKey, apiKeyPrefix } from '../../utils/resolveAccount';
 
 // Account-management routes. These are ADMIN-only: only the seeded admin account
@@ -33,7 +33,10 @@ type AccountListRes = {
    error?: string | null,
 };
 
-const isAdmin = (account: Account | null | undefined): boolean => Boolean(account) && account!.ID === ADMIN_ACCOUNT_ID;
+// Admin gate routes through isAdminAccount (utils/scope.ts): the admin sentinel id, but NEVER a
+// scoped share-key account (which can be minted on the admin account and would otherwise inherit
+// admin rights). Belt: the share-key route allowlist already denies this route entirely.
+const isAdmin = isAdminAccount;
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
    await db.sync();

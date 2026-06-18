@@ -109,13 +109,16 @@ describe('authorize() per-domain share-key enforcement', () => {
       expect(result.error).toBe(`This key is limited to ${SCOPED_DOMAIN}.`);
    });
 
-   it('REJECTS a GET on a NO-DOMAIN route (no domain param to match)', async () => {
-      // Portfolio/domains/account/me carry no domain param, so the share key cannot reach them.
+   it('REJECTS a GET on a NO-DOMAIN route (not in the scoped-key allowlist)', async () => {
+      // Portfolio/domains/account/me are NOT per-domain-gated, so they are excluded from the
+      // scoped-key allowlist. The allowlist check runs before the domain-equality check, so the
+      // denial reason is the route rejection (this route now denies even WITH a ?domain= present,
+      // which is the whole point of the positive-allowlist fix).
       const result = await authorize(makeReq('GET', '/api/portfolio', {}), makeRes());
 
       expect(result.authorized).toBe(false);
       expect(result.account).toBeNull();
-      expect(result.error).toBe(`This key is limited to ${SCOPED_DOMAIN}.`);
+      expect(result.error).toBe('This Route cannot be accessed with a share key.');
    });
 
    it.each(['POST', 'PUT', 'DELETE'])('REJECTS a %s even when it targets the scoped domain (read-only)', async (method) => {

@@ -4,7 +4,7 @@ import Account from '../../database/models/account';
 import FeatureRequest from '../../database/models/featureRequest';
 import authorize from '../../utils/authorize';
 import ensureAdminAccount from '../../utils/ensureAdminAccount';
-import { ADMIN_ACCOUNT_ID, ownerIdFor } from '../../utils/scope';
+import { isAdminAccount, ownerIdFor } from '../../utils/scope';
 import { crossCheckCapability } from '../../utils/knowledge';
 import { notifyFeatureRequest } from '../../utils/notify-feature-request';
 
@@ -72,8 +72,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return createRequest(req, res, account);
    }
    if (req.method === 'GET') {
-      // ADMIN-only read of every account's requests.
-      if (account.ID !== ADMIN_ACCOUNT_ID) {
+      // ADMIN-only read of every account's requests. isAdminAccount is the admin sentinel id
+      // but never a scoped share-key account, so a share key minted on the admin account cannot
+      // read every tenant's feature requests here (belt: the share-key allowlist already denies
+      // this route).
+      if (!isAdminAccount(account)) {
          return res.status(403).json({ error: 'Admin access required.' });
       }
       return listRequests(req, res);

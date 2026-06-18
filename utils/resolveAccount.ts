@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import Account from '../database/models/account';
 import ApiKey from '../database/models/apiKey';
-import { ADMIN_ACCOUNT_ID, isMultiTenantEnabled } from './scope';
+import { ADMIN_ACCOUNT_ID, isMultiTenantEnabled, markScopedAccount } from './scope';
 
 // resolveAccount is the multi-tenant sibling of verifyUser. It resolves the calling
 // Bearer API key (or cookie session) to an Account, defaulting to the seeded admin
@@ -117,14 +117,20 @@ const resolveAccount = async (req: NextApiRequest, res: NextApiResponse): Promis
             } catch (saveError) {
                // ignore
             }
-            // Surface the key's role so authorize() can hold a member key to GET-only.
-            // Legacy keys (and keys minted before the role column existed) default to admin.
-            const role: 'admin' | 'member' = candidate.role === 'member' ? 'member' : 'admin';
             // Surface the key's scoped_domain so authorize() can enforce the per-domain share
             // restriction. A normal key has null here (no restriction); a share key carries the
             // one domain it may read. Keys minted before the column existed read undefined,
             // which is treated as null (unrestricted), identical to today.
             const scopedDomain: string | null = candidate.scoped_domain ?? null;
+            // Surface the key's role so authorize() can hold a member key to GET-only.
+            // Legacy keys (and keys minted before the role column existed) default to admin.
+            // A SHARE key (scopedDomain set) is forced to 'member' regardless of its stored role:
+            // it is a read-only per-domain link and must never carry the admin role, even if it was
+            // minted on the admin account (whose owned domains have owner_id null). We also stamp the
+            // non-enumerable scoped marker so isAdminAccount() treats it as a non-admin everywhere,
+            // closing the admin-identity-inheritance leak (defense in depth behind the route allowlist).
+            const role: 'admin' | 'member' = (scopedDomain || candidate.role === 'member') ? 'member' : 'admin';
+            if (scopedDomain) { markScopedAccount(account); }
             return { authorized: true, account, role, scopedDomain };
          }
       }

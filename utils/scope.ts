@@ -34,3 +34,37 @@ export const ownerIdFor = (account: Account | null | undefined): number | null =
    if (!account || account.ID === ADMIN_ACCOUNT_ID) { return null; }
    return account.ID;
 };
+
+// A SCOPED account is the account a read-only per-domain SHARE key resolves to. The share
+// key is minted on the domain OWNER's account, which can be the seeded ADMIN account (a
+// domain with owner_id null belongs to admin). We deliberately do NOT change account.ID for
+// a share key, because scopeWhere/ownerIdFor must keep resolving the owner's data correctly
+// (the allowlisted per-domain routes isolate by the globally-unique domain name). Instead we
+// tag the resolved Account object with a non-enumerable __scoped marker so PRIVILEGE checks
+// (isAdminAccount) can treat it as a non-admin member, while data-scoping stays unchanged.
+//
+// SCOPED_MARKER is a Symbol so it cannot collide with any model attribute and is not
+// serialized by get({ plain: true }) / JSON.stringify, so it never leaks into a response.
+export const SCOPED_MARKER = Symbol('s33kScopedAccount');
+
+// markScopedAccount stamps the non-enumerable scoped marker on an Account object and returns
+// it. Called by resolveAccount when a share key authorizes, so every downstream isAdminAccount
+// check sees a non-admin even though account.ID is still the (admin) owner's id.
+export const markScopedAccount = <T extends object>(account: T): T => {
+   Object.defineProperty(account, SCOPED_MARKER, { value: true, enumerable: false, configurable: true, writable: false });
+   return account;
+};
+
+// isScopedAccount is true only for the share-key account tagged by markScopedAccount.
+export const isScopedAccount = (account: Account | null | undefined): boolean => Boolean(
+   account && (account as unknown as Record<symbol, unknown>)[SCOPED_MARKER] === true,
+);
+
+// isAdminAccount is the single privilege predicate for "may this caller use admin-only routes
+// (list/create accounts, read every feature request, read the waitlist)". It is the admin
+// sentinel check account.ID === ADMIN_ACCOUNT_ID, EXCEPT a scoped share-key account is NEVER
+// admin even when its id is the admin id. Use this everywhere an admin gate is needed instead
+// of an inline account.ID === ADMIN_ACCOUNT_ID, so a share key can never inherit admin rights.
+export const isAdminAccount = (account: Account | null | undefined): boolean => Boolean(
+   account && account.ID === ADMIN_ACCOUNT_ID && !isScopedAccount(account),
+);

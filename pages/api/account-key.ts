@@ -4,7 +4,7 @@ import Account from '../../database/models/account';
 import ApiKey from '../../database/models/apiKey';
 import authorize from '../../utils/authorize';
 import ensureAdminAccount from '../../utils/ensureAdminAccount';
-import { ADMIN_ACCOUNT_ID } from '../../utils/scope';
+import { isAdminAccount } from '../../utils/scope';
 import { generateApiKey, hashApiKey, apiKeyPrefix } from '../../utils/resolveAccount';
 
 // API-key management. Minting an extra key (POST) and revoking a key (DELETE) is allowed
@@ -26,7 +26,10 @@ type KeyDeleteRes = {
    error?: string | null,
 };
 
-const isAdmin = (account: Account | null | undefined): boolean => Boolean(account) && account!.ID === ADMIN_ACCOUNT_ID;
+// Admin gate routes through isAdminAccount (utils/scope.ts): the admin sentinel id, but NEVER a
+// scoped share-key account. Belt: share keys are GET-only and this route is POST/DELETE, so a
+// scoped key never reaches here; the predicate is hardened anyway for defense in depth.
+const isAdmin = isAdminAccount;
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
    await db.sync();

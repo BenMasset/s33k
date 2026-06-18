@@ -1,10 +1,9 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import db from '../../database/database';
-import Account from '../../database/models/account';
 import Waitlist from '../../database/models/waitlist';
 import authorize from '../../utils/authorize';
 import ensureAdminAccount from '../../utils/ensureAdminAccount';
-import { ADMIN_ACCOUNT_ID } from '../../utils/scope';
+import { isAdminAccount } from '../../utils/scope';
 
 // Waitlist routes.
 //
@@ -67,7 +66,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (!authorized || !account) {
          return res.status(401).json({ error: error || 'Not authorized' });
       }
-      if (account.ID !== ADMIN_ACCOUNT_ID) {
+      // isAdminAccount is the admin sentinel id but never a scoped share-key account, so a share
+      // key minted on the admin account cannot read the waitlist (belt: the share-key allowlist
+      // already denies this GET route).
+      if (!isAdminAccount(account)) {
          return res.status(403).json({ error: 'Admin access required.' });
       }
       return listWaitlist(res);
