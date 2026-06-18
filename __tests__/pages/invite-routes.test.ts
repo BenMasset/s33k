@@ -338,6 +338,63 @@ describe('POST /api/invite/accept: internal mints a read-only member key', () =>
    });
 });
 
+describe('POST /api/invite/accept: share mints a read-only single-domain member key', () => {
+   it('mints a MEMBER key SCOPED to the invite domain, on the owner account, claim-before-mint', async () => {
+      mockInvite.findOne.mockResolvedValue({
+         ID: 71,
+         code: 'GOODSHARE',
+         type: 'share',
+         status: 'pending',
+         email: 'client@acme.com',
+         target_account_id: 9,
+         scoped_domain: 'tenant-a.com',
+         get: (k: string) => (k === 'createdAt' ? new Date() : undefined),
+      });
+      mockAccount.findOne.mockResolvedValue({ ID: 9, name: 'Owner', status: 'active' });
+      mockApiKey.create.mockResolvedValue({ ID: 700 });
+      const res = makeRes();
+
+      await acceptHandler(makeReq({ method: 'POST', body: { code: 'GOODSHARE' } }), res);
+
+      expect(res.statusCode).toBe(201);
+      expect(res.payload.role).toBe('member');
+      expect(res.payload.accountId).toBe(9);
+      expect((res.payload.apiKey as string)).toMatch(/^s33k_/);
+      // No new account; the key is a MEMBER key on the OWNER account, SCOPED to the invite's domain.
+      expect(mockAccount.create).not.toHaveBeenCalled();
+      const keyArg = mockApiKey.create.mock.calls[0][0];
+      expect(keyArg.account_id).toBe(9);
+      expect(keyArg.role).toBe('member');
+      // The domain and account come from the INVITE ROW, never the request body.
+      expect(keyArg.scoped_domain).toBe('tenant-a.com');
+      // Claim (guarded pending->accepted flip) happens before the mint.
+      const [claimValues, claimOpts] = mockInvite.update.mock.calls[0];
+      expect(claimValues.status).toBe('accepted');
+      expect((claimOpts as { where: { status: string } }).where.status).toBe('pending');
+   });
+
+   it('rejects a replayed share code (claim flips 0 rows) and mints NOTHING', async () => {
+      mockInvite.findOne.mockResolvedValue({
+         ID: 72,
+         code: 'REPLAYSHARE',
+         type: 'share',
+         status: 'pending',
+         email: 'client@acme.com',
+         target_account_id: 9,
+         scoped_domain: 'tenant-a.com',
+         get: (k: string) => (k === 'createdAt' ? new Date() : undefined),
+      });
+      mockAccount.findOne.mockResolvedValue({ ID: 9, name: 'Owner', status: 'active' });
+      mockInvite.update.mockResolvedValueOnce([0]); // a concurrent accept already claimed it
+      const res = makeRes();
+
+      await acceptHandler(makeReq({ method: 'POST', body: { code: 'REPLAYSHARE' } }), res);
+
+      expect(res.statusCode).toBe(400);
+      expect(mockApiKey.create).not.toHaveBeenCalled();
+   });
+});
+
 describe('POST /api/invite/accept: invalid / used / expired codes are rejected', () => {
    it('rejects an UNKNOWN code generically and never mints a key or account', async () => {
       mockInvite.findOne.mockResolvedValue(null);
