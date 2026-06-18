@@ -58,6 +58,13 @@ export const buildGSCRedirectURL = (req: NextApiRequest): string => {
    if (appURL) {
       return `${appURL.replace(/\/$/, '')}/api/searchconsole/callback`;
    }
+   // No configured app URL: derive from request headers. This is a dev convenience. In production
+   // NEXT_PUBLIC_APP_URL MUST be set, because deriving an OAuth redirect from attacker-controllable
+   // headers is a security-relevant misconfiguration. Warn loudly so it is never silent (Google's
+   // exact-match redirect allowlist still fails a poisoned URI closed, so this cannot leak the code).
+   if (process.env.NODE_ENV === 'production') {
+      console.warn('[GSC OAuth] NEXT_PUBLIC_APP_URL is unset in production; deriving the redirect URI from request headers. Set it.');
+   }
    const fwdProto = req.headers['x-forwarded-proto'] as string | undefined;
    const fwdHost = req.headers['x-forwarded-host'] as string | undefined;
    const proto = fwdProto || (req.headers.host?.includes('localhost:') ? 'http' : 'https');

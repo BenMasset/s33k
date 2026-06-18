@@ -25,12 +25,25 @@ const PAGE_STYLE = 'body{font-family:system-ui,-apple-system,Segoe UI,Roboto,san
    + '.card{max-width:520px;text-align:center;background:#111827;border:1px solid #1f2937;border-radius:12px;padding:32px}'
    + 'h1{font-size:20px;margin:0 0 12px}p{font-size:15px;line-height:1.5;color:#9ca3af;margin:0}';
 
-const htmlPage = (title: string, body: string): string => (
-   '<!doctype html><html lang="en"><head><meta charset="utf-8">'
-   + '<meta name="viewport" content="width=device-width, initial-scale=1">'
-   + `<title>${title}</title><style>${PAGE_STYLE}</style></head>`
-   + `<body><div class="card"><h1>${title}</h1><p>${body}</p></div></body></html>`
-);
+// Escape any value before it is interpolated into the page. Every value rendered here is currently
+// server-controlled (the signed-state domain, static strings), so this is defense-in-depth: it keeps
+// htmlPage safe-by-construction on this PUBLIC route, so a future edit that passes a raw query param
+// (code/state/error) into it cannot become a reflected XSS.
+const escapeHtml = (s: string): string => String(s)
+   .replace(/&/g, '&amp;')
+   .replace(/</g, '&lt;')
+   .replace(/>/g, '&gt;')
+   .replace(/"/g, '&quot;')
+   .replace(/'/g, '&#39;');
+
+const htmlPage = (title: string, body: string): string => {
+   const t = escapeHtml(title);
+   const b = escapeHtml(body);
+   return '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+      + '<meta name="viewport" content="width=device-width, initial-scale=1">'
+      + `<title>${t}</title><style>${PAGE_STYLE}</style></head>`
+      + `<body><div class="card"><h1>${t}</h1><p>${b}</p></div></body></html>`;
+};
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
    await db.sync();
