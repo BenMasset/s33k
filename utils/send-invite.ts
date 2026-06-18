@@ -27,9 +27,11 @@ type SendInviteArgs = {
 
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 
-// The verified sending identity. Overridable by env so prod can point at a real domain
-// without a code change; the default is a sensible on-brand placeholder for s33k.io.
-const fromAddress = (): string => (process.env.RESEND_FROM_EMAIL || 's33k <invites@s33k.io>');
+// The verified sending identity. Overridable by env so prod can point at a different domain
+// without a code change. Default is noreply@invites.s33k.io: the invites.s33k.io SUBDOMAIN is the
+// one verified in Resend, so the address must live on that subdomain. A root s33k.io address would
+// bounce as unverified.
+const fromAddress = (): string => (process.env.RESEND_FROM_EMAIL || 's33k <noreply@invites.s33k.io>');
 
 const buildSubject = (type: InviteEmailType, domain?: string): string => {
    if (type === 'internal') { return 'You have been added to a team on s33k'; }
@@ -63,31 +65,83 @@ const safeLink = (link: string): string => {
    }
 };
 
+// The copy for each invite type, in one place so the HTML and plain-text builders stay in sync.
+// `who` and `site` are already-escaped values; `lead`/`cta`/`button` are static strings. Kept free
+// of any "open source" framing on purpose: s33k is presented as a new product, not an OSS project.
+const inviteCopy = (type: InviteEmailType, who: string, site: string): { lead: string, cta: string, button: string } => {
+   if (type === 'internal') {
+      return {
+         lead: `${who} added you as a read-only member of their s33k account.`,
+         cta: 'Activate your access below to get the API key you connect to the LLM you already use.',
+         button: 'Activate access',
+      };
+   }
+   if (type === 'share') {
+      return {
+         lead: `${who} shared ${site} with you on s33k. You get read-only access to that one site: its SEO `
+            + 'rankings, traffic and analytics, and AI search visibility, all from the LLM you already use.',
+         cta: 'Activate below to connect your read-only key for this site.',
+         button: 'Connect this site',
+      };
+   }
+   return {
+      lead: `${who} invited you to s33k, the one place where your SEO rankings, traffic, and AI search `
+         + 'visibility live together and you control all of it from the LLM you already use.',
+      cta: 'Activate your access below to get the API key you connect to the LLM you already use.',
+      button: 'Activate access',
+   };
+};
+
+// Branded HTML email in the s33k "editorial terminal" identity: white paper, near-black ink,
+// monospace, sharp corners (no rounded buttons), a single green accent for the live dot and CTA.
+// Inline styles only (email clients strip <style>); the mono font stack degrades cleanly.
 const buildHtml = (type: InviteEmailType, acceptLink: string, inviterName?: string, domain?: string): string => {
    const who = escapeHtml(inviterName && inviterName.trim() ? inviterName.trim() : 'Someone');
    const site = escapeHtml(domain && domain.trim() ? domain.trim() : 'a site');
    const link = safeLink(acceptLink);
-   let lead: string;
-   let cta: string;
-   if (type === 'internal') {
-      lead = `${who} added you as a read-only member of their s33k account.`;
-      cta = 'Click below to activate your access and get your API key for your LLM of choice.';
-   } else if (type === 'share') {
-      lead = `${who} shared ${site} with you on s33k. You get read-only access to that one site's SEO rankings, `
-         + 'analytics, and AI visibility, all controllable from your LLM of choice over MCP.';
-      cta = 'Use the instructions below to connect your read-only key for this site.';
-   } else {
-      lead = `${who} invited you to s33k, the open, MCP-controllable SEO, AEO, and analytics suite.`;
-      cta = 'Click below to activate your access and get your API key for your LLM of choice.';
-   }
+   const { lead, cta, button } = inviteCopy(type, who, site);
+   const mono = "'SF Mono', ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo, Consolas, monospace";
    return [
-      '<div style="font-family: ui-sans-serif, system-ui, sans-serif; color: #0A0F1E; line-height: 1.6;">',
-      `  <p style="font-size: 16px;">${lead}</p>`,
-      `  <p style="font-size: 16px;">${cta}</p>`,
-      `  <p><a href="${link}" style="display: inline-block; background: #0095FF; color: #fff; `
-      + 'text-decoration: none; padding: 12px 24px; border-radius: 9999px; font-weight: 500;">Open s33k</a></p>',
-      `  <p style="font-size: 13px; color: #737373;">Or paste this link into your browser:<br />${escapeHtml(link)}</p>`,
+      `<div style="background:#fafafa;padding:32px 16px;font-family:${mono};">`,
+      '  <div style="max-width:480px;margin:0 auto;background:#ffffff;border:1px solid #111111;">',
+      '    <div style="padding:14px 20px;border-bottom:1px solid #ededed;">',
+      '      <span style="display:inline-block;width:8px;height:8px;background:#16a34a;margin-right:8px;vertical-align:middle;"></span>',
+      '      <span style="font-size:15px;font-weight:700;letter-spacing:0.5px;color:#0a0a0a;vertical-align:middle;">s33k</span>',
+      '    </div>',
+      '    <div style="padding:28px 24px;">',
+      `      <p style="font-size:14px;line-height:1.7;color:#0a0a0a;margin:0 0 16px;">${lead}</p>`,
+      `      <p style="font-size:14px;line-height:1.7;color:#0a0a0a;margin:0 0 22px;">${cta}</p>`,
+      `      <p style="margin:0 0 22px;"><a href="${link}" style="display:inline-block;background:#16a34a;`
+      + `color:#ffffff;text-decoration:none;padding:12px 22px;font-family:${mono};font-size:14px;font-weight:700;">`
+      + `${button} -&gt;</a></p>`,
+      '      <p style="font-size:12px;line-height:1.6;color:#737373;margin:0;">Or paste this link into your browser:<br />'
+      + `<span style="color:#15803d;word-break:break-all;">${escapeHtml(link)}</span></p>`,
+      '    </div>',
+      '    <div style="padding:14px 20px;border-top:1px solid #ededed;font-size:11px;color:#999999;">',
+      '      s33k · SEO, AI search, and analytics in one place, controlled from your LLM.',
+      '    </div>',
+      '  </div>',
       '</div>',
+   ].join('\n');
+};
+
+// Plain-text counterpart. Always sent alongside the HTML: a text part lifts deliverability and is
+// the fallback for clients that do not render HTML. Mirrors the same copy from inviteCopy.
+const buildText = (type: InviteEmailType, acceptLink: string, inviterName?: string, domain?: string): string => {
+   const who = inviterName && inviterName.trim() ? inviterName.trim() : 'Someone';
+   const site = domain && domain.trim() ? domain.trim() : 'a site';
+   const link = safeLink(acceptLink);
+   const { lead, cta, button } = inviteCopy(type, who, site);
+   return [
+      's33k',
+      '',
+      lead,
+      '',
+      cta,
+      '',
+      `${button}: ${link}`,
+      '',
+      's33k · SEO, AI search, and analytics in one place, controlled from your LLM.',
    ].join('\n');
 };
 
@@ -113,6 +167,7 @@ export const sendInviteEmail = async (args: SendInviteArgs): Promise<SendInviteR
             to: args.to.trim(),
             subject: buildSubject(args.type, args.domain),
             html: buildHtml(args.type, args.acceptLink, args.inviterName, args.domain),
+            text: buildText(args.type, args.acceptLink, args.inviterName, args.domain),
          }),
       });
       if (!response.ok) {
