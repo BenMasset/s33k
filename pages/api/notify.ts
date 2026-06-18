@@ -10,6 +10,24 @@ import { scopeWhere } from '../../utils/scope';
 import resolveDomainAccess from '../../utils/domain-access';
 import type Account from '../../database/models/account';
 import { getAppSettings } from './settings';
+import { composeDailyBriefForDomain } from './daily-brief';
+import { renderDailyBriefHtml } from '../../utils/daily-brief-render';
+
+// The scheduled daily brief is OPT-IN and OFF by default. It only sends when this env flag is
+// truthy, so enabling the proactive-analyst email is a deliberate act and a deploy never starts
+// spamming. The flag gates the EXTRA brief email only; the existing keyword-position email is
+// unchanged and still governed solely by the domain's `notification` toggle + interval.
+const isDailyBriefEnabled = (): boolean => {
+   const v = String(process.env.DAILY_BRIEF_ENABLED || '').trim().toLowerCase();
+   return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+};
+
+// The window the scheduled brief compares period-over-period. A weekly "what changed and what to
+// do" standup is the natural cadence; overridable so a deployment can tune it without code change.
+const dailyBriefPeriod = (): string => {
+   const p = String(process.env.DAILY_BRIEF_PERIOD || '').trim();
+   return /^\d+\s*[dhwm]$/i.test(p) ? p : '7d';
+};
 
 type NotifyResponse = {
    success?: boolean
@@ -45,14 +63,23 @@ const notify = async (req: NextApiRequest, res: NextApiResponse<NotifyResponse>,
          const theDomain = await resolveDomainAccess(account, reqDomain, { write: true });
          if (theDomain) {
             await sendNotificationEmail(theDomain, settings, account);
+            // Additive, opt-in second email. Never throws into the keyword-email path: the brief
+            // is best-effort and any failure is swallowed inside composeAndSendDailyBrief.
+            if (isDailyBriefEnabled()) {
+               await composeAndSendDailyBrief(theDomain, settings, account);
+            }
          }
       } else {
          const allDomains: Domain[] = await Domain.findAll({ where: { ...scopeWhere(account) } });
          if (allDomains && allDomains.length > 0) {
             const domains = allDomains.map((el) => el.get({ plain: true }));
+            const briefEnabled = isDailyBriefEnabled();
             for (const domain of domains) {
                if (domain.notification !== false) {
                   await sendNotificationEmail(domain, settings, account);
+                  if (briefEnabled) {
+                     await composeAndSendDailyBrief(domain, settings, account);
+                  }
                }
             }
          }
@@ -96,4 +123,58 @@ const sendNotificationEmail = async (domain: Domain, settings: SettingsType, acc
       subject: `[${domainName}] Keyword Positions Update`,
       html: emailHTML,
    }).catch((err:any) => console.log('[ERROR] Sending Notification Email for', domainName, err?.response || err));
+};
+
+/**
+ * Compose and send the proactive DAILY BRIEF email for one already-owned domain.
+ *
+ * This is the PUSH half of daily_brief: the same brief the GET /api/daily-brief route returns,
+ * rendered to HTML (utils/daily-brief-render) and delivered to the domain's notification_emails
+ * (falling back to the global notification_email) over the EXISTING SMTP transport. It is
+ * ADDITIVE: it runs alongside the keyword-position email, never replaces it, and is only ever
+ * called when DAILY_BRIEF_ENABLED is set (see isDailyBriefEnabled). It composes the brief with NO
+ * HTTP round-trip by calling composeDailyBriefForDomain directly, so the email and the on-demand
+ * route are byte-identical by construction.
+ *
+ * Resilient: it never throws into the caller's loop. A compose failure or a send failure is logged
+ * and swallowed so one domain's brief failure can never abort the rest of the notification run or
+ * break the keyword email that already sent.
+ *
+ * @param {Domain} domain - The owned domain (plain or model) to brief.
+ * @param {SettingsType} settings - App settings carrying the SMTP config.
+ * @param {Account | null | undefined} account - The resolved account for scoping.
+ * @returns {Promise<void>}
+ */
+export const composeAndSendDailyBrief = async (domain: Domain, settings: SettingsType, account?: Account | null): Promise<void> => {
+   const {
+      smtp_server = '',
+      smtp_port = '',
+      smtp_username = '',
+      smtp_password = '',
+      notification_email = '',
+      notification_email_from = '',
+      notification_email_from_name = 'SerpBear',
+   } = settings;
+   const domainName = domain.domain;
+   try {
+      const brief = await composeDailyBriefForDomain(domainName, dailyBriefPeriod(), account);
+      const html = renderDailyBriefHtml(brief);
+
+      const fromEmail = `${notification_email_from_name} <${notification_email_from || 'no-reply@serpbear.com'}>`;
+      const mailerSettings:any = { host: smtp_server, port: parseInt(smtp_port, 10) };
+      if (smtp_username || smtp_password) {
+         mailerSettings.auth = {};
+         if (smtp_username) mailerSettings.auth.user = smtp_username;
+         if (smtp_password) mailerSettings.auth.pass = smtp_password;
+      }
+      const transporter = nodeMailer.createTransport(mailerSettings);
+      await transporter.sendMail({
+         from: fromEmail,
+         to: domain.notification_emails || notification_email,
+         subject: `[${domainName}] Daily Brief: ${brief.headline}`.slice(0, 160),
+         html,
+      });
+   } catch (err:any) {
+      console.log('[ERROR] Sending Daily Brief Email for', domainName, err?.response || err);
+   }
 };

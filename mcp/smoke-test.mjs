@@ -88,6 +88,7 @@ const EXPECTED_TOOLS = [
    'ai_visibility',
    'alerts',
    'briefing',
+   'daily_brief',
    'campaign_report',
    'cannibalization_detection',
    'channel_report',
@@ -449,6 +450,7 @@ async function main() {
    await callAndAssert(client, 'ai_visibility', { domain: READ_DOMAIN, period: PERIOD });
    await callAndAssert(client, 'entry_pages', { domain: READ_DOMAIN, period: PERIOD });
    await callAndAssert(client, 'alerts', { domain: READ_DOMAIN, period: '7d' });
+   await callAndAssert(client, 'daily_brief', { domain: READ_DOMAIN, period: '7d' });
    await callAndAssert(client, 'top_clicks', { domain: READ_DOMAIN, period: PERIOD });
    await callAndAssert(client, 'form_submissions', { domain: READ_DOMAIN, period: PERIOD });
    await callAndAssert(client, 'scroll_depth', { domain: READ_DOMAIN, period: PERIOD });

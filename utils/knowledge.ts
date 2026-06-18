@@ -721,6 +721,20 @@ const capabilities: CapabilityEntry[] = [
          + 'answers "how is my site right now?", this answers "what moved and what should I do about it?"',
       examplePrompt: 'What moved on my site since the prior period, and what should I do about it?',
    },
+   {
+      id: 'daily_brief',
+      toolName: 'daily_brief',
+      category: 'cross-pillar',
+      title: 'Daily brief: the one thing to do today',
+      description: 'The proactive analyst distilled to a single standup: the ONE most important thing to do for a domain right now. It composes a '
+         + 'headline (the most important thing right now), 2-4 what-changed bullets (this period vs the prior equal window across rank, traffic, AI, '
+         + 'and conversions), and the single top action enriched with the top AI-visibility opportunity and the top opportunity page. The same brief '
+         + 'is also delivered by scheduled email when the instance enables it. Rules-based: it never calls an LLM and is honest on a quiet week '
+         + '("nothing material changed") rather than inventing movement.',
+      whenToUse: 'Use as the FIRST thing each day, or whenever the user asks "what should I focus on today?" Where briefing gives the full state and '
+         + 'alerts lists every change, the daily brief gives the single most important thing to do.',
+      examplePrompt: 'What should I focus on today?',
+   },
    // --- Onboarding ---
    {
       id: 'discover_pages',

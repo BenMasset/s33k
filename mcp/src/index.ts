@@ -1915,6 +1915,52 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
+// daily_brief
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'daily_brief',
+   {
+      title: 'Daily brief: the one thing to do today',
+      description:
+         'The proactive analyst distilled to a single standup: the ONE most important thing to do for a domain right now. '
+         + 'Where briefing answers "how is my site right now?" and alerts answers "what changed?", daily_brief answers the '
+         + 'hardest, most useful question of all in one tight digest: "what is the single most important thing to do today?" '
+         + 'It composes a HEADLINE (the most important thing right now), 2-4 WHAT-CHANGED bullets (this period vs the prior '
+         + 'equal window, across rank movers, traffic delta, AI-referral delta, new AI crawler, and conversion delta), and the '
+         + 'SINGLE top ACTION, enriched with the top AI-visibility opportunity and the top opportunity page. Use this as the '
+         + 'user FIRST thing each day, or whenever they ask "what should I focus on today?" The same brief is also delivered '
+         + 'by scheduled email when the instance enables it. RULES-BASED: the s33k server does NOT call any LLM; it joins and '
+         + 'prioritizes the structured data with transparent rules and is HONEST on a quiet week ("nothing material changed") '
+         + 'rather than inventing movement. YOU (the connected LLM) narrate it, leading with the headline and the top action. '
+         + 'It never fails on a missing signal: each upstream surface degrades independently.',
+      inputSchema: {
+         domain: z.string().describe('The domain to brief on, e.g. "getmasset.com".'),
+         period: z
+            .string()
+            .optional()
+            .describe('The window compared against its immediately-prior equivalent, e.g. "7d" (this week vs last week). Defaults to "7d".'),
+      },
+   },
+   async ({ domain, period }) => {
+      try {
+         const query: Record<string, string> = { domain };
+         if (period) { query.period = period; }
+         const data = await s33kFetch('/api/daily-brief', { query });
+         return jsonResult({
+            domain: data.domain,
+            period: data.period,
+            brief: data.brief,
+            rendered: data.rendered,
+            note: data.note,
+            error: data.error,
+         });
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
 // create_domain
 // ---------------------------------------------------------------------------
 server.registerTool(
@@ -2904,7 +2950,7 @@ async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
    process.stderr.write(
-      `s33k-mcp connected (base URL: ${BASE_URL}). 76 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
+      `s33k-mcp connected (base URL: ${BASE_URL}). 77 tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
    );
 }
 
