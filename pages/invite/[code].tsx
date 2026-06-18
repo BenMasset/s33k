@@ -17,6 +17,7 @@ type AcceptResult = {
    accountId?: number,
    role?: 'admin' | 'member',
    mcpConfig?: { S33K_BASE_URL: string, S33K_API_KEY: string },
+   mcpCommand?: string,
    onboardingHint?: string,
    error?: string | null,
 };
@@ -51,7 +52,7 @@ const InviteAccept: NextPage = () => {
    };
 
    const label = 'mb-2 font-semibold inline-block text-sm text-gray-700';
-   const input = 'w-full p-2 border border-gray-200 rounded mb-3 focus:outline-none focus:border-blue-300';
+   const input = 'w-full p-2 border border-gray-200 rounded mb-3 focus:outline-none focus:border-gray-400';
    const card = 'relative bg-white rounded-md text-sm border p-6 shadow-sm';
 
    return (
@@ -59,7 +60,7 @@ const InviteAccept: NextPage = () => {
          <Head><title>Accept your s33k invite</title></Head>
          <div className='flex items-center justify-center w-full min-h-screen bg-gray-50 p-4'>
             <div className='w-full max-w-md'>
-               <h3 className='py-6 text-2xl font-bold text-blue-700 text-center'>s33k</h3>
+               <h3 className='py-6 text-2xl font-bold text-gray-900 text-center'>s33k</h3>
 
                {!result && (
                   <div className={card}>
@@ -78,7 +79,7 @@ const InviteAccept: NextPage = () => {
                      <button
                         onClick={() => accept()}
                         disabled={submitting || !code}
-                        className='py-3 px-5 w-full rounded cursor-pointer bg-blue-700 text-white font-semibold text-sm disabled:opacity-50'>
+                        className='py-3 px-5 w-full rounded cursor-pointer bg-gray-900 text-white font-semibold text-sm disabled:opacity-50'>
                         {submitting ? 'Activating...' : 'Accept invite'}
                      </button>
                      {error && (
@@ -101,11 +102,20 @@ const InviteAccept: NextPage = () => {
                      <code className='block w-full p-2 border border-gray-200 rounded mb-4 break-all bg-gray-50'>
                         {result.apiKey}
                      </code>
-                     <label className={label}>MCP config</label>
-                     <pre className='block w-full p-3 border border-gray-200 rounded mb-4 overflow-x-auto bg-gray-50 text-xs'>
+                     <label className={label}>Connect in one line</label>
+                     <p className='text-gray-600 text-xs mb-2'>
+                        Paste this into your terminal in Claude Code. No install, nothing to run locally.
+                     </p>
+                     <pre className='block w-full p-3 border border-gray-900 rounded mb-4 overflow-x-auto bg-gray-900 text-gray-50 text-xs'>
+{result.mcpCommand || ''}
+                     </pre>
+                     <details className='mb-4'>
+                        <summary className='cursor-pointer text-gray-500 text-xs select-none'>Prefer to set it up by hand?</summary>
+                        <pre className='block w-full mt-2 p-3 border border-gray-200 rounded overflow-x-auto bg-gray-50 text-xs'>
 {`S33K_BASE_URL=${result.mcpConfig?.S33K_BASE_URL || ''}
 S33K_API_KEY=${result.mcpConfig?.S33K_API_KEY || ''}`}
-                     </pre>
+                        </pre>
+                     </details>
                      {result.onboardingHint && (
                         <p className='text-gray-600 text-sm'>{result.onboardingHint}</p>
                      )}

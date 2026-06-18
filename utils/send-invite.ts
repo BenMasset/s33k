@@ -23,6 +23,13 @@ type SendInviteArgs = {
    // For type 'share': the domain that was shared. Surfaced in the subject + body so the
    // recipient knows which site they were given read-only access to.
    domain?: string,
+   // For type 'share' ONLY: the connect details, so the email is SELF-CONTAINED. A share key is
+   // minted up front (unlike an external/internal invite, whose key is minted on accept), so we
+   // can hand the recipient everything they need to connect in one paste: the one-line hosted-MCP
+   // command (key embedded) plus the manual S33K_BASE_URL / S33K_API_KEY fallback. When present,
+   // the email renders these instead of an activation button. The key is read-only, single-domain,
+   // and revocable, so it is the lowest-risk credential to deliver this way.
+   connect?: { command: string, baseUrl: string, apiKey: string },
 };
 
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';
@@ -92,30 +99,57 @@ const inviteCopy = (type: InviteEmailType, who: string, site: string): { lead: s
    };
 };
 
-// Branded HTML email in the s33k "editorial terminal" identity: white paper, near-black ink,
-// monospace, sharp corners (no rounded buttons), a single green accent for the live dot and CTA.
-// Inline styles only (email clients strip <style>); the mono font stack degrades cleanly.
-const buildHtml = (type: InviteEmailType, acceptLink: string, inviterName?: string, domain?: string): string => {
+// Branded HTML email in the s33k identity: white, near-black ink, monospace, sharp corners,
+// monochrome (no accent color, matching the landing). Inline styles only (email clients strip
+// <style>); the mono font stack degrades cleanly. For a share (connect present) the email is
+// self-contained: it shows the one-line hosted-MCP connect command plus the manual fallback,
+// so the recipient pastes one line and is done. For an invite it shows the activation button.
+const MONO = "'SF Mono', ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo, Consolas, monospace";
+
+const codeBlock = (content: string, faint = false): string => `<pre style="margin:0;padding:13px;`
+   + `background:${faint ? '#fafafa' : '#f4f4f4'};border:1px solid ${faint ? '#ededed' : '#e2e2e2'};`
+   + `font-family:${MONO};font-size:12px;line-height:1.6;color:#0a0a0a;white-space:pre-wrap;`
+   + `word-break:break-all;">${content}</pre>`;
+
+const buildHtml = (type: InviteEmailType, acceptLink: string, inviterName?: string, domain?: string,
+   connect?: { command: string, baseUrl: string, apiKey: string }): string => {
    const who = escapeHtml(inviterName && inviterName.trim() ? inviterName.trim() : 'Someone');
    const site = escapeHtml(domain && domain.trim() ? domain.trim() : 'a site');
    const link = safeLink(acceptLink);
    const { lead, cta, button } = inviteCopy(type, who, site);
-   const mono = "'SF Mono', ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo, Consolas, monospace";
+
+   let middle: string[];
+   if (connect) {
+      const manual = `S33K_BASE_URL=${escapeHtml(connect.baseUrl)}\nS33K_API_KEY=${escapeHtml(connect.apiKey)}`;
+      middle = [
+         `      <p style="font-size:14px;line-height:1.7;color:#0a0a0a;margin:0 0 14px;">To connect it, paste this `
+         + `one line into your terminal in Claude Code, then ask s33k anything about ${site}.</p>`,
+         `      ${codeBlock(escapeHtml(connect.command))}`,
+         '      <p style="font-size:12px;line-height:1.6;color:#737373;margin:18px 0 6px;">Prefer to set it up by hand? '
+         + 'Use these in your MCP client instead:</p>',
+         `      ${codeBlock(manual, true)}`,
+      ];
+   } else {
+      middle = [
+         `      <p style="font-size:14px;line-height:1.7;color:#0a0a0a;margin:0 0 22px;">${cta}</p>`,
+         `      <p style="margin:0 0 22px;"><a href="${link}" style="display:inline-block;background:#0a0a0a;`
+         + `color:#ffffff;text-decoration:none;padding:12px 22px;font-family:${MONO};font-size:14px;font-weight:700;">`
+         + `${button} -&gt;</a></p>`,
+         '      <p style="font-size:12px;line-height:1.6;color:#737373;margin:0;">Or paste this link into your browser:<br />'
+         + `<span style="color:#0a0a0a;word-break:break-all;">${escapeHtml(link)}</span></p>`,
+      ];
+   }
+
    return [
-      `<div style="background:#fafafa;padding:32px 16px;font-family:${mono};">`,
-      '  <div style="max-width:480px;margin:0 auto;background:#ffffff;border:1px solid #111111;">',
+      `<div style="background:#fafafa;padding:32px 16px;font-family:${MONO};">`,
+      '  <div style="max-width:520px;margin:0 auto;background:#ffffff;border:1px solid #111111;">',
       '    <div style="padding:14px 20px;border-bottom:1px solid #ededed;">',
-      '      <span style="display:inline-block;width:8px;height:8px;background:#16a34a;margin-right:8px;vertical-align:middle;"></span>',
+      '      <span style="display:inline-block;width:8px;height:8px;background:#0a0a0a;margin-right:8px;vertical-align:middle;"></span>',
       '      <span style="font-size:15px;font-weight:700;letter-spacing:0.5px;color:#0a0a0a;vertical-align:middle;">s33k</span>',
       '    </div>',
       '    <div style="padding:28px 24px;">',
       `      <p style="font-size:14px;line-height:1.7;color:#0a0a0a;margin:0 0 16px;">${lead}</p>`,
-      `      <p style="font-size:14px;line-height:1.7;color:#0a0a0a;margin:0 0 22px;">${cta}</p>`,
-      `      <p style="margin:0 0 22px;"><a href="${link}" style="display:inline-block;background:#16a34a;`
-      + `color:#ffffff;text-decoration:none;padding:12px 22px;font-family:${mono};font-size:14px;font-weight:700;">`
-      + `${button} -&gt;</a></p>`,
-      '      <p style="font-size:12px;line-height:1.6;color:#737373;margin:0;">Or paste this link into your browser:<br />'
-      + `<span style="color:#15803d;word-break:break-all;">${escapeHtml(link)}</span></p>`,
+      ...middle,
       '    </div>',
       '    <div style="padding:14px 20px;border-top:1px solid #ededed;font-size:11px;color:#999999;">',
       '      s33k · SEO, AI search, and analytics in one place, controlled from your LLM.',
@@ -127,19 +161,29 @@ const buildHtml = (type: InviteEmailType, acceptLink: string, inviterName?: stri
 
 // Plain-text counterpart. Always sent alongside the HTML: a text part lifts deliverability and is
 // the fallback for clients that do not render HTML. Mirrors the same copy from inviteCopy.
-const buildText = (type: InviteEmailType, acceptLink: string, inviterName?: string, domain?: string): string => {
+const buildText = (type: InviteEmailType, acceptLink: string, inviterName?: string, domain?: string,
+   connect?: { command: string, baseUrl: string, apiKey: string }): string => {
    const who = inviterName && inviterName.trim() ? inviterName.trim() : 'Someone';
    const site = domain && domain.trim() ? domain.trim() : 'a site';
    const link = safeLink(acceptLink);
    const { lead, cta, button } = inviteCopy(type, who, site);
+   const body = connect
+      ? [
+         `To connect it, paste this one line into your terminal in Claude Code, then ask s33k anything about ${site}:`,
+         '',
+         connect.command,
+         '',
+         'Prefer to set it up by hand? Use these in your MCP client instead:',
+         `S33K_BASE_URL=${connect.baseUrl}`,
+         `S33K_API_KEY=${connect.apiKey}`,
+      ]
+      : [cta, '', `${button}: ${link}`];
    return [
       's33k',
       '',
       lead,
       '',
-      cta,
-      '',
-      `${button}: ${link}`,
+      ...body,
       '',
       's33k · SEO, AI search, and analytics in one place, controlled from your LLM.',
    ].join('\n');
@@ -166,8 +210,8 @@ export const sendInviteEmail = async (args: SendInviteArgs): Promise<SendInviteR
             from: fromAddress(),
             to: args.to.trim(),
             subject: buildSubject(args.type, args.domain),
-            html: buildHtml(args.type, args.acceptLink, args.inviterName, args.domain),
-            text: buildText(args.type, args.acceptLink, args.inviterName, args.domain),
+            html: buildHtml(args.type, args.acceptLink, args.inviterName, args.domain, args.connect),
+            text: buildText(args.type, args.acceptLink, args.inviterName, args.domain, args.connect),
          }),
       });
       if (!response.ok) {

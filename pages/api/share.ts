@@ -128,11 +128,18 @@ const createShare = async (req: NextApiRequest, res: NextApiResponse<ShareCreate
 
       const baseUrl = resolveBaseUrl(req);
       const mcpConfig = { S33K_BASE_URL: baseUrl, S33K_API_KEY: fullKey };
-      const instruction = `Read-only access to ${canonicalDomain} on s33k. Add s33k to your LLM client with `
-         + `S33K_BASE_URL=${baseUrl} and S33K_API_KEY=<the key above>. This key can only read ${canonicalDomain}.`;
+      // The zero-install connect path: one line adds the hosted MCP endpoint with this key, so the
+      // recipient pastes it into their LLM client and is done (no local server). The manual
+      // S33K_BASE_URL / S33K_API_KEY env pair stays as the fallback for self-hosters.
+      const connectCommand = `claude mcp add --transport http s33k ${baseUrl}/api/mcp `
+         + `--header "Authorization: Bearer ${fullKey}"`;
+      const instruction = `Read-only access to ${canonicalDomain} on s33k. Connect in one line: ${connectCommand} `
+         + `Or set S33K_BASE_URL=${baseUrl} and S33K_API_KEY=<the key above> in your MCP client. This key can `
+         + `only read ${canonicalDomain}.`;
 
       // Best-effort email; if Resend is unconfigured or fails, the caller keeps the returned key
-      // and instruction and we never fail the share for it.
+      // and instruction and we never fail the share for it. The email is self-contained: it carries
+      // the one-line connect command (key embedded) so the recipient does not need anything else.
       let emailSent = false;
       if (email) {
          const result = await sendInviteEmail({
@@ -141,6 +148,7 @@ const createShare = async (req: NextApiRequest, res: NextApiResponse<ShareCreate
             type: 'share',
             inviterName: account.name,
             domain,
+            connect: { command: connectCommand, baseUrl, apiKey: fullKey },
          });
          emailSent = result.sent;
       }

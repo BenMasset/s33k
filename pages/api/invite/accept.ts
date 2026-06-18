@@ -71,6 +71,9 @@ type AcceptRes = {
    accountId?: number,
    role?: 'admin' | 'member',
    mcpConfig?: { S33K_BASE_URL: string, S33K_API_KEY: string },
+   // The one-line hosted-MCP connect command (key embedded). This is the primary, zero-install
+   // path the accept page leads with; mcpConfig is the manual fallback.
+   mcpCommand?: string,
    onboardingHint?: string,
    error?: string | null,
 };
@@ -155,10 +158,16 @@ const mcpFor = (req: NextApiRequest, fullKey: string) => ({
    S33K_API_KEY: fullKey,
 });
 
-const externalHint = 'Set S33K_BASE_URL and S33K_API_KEY in your MCP client, then call onboard with your '
-   + 'domain to discover keywords and start tracking rankings.';
-const internalHint = 'Set S33K_BASE_URL and S33K_API_KEY in your MCP client. This is a read-only member key: '
-   + 'you can view rankings, analytics, and AI visibility, but not make changes.';
+// The one-line, zero-install connect command: adds the hosted MCP endpoint with this key, so the
+// recipient pastes it into Claude Code and is connected with no local server. mcpConfig is the
+// manual fallback for self-hosters.
+const commandFor = (req: NextApiRequest, fullKey: string): string => 'claude mcp add --transport http s33k '
+   + `${resolveBaseUrl(req)}/api/mcp --header "Authorization: Bearer ${fullKey}"`;
+
+const externalHint = 'Paste the command above into Claude Code, then ask s33k to onboard your domain to '
+   + 'discover keywords and start tracking rankings.';
+const internalHint = 'Paste the command above into Claude Code. This is a read-only member key: you can view '
+   + 'rankings, analytics, and AI visibility, but not make changes.';
 
 const acceptExternal = async (req: NextApiRequest, res: NextApiResponse<AcceptRes>, invite: Invite, name: string) => {
    // Claim the invite FIRST, before minting anything. If a concurrent request already claimed
@@ -187,6 +196,7 @@ const acceptExternal = async (req: NextApiRequest, res: NextApiResponse<AcceptRe
       accountId: account.ID,
       role: 'admin',
       mcpConfig: mcpFor(req, fullKey),
+      mcpCommand: commandFor(req, fullKey),
       onboardingHint: externalHint,
    });
 };
@@ -222,6 +232,7 @@ const acceptInternal = async (req: NextApiRequest, res: NextApiResponse<AcceptRe
       accountId: target.ID,
       role: 'member',
       mcpConfig: mcpFor(req, fullKey),
+      mcpCommand: commandFor(req, fullKey),
       onboardingHint: internalHint,
    });
 };
