@@ -3,7 +3,7 @@
  * (pages/api/briefing.ts).
  *
  * The briefing joins every s33k pillar (traffic, human-vs-bot, SEO rank, AI
- * referrals, AI crawlers, engagement) into one narration-ready structure. Its
+ * referrals, engagement) into one narration-ready structure. Its
  * hard contract: a single failing sub-signal must NOT break the briefing. Each
  * pillar is fetched independently; a rejection degrades that one section into a
  * note while the rest of the briefing still builds. The only non-200 paths are
@@ -16,12 +16,10 @@
  *      section into an "unavailable" note; status is still 200 and the other
  *      sections are intact.
  *   3. estimateHumanTraffic rejecting does not break the briefing (200).
- *   4. The CrawlerHit DB query rejecting degrades only the AI/crawler section
- *      (200), not the whole briefing.
- *   5. Many sub-signals failing at once still yields a usable 200 briefing.
- *   6. Auth failure returns 401; a missing domain returns 400.
+ *   4. Many sub-signals failing at once still yields a usable 200 briefing.
+ *   5. Auth failure returns 401; a missing domain returns 400.
  *
- * All heavy deps (db, Domain, Keyword, CrawlerHit, authorize, the analytics provider,
+ * All heavy deps (db, Domain, Keyword, authorize, the analytics provider,
  * estimateHumanTraffic) are mocked. No DB, no network, no LLM.
  */
 
@@ -29,17 +27,11 @@ import handler from '../../pages/api/briefing';
 import { getAnalyticsProvider } from '../../utils/analytics';
 import { estimateHumanTraffic } from '../../utils/bot-filter';
 import Keyword from '../../database/models/keyword';
-import CrawlerHit from '../../database/models/crawlerHit';
 
-// briefing.ts imports { Op } from 'sequelize' directly. Mock sequelize to a
-// tiny stub so jest does not have to transform sequelize's ESM uuid dependency
-// (the model layer is mocked anyway, so Op is never exercised against a real DB).
-jest.mock('sequelize', () => ({ __esModule: true, Op: { gte: Symbol('gte') } }));
 jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn().mockResolvedValue(undefined) }, ensureSynced: jest.fn().mockResolvedValue(undefined) }));
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('../../database/models/domain', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
 jest.mock('../../database/models/keyword', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
-jest.mock('../../database/models/crawlerHit', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../utils/analytics', () => {
    const actual = jest.requireActual('../../utils/analytics');
    return { __esModule: true, ...actual, getAnalyticsProvider: jest.fn() };
@@ -52,7 +44,6 @@ import Domain from '../../database/models/domain';
 const mockedAuthorize = authorize as unknown as jest.Mock;
 const mockedDomainFindOne = (Domain as unknown as { findOne: jest.Mock }).findOne;
 const mockedKeywordFindAll = (Keyword as unknown as { findAll: jest.Mock }).findAll;
-const mockedCrawlerFindAll = (CrawlerHit as unknown as { findAll: jest.Mock }).findAll;
 const mockedGetProvider = getAnalyticsProvider as jest.Mock;
 const mockedEstimate = estimateHumanTraffic as jest.Mock;
 
@@ -136,9 +127,6 @@ beforeEach(() => {
       keywordRow({ ID: 1, keyword: 'masset', target_page: '/', position: 1 }),
       keywordRow({ ID: 2, keyword: 'DAM MCP server', target_page: '/software/mcp', position: 14 }),
    ]);
-   mockedCrawlerFindAll.mockResolvedValue([
-      { bot: 'GPTBot', owner: 'OpenAI', isAiEngine: true, hitAt: new Date().toJSON() },
-   ]);
    mockedEstimate.mockResolvedValue(goodEstimate);
    mockedGetProvider.mockReturnValue(providerStub());
 });
@@ -186,24 +174,11 @@ describe('briefing composer graceful degradation', () => {
       expect(traffic.points.join(' ')).toMatch(/pageviews|Human-vs-bot estimate unavailable/i);
    });
 
-   it('degrades only the AI/crawler section when the CrawlerHit query rejects', async () => {
-      mockedCrawlerFindAll.mockRejectedValue(new Error('crawler table missing'));
-      const { req, res, captured } = makeReqRes({ domain: 'getmasset.com' });
-      await handler(req, res);
-
-      expect(captured.status).toBe(200);
-      const ai = captured.body.sections.find((s: any) => /AI visibility/i.test(s.title));
-      // The crawler query failed -> route treats it as zero hits, not a 500.
-      expect(ai).toBeDefined();
-      expect(ai.points.join(' ')).toMatch(/crawler/i);
-   });
-
    it('still returns a usable 200 briefing when many sub-signals fail at once', async () => {
       mockedGetProvider.mockReturnValue(providerStub(new Set([
          'getPageTraffic', 'getReferralSources', 'getSummary', 'getEngagement',
       ])));
       mockedEstimate.mockRejectedValue(new Error('estimate down'));
-      mockedCrawlerFindAll.mockRejectedValue(new Error('crawler down'));
       mockedKeywordFindAll.mockRejectedValue(new Error('keyword query down'));
 
       const { req, res, captured } = makeReqRes({ domain: 'getmasset.com' });

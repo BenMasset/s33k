@@ -2,7 +2,6 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { Op } from 'sequelize';
 import { ensureSynced } from '../../database/database';
 import Keyword from '../../database/models/keyword';
-import CrawlerHit from '../../database/models/crawlerHit';
 import S33kEvent from '../../database/models/s33kEvent';
 import Domain from '../../database/models/domain';
 import authorize from '../../utils/authorize';
@@ -46,9 +45,9 @@ import {
  *
  * It is RULES-BASED: it does NOT call any LLM. The server reuses the SAME pillar
  * reads the other tools use (the analytics provider for traffic + AI referrals,
- * the CrawlerHit table for AI crawlers, the s33k_event table for conversions, and
- * Keyword rank history for SEO), shapes the current and prior periods, and hands
- * them to the engine. The USER's LLM narrates the result.
+ * the s33k_event table for conversions, and Keyword rank history for SEO), shapes
+ * the current and prior periods, and hands them to the engine. The USER's LLM
+ * narrates the result.
  *
  * Robustness: this endpoint NEVER 500s on a sub-signal failure. Each pillar is
  * fetched independently and degrades to "no data for this pillar" on error,
@@ -61,9 +60,9 @@ import {
  *   - Additive provider totals (traffic, per-engine AI referral visitors) are
  *     fetched for the current window AND a doubled window, and prior = doubled
  *     minus current. Exact for additive quantities.
- *   - The DB-backed pillars this route queries directly (AI crawlers via
- *     CrawlerHit, conversions via s33k_event, rank via Keyword history) use an
- *     explicit [priorStart, priorEnd) window, so those priors are exact too.
+ *   - The DB-backed pillars this route queries directly (conversions via
+ *     s33k_event, rank via Keyword history) use an explicit [priorStart, priorEnd)
+ *     window, so those priors are exact too.
  */
 
 type AlertsResponse = {
@@ -250,7 +249,6 @@ const getAlerts = async (req: NextApiRequest, res: NextApiResponse<AlertsRespons
          keywordRows,
          summaryCur, summaryDbl,
          referralsCur, referralsDbl,
-         crawlerCur, crawlerPrior,
          eventCur, eventPrior,
       ] = await Promise.all([
          Keyword.findAll({ where: { domain, ...scopeWhere(account) } }).catch(() => [] as Keyword[]),
@@ -258,18 +256,6 @@ const getAlerts = async (req: NextApiRequest, res: NextApiResponse<AlertsRespons
          provider.getSummary(domain, doubled).catch((e) => emptySummary(String(e))),
          provider.getReferralSources(domain, period).catch((e) => ({ sources: [], error: String(e) })),
          provider.getReferralSources(domain, doubled).catch((e) => ({ sources: [], error: String(e) })),
-         CrawlerHit.findAll({
-            where: { domain, isAiEngine: true, hitAt: { [Op.gte]: new Date(curStart).toJSON() } },
-            raw: true,
-         }).catch(() => [] as Array<{ bot: string }>),
-         CrawlerHit.findAll({
-            where: {
-               domain,
-               isAiEngine: true,
-               hitAt: { [Op.gte]: new Date(priorStart).toJSON(), [Op.lt]: new Date(curStart).toJSON() },
-            },
-            raw: true,
-         }).catch(() => [] as Array<{ bot: string }>),
          S33kEvent.findAll({
             where: { domain, type: 'form_submit', created: { [Op.gte]: new Date(curStart).toJSON() }, ...scopeWhere(account) },
             raw: true,
@@ -310,7 +296,7 @@ const getAlerts = async (req: NextApiRequest, res: NextApiResponse<AlertsRespons
       };
       const trafficNote = trafficAvailabilityNote(curSummary.error, priorTraffic);
 
-      // --- AI: per-engine referral visitors (current + derived prior) and crawler sets. --
+      // --- AI: per-engine referral visitors (current + derived prior). --
       const curRef = referralsCur as { sources: ReferralSource[], error: string | null };
       const dblRef = referralsDbl as { sources: ReferralSource[], error: string | null };
       const currentEngineMap = aiVisitorsByEngine(curRef.sources || []);
@@ -318,15 +304,9 @@ const getAlerts = async (req: NextApiRequest, res: NextApiResponse<AlertsRespons
       const currentAiEngines = engineCounts(currentEngineMap);
       const priorAiEngines = priorEnginesFromDiff(doubledEngineMap, currentEngineMap);
 
-      const currentCrawlerEngines = Array.from(
-         new Set((crawlerCur as Array<{ bot: string }>).map((c) => c.bot).filter(Boolean)),
-      );
-      const priorCrawlerEngines = Array.from(
-         new Set((crawlerPrior as Array<{ bot: string }>).map((c) => c.bot).filter(Boolean)),
-      );
       const aiNote = curRef.error
-         ? `AI referral data unavailable (${curRef.error}); AI alerts limited to crawler signal.`
-         : 'Compared current vs prior AI referral engines and AI crawler activity.';
+         ? `AI referral data unavailable (${curRef.error}); AI alerts suppressed this period.`
+         : 'Compared current vs prior AI referral engines.';
 
       // --- CONVERSIONS: total form submissions, current vs prior (exact windows). --------
       const currentFormSubmissions = buildFormSubmissions(eventCur as EventRow[]).totalSubmissions;
@@ -339,14 +319,12 @@ const getAlerts = async (req: NextApiRequest, res: NextApiResponse<AlertsRespons
             keywords: currentKeywords,
             traffic: currentTraffic,
             aiEngines: currentAiEngines,
-            aiCrawlerEngines: currentCrawlerEngines,
             formSubmissions: currentFormSubmissions,
          },
          {
             keywords: priorKeywords,
             traffic: priorTraffic,
             aiEngines: priorAiEngines,
-            aiCrawlerEngines: priorCrawlerEngines,
             formSubmissions: priorFormSubmissions,
          },
       );

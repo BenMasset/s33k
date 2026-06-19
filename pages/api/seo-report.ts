@@ -25,7 +25,7 @@ import * as reportCache from '../../utils/report-cache';
 //   rankingPages    - tracked keywords grouped by their target_page, so a marketer sees each page and
 //                     exactly which terms + positions it holds.
 //
-// Pure query over Keyword rows. No crawl, no analytics provider, no LLM (the trust property). The
+// Pure query over Keyword rows. No page fetch, no analytics provider, no LLM (the trust property). The
 // report returns structured sections for the user's own LLM to narrate.
 
 // One keyword as it appears inside a ranking page group: the term, its live position, and the url it

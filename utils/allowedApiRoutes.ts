@@ -66,8 +66,6 @@ export const allowedApiRoutes = [
    'GET:/api/timeseries',
    'GET:/api/events',
    'GET:/api/engagement',
-   'POST:/api/crawler-hit',
-   'GET:/api/ai-crawlers',
    'GET:/api/ai-visibility',
    'GET:/api/top-clicks',
    'GET:/api/form-submissions',
@@ -139,7 +137,7 @@ export const isAllowedApiRoute = (req: NextApiRequest): boolean => Boolean(
 // and never gates by domain, so an admin-scoped share key would read any keyword across all domains.
 // The cross-domain / account / instance routes (export, portfolio, domains, domain, account,
 // account-key, me, invite, waitlist, feature-request, account-data, onboard, refresh, notify,
-// crawler-hit, share, searchconsole/connect, adwords, ideas, settings, dbmigrate, clearfailed, cron,
+// share, searchconsole/connect, adwords, ideas, settings, dbmigrate, clearfailed, cron,
 // collect, volume, login, logout) are EXCLUDED. competitor-visibility, executive-summary,
 // weekly-digest, and onboarding-status DO gate per-domain but are intentionally NOT included here:
 // they are outside the curated share-key surface, fail-closed until explicitly added.
@@ -149,7 +147,6 @@ export const scopedKeyAllowedRoutes: string[] = [
    'GET:/api/summary',
    'GET:/api/channel-report',
    'GET:/api/ai-referrals',
-   'GET:/api/ai-crawlers',
    'GET:/api/ai-visibility',
    'GET:/api/aeo-report',
    'GET:/api/aeo-roi',

@@ -1,9 +1,8 @@
 // AEO ROI: "The AI Visibility P&L". The cross-pillar report no AEO tool can produce, because no AEO
-// tool holds, in one store, all of: which AI bots CRAWLED each page (CrawlerHit), which human
-// sessions those AI engines then REFERRED (analytics + the 'ai' channel), which of those sessions
-// CONVERTED a named goal (conversions), and what one conversion is WORTH (goal value). This module
-// is the join that closes the loop: AI crawls -> AI-referred traffic -> conversions -> revenue,
-// per page.
+// tool holds, in one store, all of: which human sessions AI engines REFERRED (analytics + the 'ai'
+// channel), which of those sessions CONVERTED a named goal (conversions), and what one conversion is
+// WORTH (goal value). This module is the join that closes the loop: AI-referred traffic -> conversions
+// -> revenue, per page.
 //
 // It mirrors attributeConversions in conversion-attribution.ts: a pure function (no IO, no LLM) that
 // takes already-read rows and returns a structured join for the user's own LLM (and the briefing) to
@@ -11,11 +10,10 @@
 // sessionize, sessionConverted for the goal test, and the goalValue/money revenue pattern.
 //
 // CRITICAL HONESTY (the whole point of an honest P&L): when a layer has no data, this module stays
-// SILENT rather than fabricate a rate off a zero baseline. The AI-crawler feeder is not always
-// populated (it needs a server-side ingest the static-host case cannot provide), so 0 AI crawls is a
-// normal, expected state, not a bug. Likewise 0 AI sessions on a page. Every rate is divide-by-zero
-// guarded, every "opportunity" requires a real signal on BOTH sides of the comparison it makes, and
-// the top-level note says plainly when there is simply no AI activity in the window.
+// SILENT rather than fabricate a rate off a zero baseline. 0 AI sessions on a page is a normal,
+// expected state. Every rate is divide-by-zero guarded, every "opportunity" requires a real signal on
+// BOTH sides of the comparison it makes, and the top-level note says plainly when there is simply no
+// AI activity in the window.
 
 import { SessionAgg, GoalDef, sessionConverted } from './sessionize';
 
@@ -23,26 +21,18 @@ import { SessionAgg, GoalDef, sessionConverted } from './sessionize';
 // as a tracked, intended-to-rank page (context), not silently dropped. Only the target page is used.
 export type RoiKeyword = { keyword: string, targetPage: string };
 
-// One AI crawler hit, already filtered to isAiEngine===true by the caller, carrying the page it hit
-// and the engine that owns the bot (e.g. "OpenAI"), so byPage can list which engines crawled a page.
-export type AiCrawlHit = { page: string, engine: string };
-
 export type RoiOpportunity = {
-   // crawled-not-referring: AI bots crawl the page but no AI engine has sent a visitor to it yet
-   //   (the citation gap: access without recommendation).
    // ai-outconverts-organic: the page's AI-referred sessions convert materially better than its
    //   organic-search sessions (lean into AEO for this page).
    // cited-not-converting: AI is sending real visitors to the page but none convert (fix the page,
    //   not the AI visibility).
-   type: 'crawled-not-referring' | 'ai-outconverts-organic' | 'cited-not-converting',
+   type: 'ai-outconverts-organic' | 'cited-not-converting',
    page: string,
    detail: string,
 };
 
 export type RoiPageRow = {
    page: string,
-   aiCrawls: number,
-   aiCrawlerEngines: string[],
    aiReferredSessions: number,
    aiConversions: number,
    // Conversion rate of THIS page's AI-referred sessions. 0 when the page has no AI sessions (an
@@ -57,8 +47,6 @@ export type RoiPageRow = {
 };
 
 export type AeoRoi = {
-   totalAiCrawls: number,
-   aiCrawlerEngines: string[],
    totalAiSessions: number,
    aiConversions: number,
    totalAiRevenue: number | null,
@@ -76,7 +64,7 @@ const rate = (c: number, s: number): number => (s > 0 ? Math.round((1000 * c) / 
 const money = (n: number): number => Math.round(n * 100) / 100;
 
 // Normalize a path for comparison: strip origin + trailing slash, lowercase. Mirrors normPath in
-// conversion-attribution.ts so the crawl side and the session side join on identical page keys.
+// conversion-attribution.ts so the session side joins on identical page keys.
 const cleanPath = (p: string): string => {
    let s = String(p || '').trim().toLowerCase();
    s = s.replace(/^https?:\/\/[^/]+/, '');
@@ -91,12 +79,9 @@ const cleanPath = (p: string): string => {
 const MATERIAL_GAP_PCT = 5;
 
 /**
- * Join AI crawler hits, AI-referred + organic human sessions, a goal, and tracked keywords into the
- * AI Visibility P&L: crawls -> referred sessions -> conversions -> revenue, per page.
+ * Join AI-referred + organic human sessions, a goal, and tracked keywords into the AI Visibility
+ * P&L: referred sessions -> conversions -> revenue, per page.
  *
- * @param {AiCrawlHit[]} aiCrawlHits - CrawlerHit rows already filtered to isAiEngine===true, each
- *   carrying the page it hit and the owning engine. May be empty (the feeder is not always populated;
- *   an empty crawl layer is an expected state, handled honestly, never a fabricated number).
  * @param {SessionAgg[]} sessions - Sessionized human sessions (the route filters bots out by default).
  *   The 'ai' channel marks AI-referred sessions; 'organic-search' is the comparison baseline.
  * @param {GoalDef} goal - The conversion goal to attribute.
@@ -107,7 +92,6 @@ const MATERIAL_GAP_PCT = 5;
  * @returns {AeoRoi}
  */
 export const buildAeoRoi = (
-   aiCrawlHits: AiCrawlHit[],
    sessions: SessionAgg[],
    goal: GoalDef,
    keywords: RoiKeyword[],
@@ -118,23 +102,15 @@ export const buildAeoRoi = (
    const aiSessions = sessions.filter((s) => s.channel === 'ai');
    const organicSessions = sessions.filter((s) => s.channel === 'organic-search');
 
-   const totalAiCrawls = aiCrawlHits.length;
    const totalAiSessions = aiSessions.length;
    const aiConversions = aiSessions.filter((s) => sessionConverted(s, goal)).length;
    const totalAiRevenue = hasValue ? money(aiConversions * (goalValue as number)) : null;
 
-   // Distinct engines seen crawling anywhere, for the top-level summary.
-   const enginesSeen = new Set<string>();
-   for (const h of aiCrawlHits) { if (h.engine) { enginesSeen.add(h.engine); } }
-   const aiCrawlerEngines = Array.from(enginesSeen).sort();
-
-   // Per-page accumulation keyed by normalized path. A page can be introduced by a crawl, by an AI
-   // session, by an organic session, or by a tracked keyword's target page (so tracked-but-quiet pages
-   // still appear as honest 0-activity context rows). Every page that touches ANY layer is a key.
+   // Per-page accumulation keyed by normalized path. A page can be introduced by an AI session, by an
+   // organic session, or by a tracked keyword's target page (so tracked-but-quiet pages still appear
+   // as honest 0-activity context rows). Every page that touches ANY layer is a key.
    type Acc = {
       page: string, // the first-seen display path for this key
-      aiCrawls: number,
-      engines: Set<string>,
       aiReferredSessions: number,
       aiConversions: number,
       organicSessions: number,
@@ -145,17 +121,12 @@ export const buildAeoRoi = (
       const key = cleanPath(rawPage);
       let acc = pages.get(key);
       if (!acc) {
-         acc = { page: key, aiCrawls: 0, engines: new Set(), aiReferredSessions: 0, aiConversions: 0, organicSessions: 0, organicConversions: 0 };
+         acc = { page: key, aiReferredSessions: 0, aiConversions: 0, organicSessions: 0, organicConversions: 0 };
          pages.set(key, acc);
       }
       return acc;
    };
 
-   for (const h of aiCrawlHits) {
-      const acc = ensure(h.page);
-      acc.aiCrawls += 1;
-      if (h.engine) { acc.engines.add(h.engine); }
-   }
    for (const s of aiSessions) {
       const acc = ensure(s.landingPage);
       acc.aiReferredSessions += 1;
@@ -176,8 +147,6 @@ export const buildAeoRoi = (
       .map((a) => {
          const row: RoiPageRow = {
             page: a.page,
-            aiCrawls: a.aiCrawls,
-            aiCrawlerEngines: Array.from(a.engines).sort(),
             aiReferredSessions: a.aiReferredSessions,
             aiConversions: a.aiConversions,
             aiConversionRatePct: rate(a.aiConversions, a.aiReferredSessions),
@@ -186,24 +155,14 @@ export const buildAeoRoi = (
          };
          return row;
       })
-      // Order the P&L by where AI is doing the most: referred sessions, then crawls, then page name for
-      // a stable tiebreak.
-      .sort((x, y) => y.aiReferredSessions - x.aiReferredSessions || y.aiCrawls - x.aiCrawls || x.page.localeCompare(y.page));
+      // Order the P&L by where AI is doing the most: referred sessions, then page name for a stable
+      // tiebreak.
+      .sort((x, y) => y.aiReferredSessions - x.aiReferredSessions || x.page.localeCompare(y.page));
 
    // Opportunities, each requiring REAL signal on both sides of its claim. No opportunity is ever
    // emitted off a zero baseline, which is what keeps the P&L honest when a layer has no data.
    const opportunities: RoiOpportunity[] = [];
    for (const a of pages.values()) {
-      // crawled-not-referring: AI bots crawl the page (real access) but no AI session has landed there.
-      // The gap is citation, not access. Fires only when crawls > 0 AND referred sessions === 0.
-      if (a.aiCrawls > 0 && a.aiReferredSessions === 0) {
-         opportunities.push({
-            type: 'crawled-not-referring',
-            page: a.page,
-            detail: `AI bots crawled ${a.page} ${a.aiCrawls} time(s) but no AI engine has sent a visitor to it yet. `
-               + 'The gap is citation, not access. Make the page more citation-ready (clear answer up top, structured claims) to win referrals.',
-         });
-      }
       // ai-outconverts-organic: the page's AI-referred sessions convert materially better than its
       // organic-search sessions. Requires real samples on BOTH sides (so a 0-baseline can never fire),
       // a positive AI rate, and a gap clearing the floor.
@@ -233,22 +192,17 @@ export const buildAeoRoi = (
    // The top-level note is the honest headline. It NEVER states a rate off a zero baseline; it says
    // plainly when a layer (or the whole AI picture) has no data in the window.
    let note: string;
-   if (totalAiCrawls === 0 && totalAiSessions === 0) {
-      note = 'No AI activity in this window: no AI crawler hits and no AI-referred sessions recorded. '
-         + 'AI crawls normally appear before AI referrals, and the crawler feed needs a server-side ingest, so an empty AI P&L early on is expected. '
+   if (totalAiSessions === 0) {
+      note = 'No AI activity in this window: no AI-referred sessions recorded. '
+         + 'AI referral traffic to most sites builds slowly, so an empty AI P&L early on is expected. '
          + 'Re-check as the window fills.';
-   } else if (totalAiSessions === 0) {
-      note = `AI bots crawled ${totalAiCrawls} time(s) but no AI engine has sent a visitor yet this window. `
-         + 'That is the normal early state: crawl is the leading indicator, referred traffic is the outcome. The gap is citation, not access.';
    } else {
       const revenueNote = totalAiRevenue !== null ? ` Worth ~${totalAiRevenue} at ${goalValue} per conversion.` : '';
       note = `AI engines referred ${totalAiSessions} session(s) producing ${aiConversions} conversion(s) across ${byPage.length} page(s).`
-         + `${revenueNote} ${totalAiCrawls} AI crawler hit(s) recorded.`;
+         + `${revenueNote}`;
    }
 
    return {
-      totalAiCrawls,
-      aiCrawlerEngines,
       totalAiSessions,
       aiConversions,
       totalAiRevenue,

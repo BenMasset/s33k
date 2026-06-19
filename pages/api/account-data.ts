@@ -15,7 +15,7 @@ import { deleteUmamiWebsite } from '../../utils/umami-provision';
 
 // HARD DELETE: the ultimate "your data is yours." DELETE /api/account-data permanently and
 // irreversibly erases ALL of the calling account's data: every domain, every keyword (with
-// rank history), every crawler hit, every autocapture event, the account's api_keys, and
+// rank history), every autocapture event, the account's api_keys, and
 // the account row itself, plus a best-effort deprovision of each per-domain Umami website.
 //
 // THIS IS SECURITY-CRITICAL AND IRREVERSIBLE. Three guardrails, all enforced here:
@@ -37,7 +37,6 @@ type DeleteResponse = {
    deletedAccountId?: number,
    domainsRemoved?: number,
    keywordsRemoved?: number,
-   crawlerHitsRemoved?: number,
    eventsRemoved?: number,
    featureRequestsRemoved?: number,
    invitesRemoved?: number,
@@ -98,14 +97,14 @@ const deleteAccountData = async (req: NextApiRequest, res: NextApiResponse<Delet
       }
 
       // Delete the tenant's rows. Each delete is scoped: owner_id (keyword/event) AND/OR the
-      // caller's owned-domain set (keyword/event/crawler_hit), and owner_id for the domains.
+      // caller's owned-domain set (keyword/event), and owner_id for the domains.
       const domainFilter = domainNames.length > 0 ? { [Op.in]: domainNames } : { [Op.in]: [] as string[] };
 
       const keywordsRemoved = await Keyword.destroy({ where: { ...scope, domain: domainFilter } });
       const eventsRemoved = await S33kEvent.destroy({ where: { ...scope, domain: domainFilter } });
-      const crawlerHitsRemoved = domainNames.length > 0
-         ? await CrawlerHit.destroy({ where: { domain: domainFilter } })
-         : 0;
+      // Purge any leftover dormant per-domain rows keyed only by the owned-domain set, so a deleted
+      // account leaves nothing behind. Scoped by the caller's owned domain names (globally @Unique).
+      if (domainNames.length > 0) { await CrawlerHit.destroy({ where: { domain: domainFilter } }); }
       const domainsRemoved = await Domain.destroy({ where: { ...scope } });
 
       // Account-linked records the export/delete trust claim must also cover (security review #3).
@@ -131,7 +130,7 @@ const deleteAccountData = async (req: NextApiRequest, res: NextApiResponse<Delet
 
       console.log(
          `[DELETE] Hard-deleted account ID ${accountId}: ${domainsRemoved} domains, ${keywordsRemoved} keywords, `
-         + `${crawlerHitsRemoved} crawler hits, ${eventsRemoved} events, ${featureRequestsRemoved} feature requests, `
+         + `${eventsRemoved} events, ${featureRequestsRemoved} feature requests, `
          + `${invitesRemoved} invites, ${apiKeysRemoved} api keys, account row removed: ${accountRemoved}, `
          + `umami websites deleted: ${umamiWebsitesDeleted}. IRREVERSIBLE.`,
       );
@@ -141,7 +140,6 @@ const deleteAccountData = async (req: NextApiRequest, res: NextApiResponse<Delet
          deletedAccountId: accountId,
          domainsRemoved,
          keywordsRemoved,
-         crawlerHitsRemoved,
          eventsRemoved,
          featureRequestsRemoved,
          invitesRemoved,

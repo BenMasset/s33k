@@ -329,7 +329,7 @@ const pickNextAction = (ctx: {
    }
    // 4. AEO push when no AI engine sends visitors yet.
    if (!aiVisibility.sendingVisitors) {
-      return 'Start the AEO loop: no AI engines send visitors yet. Confirm robots.txt allows GPTBot/ClaudeBot/PerplexityBot, '
+      return 'Start the AEO loop: no AI engines send visitors yet. Make sure robots.txt allows AI answer engines, '
          + 'publish an llms.txt, and structure key pages as direct answers so engines begin citing the site.';
    }
    // 5. Nothing urgent: keep compounding what already works.

@@ -2,7 +2,7 @@
  * Install-guide library for the s33k onboarding tracking snippet.
  *
  * Once a domain has a provisioned Umami website, the customer needs to add the Umami
- * tracking script to their site so s33k can collect analytics and AEO/AI-crawler signal.
+ * tracking script to their site so s33k can collect analytics and AEO/AI-referral signal.
  * This module turns a domain + its Umami website id into (1) the exact script snippet and
  * (2) accurate, copy-paste-ready, per-platform install instructions for the surfaces a
  * marketer is most likely to be on.

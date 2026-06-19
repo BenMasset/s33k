@@ -25,8 +25,8 @@
  * deltas need a non-zero prior baseline; AI "new engine" detection needs the
  * prior set to be known. When a baseline is absent the engine stays silent for
  * that rule rather than inventing a 100%-style swing out of a zero. The one place
- * "from nothing" is itself the signal is a brand-NEW AI engine appearing, which
- * is a genuine leading AEO indicator and is surfaced as such. The route reports
+ * "from nothing" is itself the signal is a brand-NEW AI engine referring traffic,
+ * which is a genuine leading AEO indicator and is surfaced as such. The route reports
  * per-pillar data availability separately; this engine simply does not fire on
  * what it cannot honestly measure.
  */
@@ -72,15 +72,12 @@ export type TrafficTotals = {
  *   - keywords        keyed by keyword string for current-vs-prior pairing.
  *   - traffic         compared only when the prior baseline is non-zero.
  *   - aiEngines       compared by engine label; a brand-new label is the signal.
- *   - aiCrawlerEngines the SET of AI engines seen crawling (leading AEO signal).
  *   - formSubmissions compared only when the prior baseline is non-zero.
  */
 export type PeriodData = {
    keywords: KeywordRank[],
    traffic: TrafficTotals,
    aiEngines: AiEngineCount[],
-   /** Distinct AI-engine crawler names seen this period (e.g. "GPTBot", "ClaudeBot"). */
-   aiCrawlerEngines: string[],
    /** Total form submissions this period (the autocapture conversion proxy). */
    formSubmissions: number,
 };
@@ -290,19 +287,13 @@ const detectTrafficChanges = (current: TrafficTotals, prior: TrafficTotals): Ale
  *      absent prior). "From nothing" IS the signal here, so this is the one rule
  *      that intentionally fires off a zero prior. High severity.
  *   2. An existing AI engine's referral visitors grew/shrank by AI_CHANGE_MIN+.
- *   3. A brand-NEW AI engine started CRAWLING (in the crawler set now, not prior).
- *      Crawls precede citations, so a new crawler is an early access signal.
  * @param {AiEngineCount[]} currentEngines - This period's AI referral engines.
  * @param {AiEngineCount[]} priorEngines - The prior period's AI referral engines.
- * @param {string[]} currentCrawlers - This period's distinct AI crawler engines.
- * @param {string[]} priorCrawlers - The prior period's distinct AI crawler engines.
  * @returns {Alert[]}
  */
 const detectAiChanges = (
    currentEngines: AiEngineCount[],
    priorEngines: AiEngineCount[],
-   currentCrawlers: string[],
-   priorCrawlers: string[],
 ): Alert[] => {
    const alerts: Alert[] = [];
 
@@ -346,22 +337,6 @@ const detectAiChanges = (
       });
    });
 
-   // New AI crawler engines: in the crawler set now, not before. Access before citation.
-   const priorCrawlerSet = new Set(priorCrawlers.map((c) => c.toLowerCase()));
-   const seen = new Set<string>();
-   currentCrawlers.forEach((crawler) => {
-      const key = crawler.toLowerCase();
-      if (seen.has(key) || priorCrawlerSet.has(key)) { return; }
-      seen.add(key);
-      alerts.push({
-         severity: 'medium',
-         pillar: 'ai',
-         headline: `${crawler} began crawling your site this period.`,
-         detail: 'A new AI crawler is the leading indicator of AEO: bots crawl before any engine cites you.',
-         recommendation: 'Make the pages you most want cited answer-ready (direct answers, clean headings, '
-            + 'schema) so this new crawler turns into citations and referrals.',
-      });
-   });
    return alerts;
 };
 
@@ -410,7 +385,7 @@ export const detectChanges = (current: PeriodData, prior: PeriodData): AnalystOu
    const alerts: Alert[] = [
       ...detectRankChanges(current.keywords, prior.keywords),
       ...detectTrafficChanges(current.traffic, prior.traffic),
-      ...detectAiChanges(current.aiEngines, prior.aiEngines, current.aiCrawlerEngines, prior.aiCrawlerEngines),
+      ...detectAiChanges(current.aiEngines, prior.aiEngines),
       ...detectConversionChanges(current.formSubmissions, prior.formSubmissions),
    ];
 

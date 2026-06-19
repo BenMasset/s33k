@@ -7,7 +7,7 @@
  * text block. Its hard contracts:
  *
  *   1. OWNERSHIP: a domain the caller does not own returns 403 and NO pillar read
- *      runs (Keyword/CrawlerHit/S33kEvent/Goal.findAll are never called).
+ *      runs (Keyword/S33kEvent/Goal.findAll are never called).
  *   2. AUTH / METHOD / INPUT: 401 unauthorized, 405 non-GET, 400 missing domain.
  *   3. HAPPY PATH: an owned domain returns 200, a structured brief, and a non-empty
  *      rendered string; a real rank change surfaces in whatChanged.
@@ -23,7 +23,6 @@ jest.mock('../../database/database', () => ({ __esModule: true, default: { sync:
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('../../database/models/domain', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
 jest.mock('../../database/models/keyword', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
-jest.mock('../../database/models/crawlerHit', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../database/models/s33kEvent', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../database/models/goal', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../utils/analytics', () => {
@@ -42,8 +41,6 @@ import Domain from '../../database/models/domain';
 // eslint-disable-next-line import/first
 import Keyword from '../../database/models/keyword';
 // eslint-disable-next-line import/first
-import CrawlerHit from '../../database/models/crawlerHit';
-// eslint-disable-next-line import/first
 import S33kEvent from '../../database/models/s33kEvent';
 // eslint-disable-next-line import/first
 import Goal from '../../database/models/goal';
@@ -51,7 +48,6 @@ import Goal from '../../database/models/goal';
 const mockedAuthorize = authorize as unknown as jest.Mock;
 const mockedDomainFindOne = (Domain as unknown as { findOne: jest.Mock }).findOne;
 const mockedKeywordFindAll = (Keyword as unknown as { findAll: jest.Mock }).findAll;
-const mockedCrawlerFindAll = (CrawlerHit as unknown as { findAll: jest.Mock }).findAll;
 const mockedEventFindAll = (S33kEvent as unknown as { findAll: jest.Mock }).findAll;
 const mockedGoalFindAll = (Goal as unknown as { findAll: jest.Mock }).findAll;
 const mockedGetProvider = getAnalyticsProvider as jest.Mock;
@@ -124,7 +120,6 @@ beforeEach(() => {
    mockedAuthorize.mockResolvedValue({ authorized: true, account: { ID: 1 } });
    mockedDomainFindOne.mockResolvedValue({ ID: 1, domain: 'getmasset.com' });
    mockedKeywordFindAll.mockResolvedValue([]);
-   mockedCrawlerFindAll.mockResolvedValue([]);
    mockedEventFindAll.mockResolvedValue([]);
    mockedGoalFindAll.mockResolvedValue([]);
    mockedGetProvider.mockReturnValue(providerStub());
@@ -162,7 +157,6 @@ describe('daily-brief route: ownership gate', () => {
       expect(captured.status).toBe(403);
       expect(captured.body.error).toMatch(/not found/i);
       expect(mockedKeywordFindAll).not.toHaveBeenCalled();
-      expect(mockedCrawlerFindAll).not.toHaveBeenCalled();
       expect(mockedEventFindAll).not.toHaveBeenCalled();
       expect(mockedGoalFindAll).not.toHaveBeenCalled();
    });
@@ -209,7 +203,6 @@ describe('daily-brief route: happy path', () => {
 describe('daily-brief route: graceful degradation (never 500)', () => {
    it('still returns a usable 200 when the provider and several reads fail at once', async () => {
       mockedKeywordFindAll.mockRejectedValue(new Error('kw down'));
-      mockedCrawlerFindAll.mockRejectedValue(new Error('crawler down'));
       mockedEventFindAll.mockRejectedValue(new Error('event down'));
       mockedGoalFindAll.mockRejectedValue(new Error('goal down'));
       mockedGetProvider.mockReturnValue(providerStub({ throwOn: new Set(['getSummary', 'getReferralSources', 'getPageTraffic']) }));

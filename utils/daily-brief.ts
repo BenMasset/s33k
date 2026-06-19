@@ -101,9 +101,8 @@ const MAX_CHANGES = 4;
  * Pick the single most relevant AEO opportunity to enrich the action with. The
  * opportunity types are ordered by leverage: a page AI already sends traffic to but
  * that does not convert (cited-not-converting) is the most actionable, then a page
- * AI crawls but does not yet refer (crawled-not-referring), then a page where AI
- * out-converts organic (ai-outconverts-organic, a "double down" signal). Returns
- * null when there are no opportunities (an honest empty AEO layer).
+ * where AI out-converts organic (ai-outconverts-organic, a "double down" signal).
+ * Returns null when there are no opportunities (an honest empty AEO layer).
  * @param {AeoRoi | null} roi - The AI Visibility P&L, or null.
  * @returns {RoiOpportunity | null}
  */
@@ -111,8 +110,7 @@ const topAeoOpportunity = (roi: AeoRoi | null): RoiOpportunity | null => {
    if (!roi || !roi.opportunities || roi.opportunities.length === 0) { return null; }
    const order: Record<RoiOpportunity['type'], number> = {
       'cited-not-converting': 0,
-      'crawled-not-referring': 1,
-      'ai-outconverts-organic': 2,
+      'ai-outconverts-organic': 1,
    };
    return [...roi.opportunities].sort((a, b) => order[a.type] - order[b.type])[0];
 };

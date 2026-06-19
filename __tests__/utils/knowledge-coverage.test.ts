@@ -169,7 +169,7 @@ describe('help tool (searchKnowledge): returns topic-relevant content', () => {
       expect(result.capabilities.length).toBeGreaterThan(0);
       expect(result.capabilities.every((c) => c.category === 'aeo')).toBe(true);
       const names = result.capabilities.map((c) => c.toolName);
-      expect(names).toEqual(expect.arrayContaining(['ai_referrals', 'ai_crawlers', 'ai_visibility']));
+      expect(names).toEqual(expect.arrayContaining(['ai_referrals', 'ai_visibility']));
    });
 
    it('surfaces the trust/security facts for a security question', () => {
@@ -208,7 +208,6 @@ describe('request_feature safety net (crossCheckCapability)', () => {
       const cases: { request: string, expected: string }[] = [
          { request: 'show me how far visitors scroll down each page', expected: 'scroll_depth' },
          { request: 'which AI engines like ChatGPT and Perplexity sent me referral traffic', expected: 'ai_referrals' },
-         { request: 'report which AI crawlers like GPTBot crawled my site', expected: 'ai_crawlers' },
       ];
       for (const { request, expected } of cases) {
          const match = crossCheckCapability(request);

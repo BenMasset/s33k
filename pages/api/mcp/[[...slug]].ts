@@ -4,7 +4,7 @@
  * THE POINT: a recipient connects to s33k from any MCP client (Claude.ai connectors, Claude Code,
  * Cursor) by adding ONE URL plus a Bearer key, with NO local install. The local stdio server
  * (mcp/src/index.ts) still exists for self-hosters; this route is the zero-install path that makes
- * sharing one-click. It exposes the SAME 82 tools and knowledge resources via the SHARED
+ * sharing one-click. It exposes the SAME 81 tools and knowledge resources via the SHARED
  * registerS33kTools (mcp/src/tools.ts), so the two transports can never drift.
  *
  * THE SECURITY CRUX (read before touching this file):
@@ -38,7 +38,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 // The tool registrations live in the MCP workspace (mcp/src/tools.ts). The root tsconfig EXCLUDES
 // mcp/ from type-checking, but webpack still resolves and bundles this relative import for the
-// server build, so the same 82 tools are served here without duplicating a single registration.
+// server build, so the same 81 tools are served here without duplicating a single registration.
 // eslint-disable-next-line import/no-relative-packages
 import { registerS33kTools, FetchImpl } from '../../../mcp/src/tools';
 import { ensureSynced } from '../../../database/database';

@@ -6,7 +6,7 @@ controls all of it from their own LLM over MCP. Forked from `towfiqi/serpbear` (
 
 The product is the unified MCP control plane that joins three pillars a marketer checks constantly:
 SEO (per-page keyword rank in Google), Analytics (traffic + sources, Umami-backed), and AEO/GEO
-(do AI engines crawl, cite, and refer you). The join across all three, per page, is the thing no
+(do AI engines cite and refer you). The join across all three, per page, is the thing no
 other tool does.
 
 This file is for the AI doing the work. Read it before you build. Add to it when you hit a
@@ -20,11 +20,11 @@ hard-won lesson, so the next session never relearns it.
   line: `export NVM_DIR="$HOME/.nvm"; source "$NVM_DIR/nvm.sh"; nvm use 20 >/dev/null 2>&1;`
 - **Tests:** `npx jest --ci` (one-shot). `npm run test` is WATCH mode, do not use it for verification.
 - **Lint:** `npm run lint` must be clean. **Build:** `npm run build` must print "Compiled successfully".
-- **MCP server:** `cd mcp && npm run build`, then probe over a real stdio handshake. 82 tools + 5
-  resources today. Banner reads "82 tools and 5 resources registered." Smoke harness: `npm run smoke`
+- **MCP server:** `cd mcp && npm run build`, then probe over a real stdio handshake. 81 tools + 5
+  resources today. Banner reads "81 tools and 5 resources registered." Smoke harness: `npm run smoke`
   from `mcp/`. The smoke test's EXPECTED_TOOLS and the registered set are kept in lockstep by a jest
   guard (`__tests__/utils/knowledge-coverage.test.ts`), so this count cannot silently rot.
-- **Two MCP transports, one tool set.** The 82 tools live in `mcp/src/tools.ts` (`registerS33kTools`).
+- **Two MCP transports, one tool set.** The 81 tools live in `mcp/src/tools.ts` (`registerS33kTools`).
   `mcp/src/index.ts` is the thin stdio entry; `pages/api/mcp/[[...slug]].ts` is the hosted Streamable
   HTTP endpoint at `/api/mcp` (connect with a URL + Bearer key, no install). Both register the SAME
   tools, each binding its own per-connection key. See section D below.
@@ -92,7 +92,7 @@ hard-won lesson, so the next session never relearns it.
 - Add a `CapabilityEntry` to `utils/knowledge.ts` for any new tool, or the knowledge-coverage jest
   test FAILS the build. This is the self-support durability guarantee: a user's own LLM must be able
   to answer any question about the tool, so the answers can never silently rot.
-- Tools are registered in `mcp/src/tools.ts` (`registerS33kTools`, 82 tools + 5 resources today),
+- Tools are registered in `mcp/src/tools.ts` (`registerS33kTools`, 81 tools + 5 resources today),
   shared by the stdio entry (`mcp/src/index.ts`) and the hosted HTTP route (`pages/api/mcp`). The
   knowledge-coverage jest guard parses `tools.ts`, so any new tool there still needs a knowledge entry.
 - Whitelist any new authed API route in `utils/allowedApiRoutes.ts`. Keep that file
@@ -216,7 +216,7 @@ hard-won lesson, so the next session never relearns it.
 - **What it is.** A remote MCP endpoint at `/api/mcp` (Streamable HTTP, SDK
   `StreamableHTTPServerTransport`). A client connects with a URL + a Bearer key and NO local install:
   `claude mcp add --transport http s33k <base-url>/api/mcp --header "Authorization: Bearer <key>"`.
-  It exposes the SAME 82 tools as the stdio server via the shared `mcp/src/tools.ts`.
+  It exposes the SAME 81 tools as the stdio server via the shared `mcp/src/tools.ts`.
 - **THE SECURITY CRUX (do not regress).** The route reads `Authorization: Bearer <key>` off the
   incoming request and binds a per-request fetchImpl to THAT key. Every tool call therefore hits the
   real s33k REST API carrying ONLY the connecting client's key, never `process.env.APIKEY` or any
@@ -307,7 +307,7 @@ data-loss migration. The adversarial review is what has repeatedly caught exactl
 - `utils/authorize.ts`, `utils/scope.ts` · the multi-tenant auth + scoping seam.
 - `utils/allowedApiRoutes.ts` · API-route whitelist (keep dependency-free).
 - `utils/knowledge.ts` · single source of truth for tool docs; the coverage test gates it.
-- `mcp/src/tools.ts` · the SHARED MCP tool + resource registration (82 + 5). `mcp/src/index.ts` is
+- `mcp/src/tools.ts` · the SHARED MCP tool + resource registration (81 + 5). `mcp/src/index.ts` is
   the stdio entry; `pages/api/mcp/[[...slug]].ts` is the hosted HTTP endpoint. Both call into tools.ts.
 - `SECURITY.md` · the verifiable trust facts (no-training, isolation, export/delete, cookieless).
 - `BUILD_PLAN.md` · the phased plan + decision log. `NIGHT_REPORT.md` · the build-session log.

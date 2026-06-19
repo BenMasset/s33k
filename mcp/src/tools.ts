@@ -1,7 +1,7 @@
 /**
  * s33k MCP tool + resource registrations (SHARED).
  *
- * This module is the single source of truth for the 82 tools and the knowledge resources the
+ * This module is the single source of truth for the 81 tools and the knowledge resources the
  * s33k MCP server exposes. It is consumed by TWO transports:
  *   1. mcp/src/index.ts        the stdio entry, bound to process.env.S33K_API_KEY (local install).
  *   2. pages/api/mcp/[[...slug]].ts   the hosted Streamable HTTP endpoint, bound PER REQUEST to the
@@ -15,7 +15,7 @@
  * The handler bodies below are byte-for-byte the originals from the stdio server; they reference a
  * local `s33kFetch` (aliased to fetchImpl), `jsonResult`, `errorResult`, and `z`, so the extraction
  * required no per-tool edits. The knowledge-coverage jest guard parses the tool-registration calls
- * out of THIS module (it now reads tools.ts), keeping the 82-tool count and the smoke EXPECTED_TOOLS
+ * out of THIS module (it now reads tools.ts), keeping the 81-tool count and the smoke EXPECTED_TOOLS
  * list in lockstep with what is registered here.
  */
 
@@ -87,7 +87,7 @@ export const KNOWLEDGE_RESOURCES: { uri: string; topic: string; name: string; de
 ];
 
 /**
- * Register all 82 s33k tools and the knowledge resources on the given MCP server, routing every
+ * Register all 81 s33k tools and the knowledge resources on the given MCP server, routing every
  * underlying API call through `fetchImpl`. Returns the number of tools registered (for banners).
  */
 export function registerS33kTools(server: McpServer, fetchImpl: FetchImpl): { tools: number; resources: number } {
@@ -387,59 +387,26 @@ server.registerTool(
 );
 
 // ---------------------------------------------------------------------------
-// ai_crawlers
-// ---------------------------------------------------------------------------
-server.registerTool(
-   'ai_crawlers',
-   {
-      title: 'AI crawlers',
-      description:
-         'Report which AI answer-engine and search crawlers (GPTBot, OAI-SearchBot, ClaudeBot, PerplexityBot, Google-Extended, Bingbot, and more) are crawling a domain. Use this as the leading indicator of AEO: AI bots crawl a site before any AI engine starts citing it or sending visitors, so this shows up before ai_referrals does. It reads recorded crawler hits (server-log or user-agent ingest) and never queries an LLM. Returns a per-bot breakdown (bot, owner, isAiEngine, hits, lastSeen, sorted by hits), totals (aiEngineHits, allCrawlerHits), and a recent sample of hits.',
-      inputSchema: {
-         domain: z.string().describe('The domain to report AI crawler activity for, e.g. "getmasset.com".'),
-         period: z
-            .string()
-            .optional()
-            .describe('Reporting window, e.g. "30d", "7d". Defaults to "30d".'),
-      },
-   },
-   async ({ domain, period }) => {
-      try {
-         const query: Record<string, string> = { domain };
-         if (period) { query.period = period; }
-         const data = await s33kFetch('/api/ai-crawlers', { query });
-         return jsonResult({ byBot: data.byBot, totals: data.totals, recent: data.recent, error: data.error });
-      } catch (err) {
-         return errorResult(err);
-      }
-   },
-);
-
-// ---------------------------------------------------------------------------
 // ai_visibility
 // ---------------------------------------------------------------------------
 server.registerTool(
    'ai_visibility',
    {
-      title: 'AI visibility funnel',
+      title: 'AI visibility',
       description:
          'Measure a domain\'s standing in AI search (ChatGPT, Claude, Perplexity, Gemini, Copilot, and more) using ONLY '
-         + 'first-party, un-gameable behavior s33k already records: which AI engines CRAWL the site and which AI engines '
-         + 'actually REFER traffic. It never queries an LLM and never asks an AI engine whether it cites the site, so the '
-         + 'signal cannot be gamed. Use this to answer "how visible am I in AI search, and where is the gap?" The novel '
-         + 'output is the FUNNEL between crawl (an AI engine is learning about you, the leading indicator) and referral '
-         + '(an AI engine is recommending you, the outcome), per engine and per page. Returns: pages[] each with a status '
-         + 'of "ai-visible" (crawled AND cited: the goal), "crawled-not-cited" (AI knows the page but does not recommend '
-         + 'it yet, the prime opportunity), "cited-not-crawled" (rare), or "ai-invisible" (no AI crawl at all); engines[] '
-         + 'each with a status of "advocate" (crawls and refers), "aware-not-recommending" (crawls, no referrals yet), or '
-         + '"absent"; and a summary (totalAICrawls, totalAIReferrals, crawlToReferralRate, topAdvocate engine, and the '
-         + 'biggestGap engine). Read crawled-not-cited pages and aware-not-recommending engines as the work to do. Note: '
-         + 'when the analytics provider reports referrals only site-wide (no landing page), per-page isCited cannot be '
-         + 'attributed, so pages show isCited=false while engine-level referrals and the totals stay accurate (the note '
-         + 'field flags this). When first-party crawl/referral data is thin, the response also includes a deterministic '
-         + 'citabilityAudit that fetches the top pages and scores their AI-readiness (llms.txt, Markdown twins, JSON-LD, '
-         + 'answer-shaped content) as a leading indicator. This complements ai_crawlers (raw crawl detail) and '
-         + 'ai_referrals (raw referral detail) by joining them into one funnel.',
+         + 'first-party, un-gameable behavior s33k already records: which AI engines actually REFER traffic. It never '
+         + 'queries an LLM and never asks an AI engine whether it cites the site, so the signal cannot be gamed. Use this '
+         + 'to answer "how visible am I in AI search, and where is the gap?" Returns: pages[] each with a status of '
+         + '"ai-cited" (an AI engine referred visitors to the page) or "not-cited" (no AI referral for the page yet); '
+         + 'engines[] each with a status of "advocate" (refers traffic) or "absent"; and a summary (totalAIReferrals, '
+         + 'topAdvocate engine). Read not-cited pages as the work to do. Note: when the analytics provider reports '
+         + 'referrals only site-wide (no landing page), per-page isCited cannot be attributed, so pages show '
+         + 'isCited=false while engine-level referrals and the totals stay accurate (the note field flags this). When '
+         + 'first-party referral data is thin, the response also includes a deterministic citabilityAudit that fetches '
+         + 'the top pages and scores their AI-readiness (llms.txt, Markdown twins, JSON-LD, answer-shaped content) as a '
+         + 'leading indicator. This complements ai_referrals (raw referral detail) by adding the per-page view and the '
+         + 'citability audit.',
       inputSchema: {
          domain: z.string().describe('The domain to measure AI-search visibility for, e.g. "getmasset.com".'),
          period: z
@@ -1575,7 +1542,7 @@ server.registerTool(
    {
       title: 'AEO report',
       description:
-         'One-call AI-search (AEO) snapshot for a domain. Bundles three first-party signals so a marketer gets the whole AI-search picture at once, never querying an LLM: aiReferrals (which AI engines actually SENT visitors, per engine, with counts and AI share of referred traffic), aiCrawlers (which AI bots HIT the site in the window, per bot with hits and lastSeen), and a funnelSummary (per engine: crawls vs referrals, the leading-indicator-to-outcome join, plus topAdvocate and biggestGap). AI crawls normally appear before AI referrals, so when first-party data is thin the note says so honestly. Use this instead of stitching ai_referrals + ai_crawlers + ai_visibility by hand. Defaults to a 30-day window.',
+         'One-call AI-search (AEO) snapshot for a domain. Bundles the first-party AI-referral signal so a marketer gets the whole AI-search picture at once, never querying an LLM: aiReferrals (which AI engines actually SENT visitors, per engine, with counts and AI share of referred traffic), and an engineSummary (per engine: referral visitors, plus the topAdvocate). When first-party data is thin the note says so honestly. Use this instead of stitching ai_referrals + ai_visibility by hand. Defaults to a 30-day window.',
       inputSchema: {
          domain: z.string().describe('The domain to build the AEO report for, e.g. "getmasset.com".'),
          period: z
@@ -1593,10 +1560,8 @@ server.registerTool(
             domain: data.domain,
             period: data.period,
             aiReferrals: data.aiReferrals,
-            aiCrawlers: data.aiCrawlers,
-            funnelSummary: data.funnelSummary,
+            engineSummary: data.engineSummary,
             referralError: data.referralError,
-            crawlerError: data.crawlerError,
             note: data.note,
             error: data.error,
          });
@@ -2026,7 +1991,7 @@ server.registerTool(
    {
       title: 'Daily briefing',
       description:
-         'Get a single proactive, cross-pillar "daily standup" for a domain: what changed and, more importantly, what to DO about it. Use this as your FIRST call each day or whenever the user asks "how is my site doing?" or "what should I work on?" It composes every s33k pillar (traffic, human-vs-bot reality, SEO rank and opportunity pages, AI visibility from referrals + crawlers, and engagement) into one ready-to-narrate structure: a headline, sections (each a titled list of plain-English points covering traffic/human-vs-bot, search rank and opportunity pages, AI visibility, and engagement), and the top 3 recommended actions in priority order. The s33k server does NOT call any LLM; it does the joins and the prioritization with transparent rules. YOU (the connected LLM) read this and narrate it as a morning standup, leading with the headline and the recommendations. It never fails on a missing signal: a dead provider or empty data degrades one section instead of the whole briefing.',
+         'Get a single proactive, cross-pillar "daily standup" for a domain: what changed and, more importantly, what to DO about it. Use this as your FIRST call each day or whenever the user asks "how is my site doing?" or "what should I work on?" It composes every s33k pillar (traffic, human-vs-bot reality, SEO rank and opportunity pages, AI visibility from referrals, and engagement) into one ready-to-narrate structure: a headline, sections (each a titled list of plain-English points covering traffic/human-vs-bot, search rank and opportunity pages, AI visibility, and engagement), and the top 3 recommended actions in priority order. The s33k server does NOT call any LLM; it does the joins and the prioritization with transparent rules. YOU (the connected LLM) read this and narrate it as a morning standup, leading with the headline and the recommendations. It never fails on a missing signal: a dead provider or empty data degrades one section instead of the whole briefing.',
       inputSchema: {
          domain: z.string().describe('The domain to brief on, e.g. "getmasset.com".'),
          period: z
@@ -2066,7 +2031,7 @@ server.registerTool(
          + 'and what should I do about it?" It compares the current period to the immediately-prior period of the same '
          + 'length and surfaces the notable shifts as a PRIORITIZED list of plain-English alerts: keyword rank moves of 5+ '
          + 'positions or crossing page one (the highest-signal SEO move), traffic swings of 25%+ (pageviews and visitors), '
-         + 'any brand-NEW AI referral engine or AI crawler (a leading AEO signal: a new engine citing or crawling you), and '
+         + 'any brand-NEW AI referral engine (a leading AEO signal: a new engine sending you visitors), and '
          + 'form-submission/conversion changes of 30%+. Each alert carries a severity (high/medium/low), the pillar, a '
          + 'headline stating exactly what changed, a detail with the numbers, and a concrete recommendation. The response '
          + 'also returns topPriority: the single most important thing to do this week, and a per-pillar dataAvailability note '
@@ -2114,7 +2079,7 @@ server.registerTool(
          + 'Where briefing answers "how is my site right now?" and alerts answers "what changed?", daily_brief answers the '
          + 'hardest, most useful question of all in one tight digest: "what is the single most important thing to do today?" '
          + 'It composes a HEADLINE (the most important thing right now), 2-4 WHAT-CHANGED bullets (this period vs the prior '
-         + 'equal window, across rank movers, traffic delta, AI-referral delta, new AI crawler, and conversion delta), and the '
+         + 'equal window, across rank movers, traffic delta, AI-referral delta, and conversion delta), and the '
          + 'SINGLE top ACTION, enriched with the top AI-visibility opportunity and the top opportunity page. Use this as the '
          + 'user FIRST thing each day, or whenever they ask "what should I focus on today?" The same brief is also delivered '
          + 'by scheduled email when the instance enables it. RULES-BASED: the s33k server does NOT call any LLM; it joins and '
@@ -2531,7 +2496,7 @@ server.registerTool(
       title: 'Export all your account data',
       description:
          'Download EVERYTHING s33k holds about your account as one JSON bundle: your domains, your keywords (with full '
-         + 'Google rank history), your AI/SEO crawler hits, your autocapture analytics events, and your account + API-key '
+         + 'Google rank history), your autocapture analytics events, and your account + API-key '
          + 'metadata. Use this whenever you want to take your data with you, back it up, or verify exactly what s33k stores. '
          + 'Your data is yours: this is the export side of that promise. The bundle is tenant-scoped, so it only ever '
          + 'contains YOUR own data and never another account\'s. It NEVER includes any secret: Search Console / Google Ads '
@@ -2559,7 +2524,7 @@ server.registerTool(
       title: 'Permanently delete all your account data (IRREVERSIBLE)',
       description:
          'PERMANENTLY and IRREVERSIBLY delete your ENTIRE account and ALL of its data: every domain, every keyword and its '
-         + 'rank history, every crawler hit, every autocapture analytics event, your API keys, your account itself, and '
+         + 'rank history, every autocapture analytics event, your API keys, your account itself, and '
          + 'your per-domain analytics websites. There is NO undo and NO recovery: once this runs, the data is gone. This '
          + 'is the delete side of "your data is yours." To run it you MUST pass the exact confirmation string confirm = '
          + '"DELETE"; without it the call is refused and nothing is deleted. It is tenant-scoped, so it can only ever '
@@ -3024,15 +2989,15 @@ server.registerTool(
    {
       title: 'The AI Visibility P&L: does AI search actually make me money (the flagship cross-pillar join)',
       description:
-         'The cross-pillar report no AEO tool can produce: it closes the loop from AI crawls to '
+         'The cross-pillar report no AEO tool can produce: it closes the loop from '
          + 'AI-referred traffic to conversions to revenue, PER PAGE. For a named goal it joins which AI '
-         + 'bots crawled each page, which AI engines then referred real visitors there, which of those '
+         + 'engines referred real visitors to each page, which of those '
          + 'visitors converted, and what each conversion is worth, so you see the actual return on AI '
-         + 'visibility. Returns byPage (crawls, crawler engines, AI-referred sessions, conversions, AI vs '
+         + 'visibility. Returns byPage (AI-referred sessions, conversions, AI vs '
          + 'organic conversion rate, and revenue when the goal has a value) and opportunities (the money '
-         + 'moves: pages AI crawls but never refers, pages where AI out-converts organic, and pages AI '
-         + 'sends traffic to that never convert). Honest by design: when a layer has no data (e.g. the AI '
-         + 'crawler feed is not populated yet) it says so rather than fabricate a rate. Requires the '
+         + 'moves: pages where AI out-converts organic, and pages AI '
+         + 'sends traffic to that never convert). Honest by design: when a layer has no data it says so '
+         + 'rather than fabricate a rate. Requires the '
          + 'tracking script installed and at least one goal.',
       inputSchema: {
          domain: z.string().describe('The domain, e.g. "getmasset.com".'),
@@ -3095,5 +3060,5 @@ for (const resource of KNOWLEDGE_RESOURCES) {
    );
 }
 
-   return { tools: 82, resources: KNOWLEDGE_RESOURCES.length };
+   return { tools: 81, resources: KNOWLEDGE_RESOURCES.length };
 }

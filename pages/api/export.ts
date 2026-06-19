@@ -3,7 +3,6 @@ import { Op } from 'sequelize';
 import { ensureSynced } from '../../database/database';
 import Domain from '../../database/models/domain';
 import Keyword from '../../database/models/keyword';
-import CrawlerHit from '../../database/models/crawlerHit';
 import S33kEvent from '../../database/models/s33kEvent';
 import Account from '../../database/models/account';
 import ApiKey from '../../database/models/apiKey';
@@ -15,7 +14,7 @@ import type Account2 from '../../database/models/account';
 
 // DATA EXPORT: ownership the caller can exercise. GET /api/export returns EVERYTHING s33k
 // holds for the calling account as one JSON bundle: domains, keywords (with full rank
-// history), crawler hits, autocapture events, and account/key metadata. This is the
+// history), autocapture events, and account/key metadata. This is the
 // human-and-machine-readable proof of "your data is yours and you can take it with you."
 //
 // TENANT-SCOPED: the bundle only ever contains the caller's own data. Every query is
@@ -48,7 +47,6 @@ type ExportResponse = {
    apiKeys?: ExportApiKeyMeta[],
    domains?: Record<string, unknown>[],
    keywords?: Record<string, unknown>[],
-   crawlerHits?: Record<string, unknown>[],
    events?: Record<string, unknown>[],
    invites?: Record<string, unknown>[],
    featureRequests?: Record<string, unknown>[],
@@ -99,19 +97,13 @@ const exportData = async (req: NextApiRequest, res: NextApiResponse<ExportRespon
          : { ...scope, domain: { [Op.in]: [] as string[] } };
       const keywords: Keyword[] = await Keyword.findAll({ where: keywordWhere });
 
-      // 3. Crawler hits have no owner_id column; they are scoped purely by the caller's
-      //    owned domain names (the same gate every crawler read uses).
-      const crawlerHits: CrawlerHit[] = domainNames.length > 0
-         ? await CrawlerHit.findAll({ where: { domain: { [Op.in]: domainNames } }, order: [['hitAt', 'DESC']] })
-         : [];
-
-      // 4. Autocapture events: scoped by owner_id AND the caller's domain set.
+      // 3. Autocapture events: scoped by owner_id AND the caller's domain set.
       const eventWhere = domainNames.length > 0
          ? { ...scope, domain: { [Op.in]: domainNames } }
          : { ...scope, domain: { [Op.in]: [] as string[] } };
       const events: S33kEvent[] = await S33kEvent.findAll({ where: eventWhere });
 
-      // 5. Account + API-key metadata. Only meaningful with MULTI_TENANT on; for the admin /
+      // 4. Account + API-key metadata. Only meaningful with MULTI_TENANT on; for the admin /
       //    single-tenant caller account may be null, in which case there is no account row to
       //    emit. NEVER emit key_hash; emit only non-sensitive key metadata.
       let accountMeta: Record<string, unknown> | null = null;
@@ -135,11 +127,11 @@ const exportData = async (req: NextApiRequest, res: NextApiResponse<ExportRespon
          });
       }
 
-      // 6. Feature requests: account-linked text, scoped by owner_id (scope). Part of "everything
+      // 5. Feature requests: account-linked text, scoped by owner_id (scope). Part of "everything
       //    s33k holds for you" (security review #3). Admin/single-tenant (scope {}) gets all.
       const featureRequests: FeatureRequest[] = await FeatureRequest.findAll({ where: { ...scope } });
 
-      // 7. Invites tied to this account as inviter, target, or accepted-by. Only meaningful with
+      // 6. Invites tied to this account as inviter, target, or accepted-by. Only meaningful with
       //    MULTI_TENANT on (account present); the table is inert otherwise. Invite has no owner_id,
       //    so it is scoped explicitly by the three account-id columns rather than scopeWhere.
       let invites: Invite[] = [];
@@ -157,7 +149,6 @@ const exportData = async (req: NextApiRequest, res: NextApiResponse<ExportRespon
 
       const domainsOut = domains.map(sanitizeDomain);
       const keywordsOut = keywords.map((k) => k.get({ plain: true }) as Record<string, unknown>);
-      const crawlerHitsOut = crawlerHits.map((c) => c.get({ plain: true }) as Record<string, unknown>);
       const eventsOut = events.map((e) => e.get({ plain: true }) as Record<string, unknown>);
       const featureRequestsOut = featureRequests.map((f) => f.get({ plain: true }) as Record<string, unknown>);
       // Invites: the secret `code` is stripped (it is a live credential that mints API keys); we
@@ -175,14 +166,12 @@ const exportData = async (req: NextApiRequest, res: NextApiResponse<ExportRespon
          apiKeys,
          domains: domainsOut,
          keywords: keywordsOut,
-         crawlerHits: crawlerHitsOut,
          events: eventsOut,
          invites: invitesOut,
          featureRequests: featureRequestsOut,
          counts: {
             domains: domainsOut.length,
             keywords: keywordsOut.length,
-            crawlerHits: crawlerHitsOut.length,
             events: eventsOut.length,
             apiKeys: apiKeys.length,
             invites: invitesOut.length,

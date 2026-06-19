@@ -51,10 +51,11 @@ and a data model that do not exist in upstream SerpBear:
 - The analytics layer (`utils/analytics.ts`, `utils/lodd.ts`, `utils/umami.ts`)
   and its routes (`/api/summary`, `/api/breakdown`, `/api/timeseries`,
   `/api/events`, `/api/engagement`, `/api/scoreboard`).
-- AEO/AI features: AI referrals (`/api/ai-referrals`), AI crawler detection
-  (`/api/ai-crawlers`, `crawler-hit`, the `crawlerHit` model + migration),
-  human-vs-bot filtering (`/api/human-traffic`), cross-pillar insights
-  (`/api/insights`), and page discovery (`/api/discover`).
+- AEO/AI features: AI referrals (`/api/ai-referrals`), AI visibility
+  (`/api/ai-visibility`), human-vs-bot filtering (`/api/human-traffic`),
+  cross-pillar insights (`/api/insights`), and page discovery (`/api/discover`).
+  (An answer-engine bot-detection feature was built and later hidden; its dormant
+  plumbing, the `crawlerHit` model + migration and `crawler-hit` route, remains.)
 - The `target_page` keyword field (model change + migration + UI).
 
 Contributing those would force SerpBear to adopt s33k's whole analytics/AEO
@@ -165,7 +166,7 @@ safe minimum.
 - `utils/verifyUser.ts`: add the four whitelist entries listed in section 2.
 
 **Explicitly NOT in the PR** (these are s33k product scope; do not include):
-`pages/api/{ai-crawlers,ai-referrals,breakdown,crawler-hit,discover,engagement,events,human-traffic,insights,scoreboard,summary,timeseries}.ts`,
+`pages/api/{ai-referrals,ai-visibility,breakdown,crawler-hit,discover,engagement,events,human-traffic,insights,scoreboard,summary,timeseries}.ts`,
 `utils/{analytics,lodd,umami,ai-sources,ai-crawlers,bot-filter}.ts`,
 `services/*`, `components/{aitraffic,scoreboard}/*`, the `crawlerHit` model and
 both new migrations, the `target_page` keyword field changes
@@ -186,8 +187,8 @@ These are the edits Ben (or a later run) makes on a fresh branch cut from
 **Keep:** `list_domains`, `create_domain`, `list_keywords`, `add_keyword`,
 `update_keyword`, `delete_keyword`, `refresh_keywords`, `get_insight`.
 
-**Remove the 11 s33k-only tools** (they wrap routes that do not exist upstream):
-`page_scoreboard`, `ai_referrals`, `ai_crawlers`, `traffic_summary`,
+**Remove the 10 s33k-only tools** (they wrap routes that do not exist upstream):
+`page_scoreboard`, `ai_referrals`, `traffic_summary`,
 `human_traffic`, `traffic_breakdown`, `traffic_timeseries`, `top_events`,
 `engagement`, `insights`, `discover_pages`.
 

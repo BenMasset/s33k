@@ -1,13 +1,12 @@
 /**
- * aeo-roi route: "The AI Visibility P&L". The cross-pillar join AI crawls -> AI-referred traffic ->
- * conversions -> revenue, per page. Mocks the models; the real sessionize + buildAeoRoi logic runs.
+ * aeo-roi route: "The AI Visibility P&L". The cross-pillar join AI-referred traffic -> conversions ->
+ * revenue, per page. Mocks the models; the real sessionize + buildAeoRoi logic runs.
  *
  * Also exercises the pure util directly for the honest-zero-baseline guarantee.
  */
 jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
 jest.mock('sequelize', () => ({ __esModule: true, Op: { gte: Symbol('gte'), lt: Symbol('lt'), in: Symbol('in') } }));
 jest.mock('../../database/models/domain', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
-jest.mock('../../database/models/crawlerHit', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../database/models/goal', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
 jest.mock('../../database/models/keyword', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../database/models/s33kEvent', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
@@ -19,8 +18,6 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import handler from '../../pages/api/aeo-roi';
 // eslint-disable-next-line import/first
 import DomainModel from '../../database/models/domain';
-// eslint-disable-next-line import/first
-import CrawlerHitModel from '../../database/models/crawlerHit';
 // eslint-disable-next-line import/first
 import GoalModel from '../../database/models/goal';
 // eslint-disable-next-line import/first
@@ -35,7 +32,6 @@ import { buildAeoRoi } from '../../utils/aeo-roi';
 import type { GoalDef } from '../../utils/sessionize';
 
 const mockDomain = DomainModel as unknown as { findOne: jest.Mock };
-const mockCrawler = CrawlerHitModel as unknown as { findAll: jest.Mock };
 const mockGoal = GoalModel as unknown as { findOne: jest.Mock };
 const mockKeyword = KeywordModel as unknown as { findAll: jest.Mock };
 const mockEvent = S33kEventModel as unknown as { findAll: jest.Mock };
@@ -47,8 +43,6 @@ const goalRow = (over: Record<string, unknown> = {}) =>
 // A pageview event row (sessionize reads these; the route filters bots out post-sessionize).
 const pv = (session: string, source: string, page: string, created: string, is_bot = false) =>
    row({ session, source, is_bot, device: 'desktop', country: 'US', page, type: 'pageview', created });
-// A raw AI crawler hit (CrawlerHit is read with raw:true, so plain objects, not get()-wrapped).
-const crawl = (path: string, owner: string, isAiEngine = true) => ({ path, page: path, owner, bot: `${owner}Bot`, isAiEngine });
 
 const makeReq = (query: Record<string, string>): NextApiRequest =>
    ({ method: 'GET', query, body: {}, headers: {} } as unknown as NextApiRequest);
@@ -68,7 +62,6 @@ beforeEach(() => {
    mockDomain.findOne.mockResolvedValue(row({ ID: 1, domain: 'getmasset.com' }));
    mockGoal.findOne.mockResolvedValue(goalRow());
    mockKeyword.findAll.mockResolvedValue([row({ keyword: 'ai dam', target_page: '/demo' })]);
-   mockCrawler.findAll.mockResolvedValue([]);
    mockEvent.findAll.mockResolvedValue([]);
 });
 
@@ -78,7 +71,6 @@ describe('GET /api/aeo-roi', () => {
       await handler(makeReq({ domain: 'getmasset.com', goal: 'Demo' }), res);
       expect(res.statusCode).toBe(200);
       const roi = res.payload.aeoRoi;
-      expect(roi.totalAiCrawls).toBe(0);
       expect(roi.totalAiSessions).toBe(0);
       expect(roi.aiConversions).toBe(0);
       expect(roi.totalAiRevenue).toBeNull();
@@ -91,14 +83,9 @@ describe('GET /api/aeo-roi', () => {
       expect(demo.aiConversionRatePct).toBe(0);
    });
 
-   it('seeded store: correct per-page funnel, revenue, and a firing opportunity', async () => {
+   it('seeded store: correct per-page funnel and revenue', async () => {
       mockGoal.findOne.mockResolvedValue(goalRow({ value: 250 }));
-      // AI crawls /demo twice (OpenAI) and /pricing once (Anthropic).
-      mockCrawler.findAll.mockResolvedValue([
-         crawl('/demo', 'OpenAI'), crawl('/demo', 'OpenAI'), crawl('/pricing', 'Anthropic'),
-      ]);
-      // /demo: AI session D lands and converts (/thanks). /pricing: AI bot crawled but no AI session
-      // (crawled-not-referring should fire for /pricing).
+      // /demo: AI session D lands and converts (/thanks).
       mockEvent.findAll.mockResolvedValue([
          pv('D', 'ai', '/demo', '2026-06-16T10:00:00Z'),
          pv('D', 'ai', '/thanks', '2026-06-16T10:01:00Z'),
@@ -107,19 +94,13 @@ describe('GET /api/aeo-roi', () => {
       await handler(makeReq({ domain: 'getmasset.com', goal: 'Demo' }), res);
       expect(res.statusCode).toBe(200);
       const roi = res.payload.aeoRoi;
-      expect(roi.totalAiCrawls).toBe(3);
       expect(roi.totalAiSessions).toBe(1);
       expect(roi.aiConversions).toBe(1);
       expect(roi.totalAiRevenue).toBe(250); // 1 conversion * 250
       const demo = roi.byPage.find((p: any) => p.page === '/demo');
-      expect(demo.aiCrawls).toBe(2);
       expect(demo.aiReferredSessions).toBe(1);
       expect(demo.aiConversions).toBe(1);
       expect(demo.revenue).toBe(250);
-      expect(demo.aiCrawlerEngines).toContain('OpenAI');
-      // /pricing was crawled but referred nothing: crawled-not-referring opportunity fires.
-      const opp = roi.opportunities.find((o: any) => o.type === 'crawled-not-referring' && o.page === '/pricing');
-      expect(opp).toBeTruthy();
    });
 
    it('403 when the domain is not owned', async () => {
@@ -173,7 +154,7 @@ describe('buildAeoRoi (pure)', () => {
    });
 
    it('stays silent on a zero baseline (no opportunities, no NaN)', () => {
-      const roi = buildAeoRoi([], [], goal, [{ keyword: 'k', targetPage: '/demo' }], 100);
+      const roi = buildAeoRoi([], goal, [{ keyword: 'k', targetPage: '/demo' }], 100);
       expect(roi.opportunities).toEqual([]);
       expect(roi.totalAiRevenue).toBe(0); // value set, but 0 conversions => 0, never NaN
       expect(roi.byPage.every((p) => !Number.isNaN(p.aiConversionRatePct) && !Number.isNaN(p.organicConversionRatePct))).toBe(true);
@@ -190,7 +171,7 @@ describe('buildAeoRoi (pure)', () => {
          sess('o2', 'organic-search', '/demo', ['/demo']),
          sess('o3', 'organic-search', '/demo', ['/demo']),
       ];
-      const roi = buildAeoRoi([], sessions, goal, [], null);
+      const roi = buildAeoRoi(sessions, goal, [], null);
       const opp = roi.opportunities.find((o) => o.type === 'ai-outconverts-organic' && o.page === '/demo');
       expect(opp).toBeTruthy();
       expect(roi.totalAiRevenue).toBeNull(); // value-less goal => no money anywhere
@@ -202,7 +183,7 @@ describe('buildAeoRoi (pure)', () => {
          sess('a2', 'ai', '/blog', ['/blog']),
          sess('a3', 'ai', '/blog', ['/blog']),
       ];
-      const roi = buildAeoRoi([], sessions, goal, [], null);
+      const roi = buildAeoRoi(sessions, goal, [], null);
       const opp = roi.opportunities.find((o) => o.type === 'cited-not-converting' && o.page === '/blog');
       expect(opp).toBeTruthy();
    });

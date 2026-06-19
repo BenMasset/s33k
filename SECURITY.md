@@ -35,8 +35,8 @@ Where to verify:
   "This route is RULES-BASED. It does NOT call any LLM."
 - `pages/api/insights.ts`: same trust marker and "RULES-BASED. It does NOT call any
   LLM" header.
-- `pages/api/ai-visibility.ts`: trust marker; the funnel is built only from
-  first-party crawler hits and referral traffic plus a deterministic on-page audit.
+- `pages/api/ai-visibility.ts`: trust marker; the view is built only from
+  first-party AI referral traffic plus a deterministic on-page audit.
   "It NEVER queries an LLM."
 - `mcp/src/index.ts`: the `briefing`, `insights`, and `ai_visibility` tool
   descriptions all state the s33k server does not call an LLM.
@@ -102,7 +102,7 @@ shown exactly once, at mint time, and cannot be recovered afterward.
 Ownership you can exercise, not just claim:
 
 - **Export everything.** `GET /api/export` (MCP tool `export_data`) returns one JSON
-  bundle with all of your data: domains, keywords with full rank history, crawler hits,
+  bundle with all of your data: domains, keywords with full rank history,
   autocapture events, and account + API-key metadata. It is tenant-scoped, so it only
   ever contains your own data. It **never** includes a secret: Search Console / Google
   Ads credentials are reported only as configured-or-not, and API keys come back as
@@ -110,7 +110,7 @@ Ownership you can exercise, not just claim:
   the clear key.
 - **Hard-delete everything.** `DELETE /api/account-data` (MCP tool
   `delete_account_data`) permanently and irreversibly deletes your entire account and
-  all of its data: every domain, keyword, crawler hit, and autocapture event, your API
+  all of its data: every domain, keyword, and autocapture event, your API
   keys, your account row, and (best-effort) your per-domain Umami analytics websites. It
   is guarded three ways: it requires the exact confirmation `{ confirm: "DELETE" }` or
   it refuses and changes nothing; it is tenant-scoped so it can only ever delete your

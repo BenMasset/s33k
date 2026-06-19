@@ -112,10 +112,10 @@ export const QUESTION_CATALOG: SuggestedQuestion[] = [
       why: 'Shows real visitors arriving from ChatGPT, Claude, Gemini, and Perplexity, the proof AEO is paying off.',
    },
    {
-      question: 'Are AI bots crawling my site, and do they cite me?',
+      question: 'Am I visible in AI search, and where are the gaps?',
       tool: 'ai_visibility',
       pillar: 'aeo',
-      why: 'Joins the crawler (leading) and referral (outcome) signals so you know if the gap is access or citation.',
+      why: 'Per-page and per-engine view of which AI engines cite you, plus an AI-readiness audit when referrals are thin.',
    },
    // --- Analytics. ----------------------------------------------------------
    {
@@ -235,7 +235,7 @@ export const selectSuggestedQuestions = (state: DashboardState, limit = 6): Sugg
    // 4. AEO: if AI engines already refer traffic, surface the AEO questions.
    if (state.hasAiReferrals) {
       ordered.push(pick('ai_referrals', 'Are AI engines sending me traffic?'));
-      ordered.push(pick('ai_visibility', 'Are AI bots crawling my site, and do they cite me?'));
+      ordered.push(pick('ai_visibility', 'Am I visible in AI search, and where are the gaps?'));
    }
    // 5. Conversions, only when goals are defined.
    if (state.hasGoals) {

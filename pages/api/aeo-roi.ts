@@ -4,14 +4,13 @@ import { ensureSynced } from '../../database/database';
 import authorize from '../../utils/authorize';
 import resolveDomainAccess from '../../utils/domain-access';
 import { scopeWhere } from '../../utils/scope';
-import CrawlerHit from '../../database/models/crawlerHit';
 import Goal from '../../database/models/goal';
 import Keyword from '../../database/models/keyword';
 import S33kEvent from '../../database/models/s33kEvent';
 import type Account from '../../database/models/account';
 import { periodStartMs } from '../../utils/period';
 import { sessionize, EventLike, GoalDef } from '../../utils/sessionize';
-import { buildAeoRoi, AeoRoi, AiCrawlHit, RoiKeyword } from '../../utils/aeo-roi';
+import { buildAeoRoi, AeoRoi, RoiKeyword } from '../../utils/aeo-roi';
 
 /*
  * ============================================================================
@@ -19,9 +18,9 @@ import { buildAeoRoi, AeoRoi, AiCrawlHit, RoiKeyword } from '../../utils/aeo-roi
  * ============================================================================
  * This route NEVER queries an LLM, NEVER embeds/fine-tunes, and NEVER transmits
  * account data to any external model. It reads first-party, un-gameable signals
- * s33k already records (AI crawler hits, AI-referred sessions, conversions, goal
- * value) and JOINS them in pure rules-based code (utils/aeo-roi.ts). Narration
- * happens in the USER's own LLM over MCP. Trust docs: SECURITY.md / security_facts.
+ * s33k already records (AI-referred sessions, conversions, goal value) and JOINS
+ * them in pure rules-based code (utils/aeo-roi.ts). Narration happens in the
+ * USER's own LLM over MCP. Trust docs: SECURITY.md / security_facts.
  * ============================================================================
  */
 
@@ -30,19 +29,18 @@ import { buildAeoRoi, AeoRoi, AiCrawlHit, RoiKeyword } from '../../utils/aeo-roi
  *
  * GET /api/aeo-roi?domain=getmasset.com&period=30d&goal=Demo%20Booked  (or &goalId=1)
  *
- * Closes the loop no AEO tool can: AI crawls -> AI-referred traffic -> conversions
- * -> revenue, PER PAGE, in one call. It does NOT call other API routes over HTTP:
- * it reads the SAME models (CrawlerHit for AI crawls, S33kEvent for sessions, Goal,
- * Keyword) and reuses the SAME utils (sessionize, buildAeoRoi) the AEO and
- * conversion endpoints use, so the numbers agree by construction.
+ * Closes the loop no AEO tool can: AI-referred traffic -> conversions -> revenue,
+ * PER PAGE, in one call. It does NOT call other API routes over HTTP: it reads the
+ * SAME models (S33kEvent for sessions, Goal, Keyword) and reuses the SAME utils
+ * (sessionize, buildAeoRoi) the AEO and conversion endpoints use, so the numbers
+ * agree by construction.
  *
  * Resilience contract (mirrors conversion-attribution + aeo-report): db.sync,
  * authorize -> 401, GET guard -> 405, per-domain ownership gate -> 403, explicit
- * goal selector required -> 400, goal not found -> 404. Each PILLAR read degrades to
- * an honest note on its own error rather than 500-ing the whole report: a thrown
- * crawler read or session read sets its error field and the report returns 200 with
- * the rest intact. The join itself stays honest: when a layer has no data the util
- * says so instead of fabricating a rate off a zero baseline.
+ * goal selector required -> 400, goal not found -> 404. The session read degrades to
+ * an honest note on its own error rather than 500-ing the whole report. The join
+ * itself stays honest: when a layer has no data the util says so instead of
+ * fabricating a rate off a zero baseline.
  */
 
 type Resp = {
@@ -51,14 +49,10 @@ type Resp = {
    goal?: { id: number, name: string, value: number | null },
    aeoRoi?: AeoRoi,
    // Non-fatal pillar errors, surfaced so a partial P&L is honest.
-   crawlerError?: string | null,
    sessionError?: string | null,
    note?: string | null,
    error?: string | null,
 };
-
-/** A normalized AI crawler hit row pulled from CrawlerHit (raw: true). */
-type CrawlerRow = { page?: string, path?: string, owner: string | null, bot: string, isAiEngine: boolean };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<Resp>) {
    await ensureSynced();
@@ -124,27 +118,7 @@ const getAeoRoi = async (req: NextApiRequest, res: NextApiResponse<Resp>, accoun
          console.log('[WARN] aeo-roi keyword read failed for ', domain, kwErr);
       }
 
-      // --- Pillar 1: AI CRAWLS. CrawlerHit has NO owner_id, so do NOT spread scopeWhere here (it
-      // would filter a non-existent column). Isolation comes from the ownership gate above plus the
-      // globally-@Unique domain. Same isolation note as aeo-report.ts. Degrades to [] + error.
-      let crawlerError: string | null = null;
-      let aiCrawlHits: AiCrawlHit[] = [];
-      try {
-         const crawlerRows = await CrawlerHit.findAll({
-            where: { domain, hitAt: { [Op.gte]: startISO } },
-            attributes: ['page', 'path', 'owner', 'bot', 'isAiEngine'],
-            raw: true,
-         }) as unknown as CrawlerRow[];
-         aiCrawlHits = crawlerRows
-            .filter((r) => r.isAiEngine)
-            // path is the recorded URL path on CrawlerHit; page is tolerated as a fallback for any row
-            // that stored the path under a page attribute. Engine label is the owner (OpenAI, ...).
-            .map((r) => ({ page: String(r.path ?? r.page ?? ''), engine: String(r.owner || r.bot || '') }));
-      } catch (crawlErr) {
-         crawlerError = crawlErr instanceof Error ? crawlErr.message : String(crawlErr);
-      }
-
-      // --- Pillar 2: HUMAN SESSIONS (AI-referred + organic baseline + conversions). Scoped. Human-only
+      // --- HUMAN SESSIONS (AI-referred + organic baseline + conversions). Scoped. Human-only
       // (is_bot filtered in sessionize consumers via channel, but we keep bots out by reading all and
       // letting buildAeoRoi use only 'ai'/'organic-search' channels; bot rows never carry those
       // channels in practice). Degrades to [] + error.
@@ -162,14 +136,13 @@ const getAeoRoi = async (req: NextApiRequest, res: NextApiResponse<Resp>, accoun
          sessionError = sessErr instanceof Error ? sessErr.message : String(sessErr);
       }
 
-      const aeoRoi = buildAeoRoi(aiCrawlHits, sessions, goal, keywords, goalValue);
+      const aeoRoi = buildAeoRoi(sessions, goal, keywords, goalValue);
 
       return res.status(200).json({
          domain,
          period,
          goal: { id: g.ID as number, name: String(g.name), value: goalValue },
          aeoRoi,
-         crawlerError,
          sessionError,
          note: aeoRoi.note,
          error: null,

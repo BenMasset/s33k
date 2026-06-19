@@ -1,8 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { Op } from 'sequelize';
 import { ensureSynced } from '../../database/database';
 import Keyword from '../../database/models/keyword';
-import CrawlerHit from '../../database/models/crawlerHit';
 import Domain from '../../database/models/domain';
 import authorize from '../../utils/authorize';
 import resolveDomainAccess from '../../utils/domain-access';
@@ -44,9 +42,9 @@ import { estimateHumanTraffic } from '../../utils/bot-filter';
  * happened" capability.
  *
  * This route is RULES-BASED. It does NOT call any LLM. It pulls every s33k
- * pillar (traffic, human-vs-bot reality, SEO rank, AI referrals, AI crawlers,
- * engagement) once, runs a set of small, transparent, commented rules over the
- * joined data, and returns a single narration-ready structure:
+ * pillar (traffic, human-vs-bot reality, SEO rank, AI referrals, engagement)
+ * once, runs a set of small, transparent, commented rules over the joined data,
+ * and returns a single narration-ready structure:
  *
  *   {
  *     headline,                       one-line "state of the site" sentence
@@ -96,26 +94,6 @@ const BOT_SHARE_WARN = 30; // percent
 // How many opportunity pages / striking-distance keywords to list per section.
 const MAX_LIST = 5;
 
-/**
- * Convert a period string (e.g. "30d", "7d", "12h", "4w", "3m") into a cutoff
- * Date for the crawler-hit query. Mirrors the parser in ai-crawlers.ts so the
- * crawler window matches the analytics window. Unparseable input -> 30 days.
- * @param {string} period - The reporting window.
- * @returns {Date} The earliest hitAt to include.
- */
-const periodToCutoff = (period: string): Date => {
-   const match = /^(\d+)\s*([dhwm])$/i.exec(String(period || '').trim());
-   let days = 30;
-   if (match) {
-      const n = Number(match[1]);
-      const unit = match[2].toLowerCase();
-      const perUnitDays: Record<string, number> = { h: n / 24, d: n, w: n * 7, m: n * 30 };
-      days = perUnitDays[unit] ?? 30;
-   }
-   const ms = Math.max(1, days) * 24 * 60 * 60 * 1000;
-   return new Date(Date.now() - ms);
-};
-
 /** Round a 0..1 share to one decimal percent (e.g. 0.1234 -> 12.3). */
 const pct = (share: number): number => Math.round(share * 1000) / 10;
 
@@ -144,9 +122,9 @@ const getBriefing = async (req: NextApiRequest, res: NextApiResponse<BriefingRes
    // Verify the caller owns this domain before reading any of its data. With
    // MULTI_TENANT off (default), scopeWhere returns {} so this is just an existence
    // check against the same Domain row the legacy app would have read. With the flag
-   // on, a tenant can only brief a domain they own; everything below (Keyword,
-   // CrawlerHit, and the analytics providers, all keyed by the domain string) is
-   // gated behind this single ownership check.
+   // on, a tenant can only brief a domain they own; everything below (Keyword and
+   // the analytics providers, all keyed by the domain string) is gated behind this
+   // single ownership check.
    const owned = await resolveDomainAccess(account, domain);
    if (!owned) {
       return res.status(403).json({ error: 'Domain not found for this account' });
@@ -158,8 +136,8 @@ const getBriefing = async (req: NextApiRequest, res: NextApiResponse<BriefingRes
       // Pull every pillar in parallel. Each promise is wrapped so a rejection
       // becomes a recoverable value, never an unhandled throw that 500s the
       // briefing. Analytics providers already resolve (not reject) with an
-      // `error` field; the DB and crawler queries get explicit catches.
-      const [keywordRows, traffic, referrals, summary, engagement, botEstimate, crawlerRows] = await Promise.all([
+      // `error` field; the DB query gets an explicit catch.
+      const [keywordRows, traffic, referrals, summary, engagement, botEstimate] = await Promise.all([
          Keyword.findAll({ where: { domain, ...scopeWhere(account) } }).catch(() => [] as Keyword[]),
          provider.getPageTraffic(domain, period).catch((e) => ({ pages: [], error: String(e) })),
          provider.getReferralSources(domain, period).catch((e) => ({ sources: [], error: String(e) })),
@@ -170,11 +148,6 @@ const getBriefing = async (req: NextApiRequest, res: NextApiResponse<BriefingRes
          estimateHumanTraffic(provider, domain, period).catch((e) => ({
             estVisitors: 0, estHumanVisitors: 0, estBotVisitors: 0, botSharePct: 0, method: '', error: String(e),
          })),
-         CrawlerHit.findAll({
-            where: { domain, hitAt: { [Op.gte]: periodToCutoff(period).toJSON() } },
-            order: [['hitAt', 'DESC']],
-            raw: true,
-         }).catch(() => [] as Array<{ bot: string, owner: string | null, isAiEngine: boolean, hitAt: string }>),
       ]);
 
       const keywords: KeywordType[] = parseKeywords(
@@ -184,7 +157,6 @@ const getBriefing = async (req: NextApiRequest, res: NextApiResponse<BriefingRes
       const sources: ReferralSource[] = (referrals as { sources: ReferralSource[] }).sources || [];
       const summaryData = summary as SummaryResult;
       const tiers: EngagementTier[] = (engagement as { tiers: EngagementTier[] }).tiers || [];
-      const crawlers = crawlerRows as Array<{ bot: string, owner: string | null, isAiEngine: boolean, hitAt: string }>;
 
       // ---------------------------------------------------------------------
       // Shared joins (same aggregation scoreboard.ts uses, via the shared util).
@@ -210,7 +182,6 @@ const getBriefing = async (req: NextApiRequest, res: NextApiResponse<BriefingRes
          opportunityPages: false,
          strikingDistance: false,
          aiReferrals: false,
-         aiCrawlOnly: false,
          noAiAtAll: false,
          concentration: false,
          noTraffic: false,
@@ -318,10 +289,9 @@ const getBriefing = async (req: NextApiRequest, res: NextApiResponse<BriefingRes
       sections.push({ title: 'Search rank movement and opportunity pages', points: seoPoints });
 
       // =====================================================================
-      // SECTION 3. AI visibility (referrals + crawlers).
-      // Crawlers are the LEADING indicator (bots crawl before any engine cites
-      // or sends visitors); referrals are the OUTCOME (real AI-driven traffic).
-      // Reading them together tells whether the gap is access or citation.
+      // SECTION 3. AI visibility (referrals).
+      // Referrals are the real AI-driven traffic: which AI answer engines are
+      // actually sending visitors, the direct proof AEO is paying off.
       // =====================================================================
       const aiPoints: string[] = [];
       const aiSources = sources.filter((s) => s.isAI);
@@ -347,35 +317,11 @@ const getBriefing = async (req: NextApiRequest, res: NextApiResponse<BriefingRes
             + `(${aiSharePct}% of all referred traffic), led by ${byEngine}. Direct proof AEO is paying off.`);
       } else {
          aiPoints.push('No measurable visitor traffic from AI answer engines this period.');
+         if (!(referrals as { error?: string | null }).error) {
+            flags.noAiAtAll = true;
+         }
       }
-
-      // Crawler side: who is crawling, and how much of it is AI engines.
-      const aiCrawlerHits = crawlers.filter((c) => c.isAiEngine).length;
-      if (crawlers.length === 0) {
-         aiPoints.push('No AI/search crawler hits recorded this period. If you expect AI engines to find the site, '
-            + 'confirm robots.txt allows GPTBot/ClaudeBot/PerplexityBot and that crawler-hit logging is wired up.');
-      } else {
-         const botMap = new Map<string, number>();
-         crawlers.forEach((c) => { botMap.set(c.bot, (botMap.get(c.bot) || 0) + 1); });
-         const topBots = Array.from(botMap.entries())
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, MAX_LIST)
-            .map(([bot, hits]) => `${bot} (${hits})`)
-            .join(', ');
-         aiPoints.push(`${aiCrawlerHits} AI-engine crawler hits of ${crawlers.length} total this period. `
-            + `Most active: ${topBots}.`);
-      }
-
-      // The diagnostic join: crawled but no referrals = citation gap, not access.
-      if (aiCrawlerHits > 0 && aiVisitors === 0) {
-         flags.aiCrawlOnly = true;
-         aiPoints.push('AI bots ARE crawling but no AI-referred visitors arrived. The gap is citation, not '
-            + 'access: the engines can read the site but are not yet citing it. Improve answer-ready structure '
-            + '(clear headings, direct answers, schema) on the pages you want cited.');
-      } else if (aiCrawlerHits === 0 && aiVisitors === 0 && !(referrals as { error?: string | null }).error) {
-         flags.noAiAtAll = true;
-      }
-      sections.push({ title: 'AI visibility (referrals and crawlers)', points: aiPoints });
+      sections.push({ title: 'AI visibility (referrals)', points: aiPoints });
 
       // =====================================================================
       // SECTION 4. Engagement quality (supporting context for the above).
@@ -420,17 +366,13 @@ const getBriefing = async (req: NextApiRequest, res: NextApiResponse<BriefingRes
          candidates.push('Push the striking-distance keywords (positions 11-20) onto page one. They are the '
             + 'cheapest rank wins: small on-page and internal-link improvements often move them inside the top 10.');
       }
-      if (flags.aiCrawlOnly) {
-         candidates.push('Close the AI citation gap: AI bots crawl the site but send no visitors. Make the target '
-            + 'pages answer-ready (direct answers up top, clean headings, schema, an llms.txt) so engines cite them.');
-      }
       if (flags.aiReferrals) {
          candidates.push('Double down on the content AI engines already cite: keep those pages fresh and '
             + 'well-structured so the AI-referred traffic keeps compounding.');
       }
       if (flags.noAiAtAll) {
-         candidates.push('Start the AEO loop: no AI crawlers and no AI referrals yet. Confirm robots.txt allows '
-            + 'GPTBot/ClaudeBot/PerplexityBot, publish an llms.txt, and structure key pages as direct answers.');
+         candidates.push('Start the AEO loop: no AI referrals yet. Publish an llms.txt, structure key pages as '
+            + 'direct answers, and make sure your robots.txt allows AI answer engines so they begin citing you.');
       }
       if (flags.concentration) {
          candidates.push('Diversify entry points: one page carries most of the traffic. Build and rank a second and '
@@ -460,8 +402,6 @@ const getBriefing = async (req: NextApiRequest, res: NextApiResponse<BriefingRes
          let aiNote = 'no AI referral traffic yet';
          if (flags.aiReferrals) {
             aiNote = `${aiVisitors} AI-referred visitor(s)`;
-         } else if (flags.aiCrawlOnly) {
-            aiNote = 'AI bots crawling but not yet citing';
          }
          const seoNote = flags.opportunityPages
             ? `${opportunities.length} SEO opportunity page(s) waiting`

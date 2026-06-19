@@ -26,7 +26,7 @@ export type EventRow = {
 
 // Parse a period string ("30d", "7d", "12h", "4w", "3m") into the earliest `created`
 // ISO timestamp to include. Anything unparseable falls back to a 30-day window. This is
-// the same grammar the analytics providers and the crawler reports use, so an event
+// the same grammar the analytics providers use, so an event
 // window matches a traffic window for the same period string.
 export const eventPeriodCutoff = (period: string): string => {
    const match = /^(\d+)\s*([dhwm])$/i.exec(String(period || '').trim());

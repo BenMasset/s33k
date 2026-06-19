@@ -52,8 +52,6 @@ const analystQuiet = (): AnalystOutput => ({ alerts: [], topPriority: null });
 
 /** An AEO ROI carrying a single "cited-not-converting" opportunity. */
 const aeoWithOpportunity = (): AeoRoi => ({
-   totalAiCrawls: 4,
-   aiCrawlerEngines: ['OpenAI'],
    totalAiSessions: 5,
    aiConversions: 0,
    totalAiRevenue: null,

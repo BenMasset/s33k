@@ -1,9 +1,9 @@
 /**
  * AI-citability audit.
  *
- * Optional enrichment for the AI Visibility Funnel (pages/api/ai-visibility.ts).
- * When a domain has thin first-party AI-engine behavior (few or no AI crawler
- * hits and no AI referrals), the funnel has little to show. This module fills
+ * Optional enrichment for AI Visibility (pages/api/ai-visibility.ts).
+ * When a domain has thin first-party AI-engine behavior (no AI referrals), the
+ * per-page view has little to show. This module fills
  * that gap with a forward-looking, deterministic signal: how AI-READY the
  * domain's top pages actually are. It does NOT query an LLM and never asks an
  * AI engine whether it cites the site. It fetches the real pages and scores the
@@ -172,7 +172,7 @@ export async function auditCitability(domain: string, paths: string[]): Promise<
    const origin = originFor(domain);
    const note = 'AI-citability audit: a forward-looking, deterministic score of how AI-ready the top pages are '
       + '(llms.txt, a Markdown twin, JSON-LD structured data, and clean answer-shaped content). It fetches the real '
-      + 'pages and never queries an LLM. Shown because first-party AI crawl/referral data is currently thin.';
+      + 'pages and never queries an LLM. Shown because first-party AI referral data is currently thin.';
 
    // Normalize, de-duplicate, and cap the page set. Always include the root.
    const seen = new Set<string>();

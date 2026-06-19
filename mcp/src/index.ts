@@ -3,7 +3,7 @@
  * s33k MCP server, stdio transport.
  *
  * Exposes s33k (an open, self-hosted SEO/AEO rank tracker forked from SerpBear) to an LLM over the
- * Model Context Protocol, speaking stdio. This entry point is intentionally thin: the 82 tools and
+ * Model Context Protocol, speaking stdio. This entry point is intentionally thin: the 81 tools and
  * the knowledge resources live in ./tools.ts (registerS33kTools) so the SAME registrations are
  * shared with the hosted Streamable HTTP transport (pages/api/mcp). The only thing this file owns
  * is the stdio wiring and the fetchImpl bound to the LOCAL install's single Bearer key.

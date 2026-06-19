@@ -4,11 +4,11 @@
  * The route is the tenant-scoped read layer in front of the pure engine
  * (utils/analyst.ts). It pulls the current and immediately-prior period across
  * every pillar (rank from Keyword history, traffic + AI referrals from the
- * analytics provider, AI crawlers from CrawlerHit, conversions from s33k_event),
- * shapes them, and runs detectChanges. Its hard contracts:
+ * analytics provider, conversions from s33k_event), shapes them, and runs
+ * detectChanges. Its hard contracts:
  *
  *   1. OWNERSHIP: a domain the caller does not own returns 403 and NO pillar read
- *      runs (Keyword/CrawlerHit/S33kEvent.findAll are never called).
+ *      runs (Keyword/S33kEvent.findAll are never called).
  *   2. AUTH / METHOD / INPUT: 401 unauthorized, 405 non-GET, 400 missing domain.
  *   3. HAPPY PATH: an owned domain with real deltas returns 200, alerts, a
  *      topPriority, the period/comparedTo, and per-pillar dataAvailability notes.
@@ -19,8 +19,8 @@
  *      minus current; the DB pillars use explicit windows. The route still
  *      produces the expected alerts from those derived priors.
  *
- * All heavy deps (db, Domain, Keyword, CrawlerHit, S33kEvent, authorize, the
- * analytics provider) are mocked; scopeWhere runs for real. No DB, no network, no LLM.
+ * All heavy deps (db, Domain, Keyword, S33kEvent, authorize, the analytics
+ * provider) are mocked; scopeWhere runs for real. No DB, no network, no LLM.
  */
 
 jest.mock('sequelize', () => ({ __esModule: true, Op: { gte: Symbol('gte'), lt: Symbol('lt') } }));
@@ -28,7 +28,6 @@ jest.mock('../../database/database', () => ({ __esModule: true, default: { sync:
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('../../database/models/domain', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
 jest.mock('../../database/models/keyword', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
-jest.mock('../../database/models/crawlerHit', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../database/models/s33kEvent', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../utils/analytics', () => {
    const actual = jest.requireActual('../../utils/analytics');
@@ -46,14 +45,11 @@ import Domain from '../../database/models/domain';
 // eslint-disable-next-line import/first
 import Keyword from '../../database/models/keyword';
 // eslint-disable-next-line import/first
-import CrawlerHit from '../../database/models/crawlerHit';
-// eslint-disable-next-line import/first
 import S33kEvent from '../../database/models/s33kEvent';
 
 const mockedAuthorize = authorize as unknown as jest.Mock;
 const mockedDomainFindOne = (Domain as unknown as { findOne: jest.Mock }).findOne;
 const mockedKeywordFindAll = (Keyword as unknown as { findAll: jest.Mock }).findAll;
-const mockedCrawlerFindAll = (CrawlerHit as unknown as { findAll: jest.Mock }).findAll;
 const mockedEventFindAll = (S33kEvent as unknown as { findAll: jest.Mock }).findAll;
 const mockedGetProvider = getAnalyticsProvider as jest.Mock;
 
@@ -139,7 +135,6 @@ beforeEach(() => {
    mockedAuthorize.mockResolvedValue({ authorized: true, account: { ID: 1 } });
    mockedDomainFindOne.mockResolvedValue({ ID: 1, domain: 'getmasset.com' });
    mockedKeywordFindAll.mockResolvedValue([]);
-   mockedCrawlerFindAll.mockResolvedValue([]);
    mockedEventFindAll.mockResolvedValue([]);
    mockedGetProvider.mockReturnValue(providerStub());
 });
@@ -177,7 +172,6 @@ describe('alerts route: ownership gate', () => {
       expect(captured.body.error).toMatch(/not found/i);
       // The ownership gate short-circuits before any pillar read.
       expect(mockedKeywordFindAll).not.toHaveBeenCalled();
-      expect(mockedCrawlerFindAll).not.toHaveBeenCalled();
       expect(mockedEventFindAll).not.toHaveBeenCalled();
    });
 });
@@ -264,21 +258,6 @@ describe('alerts route: happy path', () => {
       expect(aiAlert.headline).toMatch(/Perplexity started referring/);
    });
 
-   it('flags a new AI crawler from the current window not present in the prior window', async () => {
-      // First findAll call is the current crawler window, second is the prior window.
-      mockedCrawlerFindAll
-         .mockResolvedValueOnce([{ bot: 'ClaudeBot' }, { bot: 'GPTBot' }]) // current
-         .mockResolvedValueOnce([{ bot: 'GPTBot' }]); // prior (ClaudeBot is new)
-
-      const { req, res, captured } = makeReqRes({ domain: 'getmasset.com', period: '7d' });
-      await handler(req, res);
-
-      expect(captured.status).toBe(200);
-      const crawlerAlert = captured.body.alerts.find((a: any) => /ClaudeBot began crawling/.test(a.headline));
-      expect(crawlerAlert).toBeDefined();
-      expect(crawlerAlert.pillar).toBe('ai');
-   });
-
    it('flags a conversion drop from the s33k_event windows', async () => {
       // First event findAll is the current window, second is the prior window.
       const formRow = () => ({
@@ -326,11 +305,8 @@ describe('alerts route: graceful degradation (never 500)', () => {
       expect(captured.body.alerts.find((a: any) => a.pillar === 'rank')).toBeDefined();
    });
 
-   it('degrades the AI referral pillar but keeps the crawler signal when getReferralSources rejects', async () => {
+   it('degrades the AI referral pillar (still 200) when getReferralSources rejects', async () => {
       mockedGetProvider.mockReturnValue(providerStub({ throwOn: new Set(['getReferralSources']) }));
-      mockedCrawlerFindAll
-         .mockResolvedValueOnce([{ bot: 'PerplexityBot' }]) // current
-         .mockResolvedValueOnce([]); // prior -> new crawler
 
       const { req, res, captured } = makeReqRes({ domain: 'getmasset.com', period: '7d' });
       await handler(req, res);
@@ -338,9 +314,8 @@ describe('alerts route: graceful degradation (never 500)', () => {
       expect(captured.status).toBe(200);
       // The AI availability note explains the referral data was unavailable.
       expect(captured.body.dataAvailability.ai).toMatch(/unavailable/i);
-      // The crawler-based AI alert still surfaced despite the referral failure.
-      const crawlerAlert = captured.body.alerts.find((a: any) => /PerplexityBot began crawling/.test(a.headline));
-      expect(crawlerAlert).toBeDefined();
+      // No AI alert is produced when the referral read fails.
+      expect(captured.body.alerts.find((a: any) => a.pillar === 'ai')).toBeUndefined();
    });
 
    it('degrades the rank pillar (still 200) when the Keyword query rejects', async () => {
@@ -364,7 +339,6 @@ describe('alerts route: graceful degradation (never 500)', () => {
 
    it('still returns a usable 200 when MANY sub-signals fail at once', async () => {
       mockedKeywordFindAll.mockRejectedValue(new Error('kw down'));
-      mockedCrawlerFindAll.mockRejectedValue(new Error('crawler down'));
       mockedEventFindAll.mockRejectedValue(new Error('event down'));
       mockedGetProvider.mockReturnValue(providerStub({ throwOn: new Set(['getSummary', 'getReferralSources']) }));
 

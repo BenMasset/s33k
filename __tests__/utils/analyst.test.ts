@@ -13,7 +13,7 @@
  *   2. TRAFFIC: a >= 25% swing (medium) / >= 50% swing (high) off a NON-ZERO prior
  *      baseline; silence when the prior baseline is zero.
  *   3. AI: a brand-new referring engine fires HIGH off a zero prior (the one rule
- *      that fires "from nothing"); existing-engine >= 30% moves; new crawler engines.
+ *      that fires "from nothing"); existing-engine >= 30% moves.
  *   4. CONVERSIONS: a >= 30% form-submission change (drop = high, rise = medium),
  *      silent off a zero prior baseline.
  *   5. NO-CHANGE: a quiet period yields zero alerts and a null topPriority (honest).
@@ -35,7 +35,6 @@ const quietPeriod = (overrides: Partial<PeriodData> = {}): PeriodData => ({
    keywords: [],
    traffic: { pageviews: 100, visitors: 80 },
    aiEngines: [],
-   aiCrawlerEngines: [],
    formSubmissions: 10,
    ...overrides,
 });
@@ -238,26 +237,6 @@ describe('detectChanges: AI pillar', () => {
       expect(out.alerts.filter((a) => a.pillar === 'ai')).toHaveLength(0);
    });
 
-   it('flags medium when a brand-NEW AI crawler engine starts crawling (case-insensitive set diff)', () => {
-      const { current, prior } = pair(
-         { aiCrawlerEngines: ['GPTBot', 'ClaudeBot'] },
-         { aiCrawlerEngines: ['gptbot'] }, // ClaudeBot is the new one; GPTBot is not (case-insensitive)
-      );
-      const out = detectChanges(current, prior);
-      const aiAlerts = out.alerts.filter((a) => a.pillar === 'ai');
-      expect(aiAlerts).toHaveLength(1);
-      expect(aiAlerts[0].severity).toBe('medium');
-      expect(aiAlerts[0].headline).toMatch(/ClaudeBot began crawling/);
-   });
-
-   it('does NOT re-flag an AI crawler that was already crawling in the prior period', () => {
-      const { current, prior } = pair(
-         { aiCrawlerEngines: ['PerplexityBot'] },
-         { aiCrawlerEngines: ['PerplexityBot'] },
-      );
-      const out = detectChanges(current, prior);
-      expect(out.alerts.filter((a) => a.pillar === 'ai')).toHaveLength(0);
-   });
 });
 
 describe('detectChanges: CONVERSIONS pillar', () => {
@@ -313,7 +292,7 @@ describe('detectChanges: no-change and missing-data honesty', () => {
 
    it('never fabricates an alert when every pillar is empty/zero in both periods', () => {
       const empty: PeriodData = {
-         keywords: [], traffic: { pageviews: 0, visitors: 0 }, aiEngines: [], aiCrawlerEngines: [], formSubmissions: 0,
+         keywords: [], traffic: { pageviews: 0, visitors: 0 }, aiEngines: [], formSubmissions: 0,
       };
       const out = detectChanges(empty, empty);
       expect(out.alerts).toEqual([]);

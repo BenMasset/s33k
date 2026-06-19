@@ -89,12 +89,12 @@ const connectScopedClient = async (scopedDomain: string) => {
 const callText = (result: any): string => (result?.content?.[0]?.text ?? '');
 
 describe('hosted MCP handshake: a connected client can list the tools', () => {
-   it('initialize + tools/list exposes the full tool set (82 tools)', async () => {
+   it('initialize + tools/list exposes the full tool set (81 tools)', async () => {
       const { client } = await connectScopedClient('getmasset.com');
       const listed = await client.listTools();
       const names = listed.tools.map((t) => t.name);
       // The handshake worked and the SAME tools the stdio server exposes are present.
-      expect(names.length).toBe(82);
+      expect(names.length).toBe(81);
       expect(names).toEqual(expect.arrayContaining(['traffic_summary', 'add_keyword', 'list_domains', 'seo_report']));
    });
 

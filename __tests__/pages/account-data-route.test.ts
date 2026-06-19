@@ -213,7 +213,6 @@ describe('DELETE /api/account-data tenant scoping', () => {
          deletedAccountId: TENANT_A.ID,
          keywordsRemoved: 3,
          eventsRemoved: 5,
-         crawlerHitsRemoved: 7,
          domainsRemoved: 1,
          apiKeysRemoved: 2,
          accountRemoved: true,

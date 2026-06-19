@@ -6,7 +6,7 @@ controls all of it from their own LLM over MCP. Forked from `towfiqi/serpbear` (
 
 The product is the unified MCP control plane that joins three pillars a marketer checks constantly:
 SEO (per-page keyword rank in Google), Analytics (traffic + sources, Umami-backed), and AEO/GEO
-(do AI engines crawl, cite, and refer you). The join across all three, per page, is the thing no
+(do AI engines cite and refer you). The join across all three, per page, is the thing no
 other tool does.
 
 This file is for the AI doing the work. Read it before you build. Add to it when you hit a
@@ -20,8 +20,8 @@ hard-won lesson, so the next session never relearns it.
   line: `export NVM_DIR="$HOME/.nvm"; source "$NVM_DIR/nvm.sh"; nvm use 20 >/dev/null 2>&1;`
 - **Tests:** `npx jest --ci` (one-shot). `npm run test` is WATCH mode, do not use it for verification.
 - **Lint:** `npm run lint` must be clean. **Build:** `npm run build` must print "Compiled successfully".
-- **MCP server:** `cd mcp && npm run build`, then probe over a real stdio handshake. 82 tools + 5
-  resources today. Banner reads "82 tools and 5 resources registered." Smoke harness: `npm run smoke`
+- **MCP server:** `cd mcp && npm run build`, then probe over a real stdio handshake. 81 tools + 5
+  resources today. Banner reads "81 tools and 5 resources registered." Smoke harness: `npm run smoke`
   from `mcp/`. The smoke test's EXPECTED_TOOLS and the registered set are kept in lockstep by a jest
   guard (`__tests__/utils/knowledge-coverage.test.ts`), so this count cannot silently rot.
 - **AI improvement backlog:** read `S33K_IMPROVEMENT_AUDIT.md` after this file. It is the shared
@@ -88,7 +88,7 @@ hard-won lesson, so the next session never relearns it.
 - Add a `CapabilityEntry` to `utils/knowledge.ts` for any new tool, or the knowledge-coverage jest
   test FAILS the build. This is the self-support durability guarantee: a user's own LLM must be able
   to answer any question about the tool, so the answers can never silently rot.
-- Tools are registered in `mcp/src/tools.ts` (`registerS33kTools`, 82 tools + 5 resources today),
+- Tools are registered in `mcp/src/tools.ts` (`registerS33kTools`, 81 tools + 5 resources today),
   shared by the stdio entry (`mcp/src/index.ts`) and the hosted HTTP route (`pages/api/mcp`). The
   knowledge-coverage jest guard parses `tools.ts`, so any new tool there still needs a knowledge entry.
 - Whitelist any new authed API route in `utils/allowedApiRoutes.ts`. Keep that file
@@ -145,7 +145,7 @@ hard-won lesson, so the next session never relearns it.
 - `utils/authorize.ts`, `utils/scope.ts` · the multi-tenant auth + scoping seam.
 - `utils/allowedApiRoutes.ts` · API-route whitelist (keep dependency-free).
 - `utils/knowledge.ts` · single source of truth for tool docs; the coverage test gates it.
-- `mcp/src/tools.ts` · shared MCP tool + resource registration (82 + 5). `mcp/src/index.ts` is the
+- `mcp/src/tools.ts` · shared MCP tool + resource registration (81 + 5). `mcp/src/index.ts` is the
   stdio entry; `pages/api/mcp/[[...slug]].ts` is the hosted HTTP endpoint.
 - `S33K_IMPROVEMENT_AUDIT.md` · shared Codex/Claude improvement backlog and progress log.
 - `SECURITY.md` · the verifiable trust facts (no-training, isolation, export/delete, cookieless).

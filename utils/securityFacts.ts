@@ -50,7 +50,7 @@ export const securityFacts: SecurityFacts = {
          question: 'Who else can see my data?',
          answer: 'Only you. Every tenant-owned table is scoped to your account: most carry an '
             + 'owner_id injected through one helper (scopeWhere / ownerIdFor in utils/scope.ts), and '
-            + 'the few keyed on the globally-unique domain name (such as crawler hits) are scoped by '
+            + 'the few keyed on the globally-unique domain name are scoped by '
             + 'your owned-domain set, which cannot collide across accounts. Every read, create, and '
             + 'delete goes through that scoping, so one account can never read or change another '
             + 'account\'s rows. This is covered by adversarial isolation tests, not just claimed.',

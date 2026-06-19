@@ -83,7 +83,6 @@ const EXPECTED_TOOLS = [
    'add_keyword',
    'aeo_report',
    'aeo_roi',
-   'ai_crawlers',
    'ai_referrals',
    'ai_visibility',
    'alerts',
@@ -405,7 +404,6 @@ async function main() {
    await callAndAssert(client, 'list_keywords', { domain: READ_DOMAIN });
    await callAndAssert(client, 'page_scoreboard', { domain: READ_DOMAIN, period: PERIOD });
    await callAndAssert(client, 'ai_referrals', { domain: READ_DOMAIN, period: PERIOD });
-   await callAndAssert(client, 'ai_crawlers', { domain: READ_DOMAIN, period: PERIOD });
    await callAndAssert(client, 'traffic_summary', { domain: READ_DOMAIN, period: PERIOD });
    await callAndAssert(client, 'human_traffic', { domain: READ_DOMAIN, period: PERIOD });
    await callAndAssert(client, 'traffic_breakdown', {

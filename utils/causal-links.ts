@@ -27,7 +27,7 @@ export const DEFAULT_RANK_CHANGE = 3;
 // baseline. 30% filters out the day-to-day noise of small-site session counts.
 export const DEFAULT_TRAFFIC_CHANGE_PCT = 30;
 // How many days AFTER the rank-change date a traffic change may land and still be read as a possible
-// consequence. Rank changes take a few days to show in traffic (re-crawl, index, click-through), so
+// consequence. Rank changes take a few days to show in traffic (reindex, click-through), so
 // the cause must precede the effect inside this window.
 export const DEFAULT_LAG_DAYS = 7;
 // A page needs at least this many distinct rank-history days and this many session days before we are

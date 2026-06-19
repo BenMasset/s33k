@@ -2,7 +2,6 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { Op } from 'sequelize';
 import { ensureSynced } from '../../database/database';
 import Keyword from '../../database/models/keyword';
-import CrawlerHit from '../../database/models/crawlerHit';
 import S33kEvent from '../../database/models/s33kEvent';
 import Goal from '../../database/models/goal';
 import authorize from '../../utils/authorize';
@@ -20,7 +19,7 @@ import { buildFormSubmissions, EventRow } from '../../utils/eventReports';
 import {
    detectChanges, KeywordRank, AiEngineCount, TrafficTotals,
 } from '../../utils/analyst';
-import { buildAeoRoi, AeoRoi, AiCrawlHit, RoiKeyword } from '../../utils/aeo-roi';
+import { buildAeoRoi, AeoRoi, RoiKeyword } from '../../utils/aeo-roi';
 import { buildDashboard, DashboardKeyword, DashboardGoal } from '../../utils/dashboard';
 import { composeDailyBrief, DailyBrief, DailyBriefDashboardHeadline } from '../../utils/daily-brief';
 import { renderDailyBriefText } from '../../utils/daily-brief-render';
@@ -181,23 +180,15 @@ export const composeDailyBriefForDomain = async (
       keywordRows,
       summaryCur, summaryDbl,
       referralsCur, referralsDbl,
-      crawlerCur, crawlerPrior,
       eventCur, eventPrior,
       trafficWindow, referralsWindow, summaryWindow,
-      sessionRows, webVitalRows, goalRows, crawlerWindowRows,
+      sessionRows, webVitalRows, goalRows,
    ] = await Promise.all([
       Keyword.findAll({ where: { domain, ...scopeWhere(account) } }).catch(() => [] as Keyword[]),
       provider.getSummary(domain, period).catch((e) => emptySummary(String(e))),
       provider.getSummary(domain, doubled).catch((e) => emptySummary(String(e))),
       provider.getReferralSources(domain, period).catch((e) => ({ sources: [], error: String(e) })),
       provider.getReferralSources(domain, doubled).catch((e) => ({ sources: [], error: String(e) })),
-      CrawlerHit.findAll({
-         where: { domain, isAiEngine: true, hitAt: { [Op.gte]: new Date(curStart).toJSON() } }, raw: true,
-      }).catch(() => [] as Array<{ bot: string }>),
-      CrawlerHit.findAll({
-         where: { domain, isAiEngine: true, hitAt: { [Op.gte]: new Date(priorStart).toJSON(), [Op.lt]: new Date(curStart).toJSON() } },
-         raw: true,
-      }).catch(() => [] as Array<{ bot: string }>),
       S33kEvent.findAll({
          where: { domain, type: 'form_submit', created: { [Op.gte]: new Date(curStart).toJSON() }, ...scopeWhere(account) }, raw: true,
       }).catch(() => [] as EventRow[]),
@@ -224,11 +215,6 @@ export const composeDailyBriefForDomain = async (
          where: { domain, type: 'webvital', is_bot: false, created: { [Op.gte]: startISO }, ...scopeWhere(account) }, raw: true,
       }).catch(() => [] as unknown as WebVitalRow[]),
       Goal.findAll({ where: { domain, ...scopeWhere(account) } }).catch(() => [] as Goal[]),
-      // AI crawler hits with page + engine for the AEO ROI join (CrawlerHit has no owner_id; isolation
-      // is the ownership gate plus the globally-@Unique domain, same as aeo-roi.ts).
-      CrawlerHit.findAll({
-         where: { domain, hitAt: { [Op.gte]: startISO } }, attributes: ['page', 'path', 'owner', 'bot', 'isAiEngine'], raw: true,
-      }).catch(() => [] as Array<{ page?: string, path?: string, owner: string | null, bot: string, isAiEngine: boolean }>),
    ]);
 
    const keywords = parseKeywords((keywordRows as Keyword[]).map((e) => e.get({ plain: true })));
@@ -257,9 +243,6 @@ export const composeDailyBriefForDomain = async (
    const currentAiEngines = engineCounts(currentEngineMap);
    const priorAiEngines = priorEnginesFromDiff(doubledEngineMap, currentEngineMap);
 
-   const currentCrawlerEngines = Array.from(new Set((crawlerCur as Array<{ bot: string }>).map((c) => c.bot).filter(Boolean)));
-   const priorCrawlerEngines = Array.from(new Set((crawlerPrior as Array<{ bot: string }>).map((c) => c.bot).filter(Boolean)));
-
    const currentFormSubmissions = buildFormSubmissions(eventCur as EventRow[]).totalSubmissions;
    const priorFormSubmissions = buildFormSubmissions(eventPrior as EventRow[]).totalSubmissions;
 
@@ -268,14 +251,12 @@ export const composeDailyBriefForDomain = async (
          keywords: currentKeywords,
          traffic: currentTraffic,
          aiEngines: currentAiEngines,
-         aiCrawlerEngines: currentCrawlerEngines,
          formSubmissions: currentFormSubmissions,
       },
       {
          keywords: priorKeywords,
          traffic: priorTraffic,
          aiEngines: priorAiEngines,
-         aiCrawlerEngines: priorCrawlerEngines,
          formSubmissions: priorFormSubmissions,
       },
    );
@@ -335,13 +316,9 @@ export const composeDailyBriefForDomain = async (
       };
       const rawValue = g.value;
       const goalValue = typeof rawValue === 'number' && Number.isFinite(rawValue) && rawValue >= 0 ? rawValue : null;
-      type CrawlerWindowRow = { page?: string, path?: string, owner: string | null, bot: string, isAiEngine: boolean };
-      const aiCrawlHits: AiCrawlHit[] = (crawlerWindowRows as CrawlerWindowRow[])
-         .filter((r) => r.isAiEngine)
-         .map((r) => ({ page: String(r.path ?? r.page ?? ''), engine: String(r.owner || r.bot || '') }));
       const roiKeywords: RoiKeyword[] = keywords.map((k) => ({ keyword: k.keyword, targetPage: String(k.target_page || '') }));
       const humanSessions = sessions.filter((s) => !s.isBot);
-      aeoRoi = buildAeoRoi(aiCrawlHits, humanSessions, goalDef, roiKeywords, goalValue);
+      aeoRoi = buildAeoRoi(humanSessions, goalDef, roiKeywords, goalValue);
    }
 
    // ===== JOIN: compose the single prioritized brief. ==================================

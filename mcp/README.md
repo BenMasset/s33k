@@ -1,6 +1,6 @@
 # s33k MCP server
 
-This is the MCP (Model Context Protocol) control layer for s33k. It lets an LLM client such as Claude Code or Cursor operate s33k entirely over a single connection: track keywords and read live Google rankings, detect AI visibility from referral and crawler data, read owned analytics, and pull the cross-pillar briefing and scoreboard.
+This is the MCP (Model Context Protocol) control layer for s33k. It lets an LLM client such as Claude Code or Cursor operate s33k entirely over a single connection: track keywords and read live Google rankings, detect AI visibility from referral data, read owned analytics, and pull the cross-pillar briefing and scoreboard.
 
 The server is a thin wrapper over the s33k REST API. It authenticates with the s33k Bearer API key, so it runs fully headless with no login cookie.
 
@@ -11,7 +11,7 @@ There are two ways to connect, and they expose the EXACT same tools (the registr
 
 ## Tools
 
-The server registers 82 tools and 5 knowledge resources, grouped by pillar. The authoritative source is `src/tools.ts` (the shared `registerS33kTools`, used by both transports); the per-tool descriptions live in `utils/knowledge.ts` in the root repo. Most read tools take `domain` and an optional `period` (e.g. `30d`); the per-tool specifics are below.
+The server registers 81 tools and 5 knowledge resources, grouped by pillar. The authoritative source is `src/tools.ts` (the shared `registerS33kTools`, used by both transports); the per-tool descriptions live in `utils/knowledge.ts` in the root repo. Most read tools take `domain` and an optional `period` (e.g. `30d`); the per-tool specifics are below.
 
 ### Cross-pillar
 
@@ -52,9 +52,8 @@ The server registers 82 tools and 5 knowledge resources, grouped by pillar. The 
 | Tool | What it does | Arguments |
 |---|---|---|
 | `ai_referrals` | Reports which AI engines send real visitors (per-engine visitors, page views, AI share of referred traffic). | `domain`, `period` (optional) |
-| `ai_crawlers` | Reports which AI and search crawlers are crawling a domain (per-bot hits, owners, AI-engine totals, recent sample). | `domain`, `period` (optional) |
-| `ai_visibility` | The AI-visibility funnel: joins crawls to referrals per engine and per page, flagging crawled-not-cited pages and aware-not-recommending engines. | `domain`, `period` (optional) |
-| `aeo_report` | A prebuilt one-call AEO snapshot: AI referrals per engine, AI crawlers per bot, and the crawl-vs-referral funnel per engine. | `domain`, `period` (optional) |
+| `ai_visibility` | Per-page and per-engine view of AI referrals, flagging not-cited pages, with an AI-readiness audit fallback when referral data is thin. | `domain`, `period` (optional) |
+| `aeo_report` | A prebuilt one-call AEO snapshot: AI referrals per engine plus a per-engine summary. | `domain`, `period` (optional) |
 
 ### Analytics
 
@@ -224,7 +223,7 @@ The stdio server waits for a client, so running it by hand will print a startup 
 S33K_API_KEY=... S33K_BASE_URL=http://localhost:3000 node dist/index.js
 ```
 
-A clean boot prints `s33k-mcp connected (base URL: ...). 82 tools and 5 resources registered.` to stderr. Press Ctrl-C to stop.
+A clean boot prints `s33k-mcp connected (base URL: ...). 81 tools and 5 resources registered.` to stderr. Press Ctrl-C to stop.
 
 ## End-to-end smoke test
 

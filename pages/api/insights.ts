@@ -310,7 +310,7 @@ const getInsights = async (req: NextApiRequest, res: NextApiResponse<InsightsRes
       } else {
          const msg = 'No measurable visitor traffic from AI answer engines (ChatGPT, Claude, '
             + 'Perplexity, etc.) this period. Either AI engines are not yet citing the site, '
-            + 'or they cite without sending clicks. Pair this with AI crawler activity to tell which.';
+            + 'or they cite without sending clicks. Make key pages answer-ready to win citations.';
          findings.push({
             type: 'no_ai_referral_traffic',
             severity: 'low',
@@ -426,9 +426,9 @@ const getInsights = async (req: NextApiRequest, res: NextApiResponse<InsightsRes
       }
       if (has('no_ai_referral_traffic')) {
          recommendations.push(
-            'Check AI crawler activity (GPTBot, ClaudeBot, PerplexityBot). If bots crawl but no '
-            + 'visitors arrive, the gap is citation, not access; if bots are absent, fix '
-            + 'robots.txt and add an llms.txt.',
+            'Start the AEO loop: no AI engines send visitors yet. Publish an llms.txt, structure '
+            + 'key pages as direct answers, and make sure robots.txt allows AI answer engines so they '
+            + 'begin citing you.',
          );
       }
       if (has('traffic_concentration')) {

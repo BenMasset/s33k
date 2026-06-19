@@ -222,24 +222,13 @@ const capabilities: CapabilityEntry[] = [
       examplePrompt: 'Which AI engines are sending traffic to getmasset.com?',
    },
    {
-      id: 'ai_crawlers',
-      toolName: 'ai_crawlers',
-      category: 'aeo',
-      title: 'AI crawlers',
-      description: 'Reports which AI and search crawlers (GPTBot, ClaudeBot, PerplexityBot, Google-Extended, Bingbot) are crawling a domain.',
-      whenToUse: 'Use as the leading indicator of AEO: AI bots crawl a site before any AI engine cites it, so this shows up before ai_referrals '
-         + 'does.',
-      examplePrompt: 'Are AI bots crawling getmasset.com?',
-   },
-   {
       id: 'ai_visibility',
       toolName: 'ai_visibility',
       category: 'aeo',
-      title: 'AI visibility funnel',
-      description: 'Joins AI crawls (the leading indicator) and AI referrals (the outcome) into one funnel per engine and per page, using only '
-         + 'first-party un-gameable behavior. Never queries an LLM.',
-      whenToUse: 'Use to answer "how visible am I in AI search, and where is the gap?" Read crawled-not-cited pages and aware-not-recommending '
-         + 'engines as the work to do.',
+      title: 'AI visibility',
+      description: 'Per-page and per-engine view of AI referrals (which AI engines send you visitors and to which pages), using only '
+         + 'first-party un-gameable behavior. When referral data is thin it falls back to a deterministic AI-readiness audit. Never queries an LLM.',
+      whenToUse: 'Use to answer "how visible am I in AI search, and where is the gap?" Read not-cited pages as the work to do.',
       examplePrompt: 'How visible is getmasset.com in AI search, and where are the gaps?',
    },
    {
@@ -649,10 +638,10 @@ const capabilities: CapabilityEntry[] = [
       toolName: 'aeo_report',
       category: 'aeo',
       title: 'AEO report (prebuilt snapshot)',
-      description: 'One-call AI-search snapshot for a domain: aiReferrals (AI engines that sent visitors, per engine), aiCrawlers (AI bots that hit '
-         + 'the site, per bot), and a funnelSummary joining crawls vs referrals per engine. Bundles the AEO signals, never queries an LLM.',
-      whenToUse: 'Use for a single whole-picture AEO read instead of calling ai_referrals, ai_crawlers, and ai_visibility separately. The note '
-         + 'flags thin first-party data, since AI crawls normally appear before AI referrals.',
+      description: 'One-call AI-search snapshot for a domain: aiReferrals (AI engines that sent visitors, per engine) and an engineSummary '
+         + '(referral visitors per engine plus the top advocate). Bundles the AEO referral signal, never queries an LLM.',
+      whenToUse: 'Use for a single whole-picture AEO read instead of calling ai_referrals and ai_visibility separately. The note '
+         + 'flags thin first-party data.',
       examplePrompt: 'Give me the full AEO snapshot for getmasset.com over the last 30 days.',
    },
    {
@@ -778,7 +767,7 @@ const capabilities: CapabilityEntry[] = [
       title: 'Proactive alerts: what changed and what to do',
       description: 'Your "what changed and what to do" standup across SEO, AI search, and analytics. Compares the current period to the prior '
          + 'one and surfaces notable shifts as a prioritized list of plain-English alerts: keyword rank moves of 5+ positions or crossing page one, '
-         + 'traffic swings of 25%+, any NEW AI referral engine or AI crawler (a leading AEO signal), and form-submission/conversion shifts of 30%+. '
+         + 'traffic swings of 25%+, any NEW AI referral engine (a leading AEO signal), and form-submission/conversion shifts of 30%+. '
          + 'Each alert carries a severity, the headline shift, a detail, and a concrete recommendation; the response also returns the single most '
          + 'important thing to act on right now. Rules-based: it never calls an LLM, and it stays silent on a signal it cannot honestly measure '
          + 'rather than inventing a movement.',
@@ -913,7 +902,7 @@ const capabilities: CapabilityEntry[] = [
       category: 'security',
       title: 'Export all your account data',
       description: 'Downloads everything s33k holds about your account as one tenant-scoped JSON bundle: domains, keywords with rank history, '
-         + 'crawler hits, autocapture events, and account metadata. Never includes a secret.',
+         + 'autocapture events, and account metadata. Never includes a secret.',
       whenToUse: 'Use whenever you want to take your data with you, back it up, or verify exactly what s33k stores.',
       examplePrompt: 'Export all of my s33k data.',
    },
@@ -1032,21 +1021,17 @@ const capabilities: CapabilityEntry[] = [
       examplePrompt: 'Show me an overview of getmasset.com',
    },
    {
-      // Worded with "crawl" (not the past-tense "crawled") on purpose: "crawled" is a distinctive
-      // verb that ai_crawlers owns, so using it here made crossCheckCapability tie aeo_roi with
-      // ai_crawlers on the "which AI crawlers crawled my site" request and route it to neither.
-      // aeo_roi still expresses crawling via "crawls"/"crawler"; this keeps the routing clean.
       id: 'aeo_roi',
       toolName: 'aeo_roi',
       category: 'cross-pillar',
       title: 'The AI Visibility P&L: does AI search make me money',
-      description: 'The flagship cross-pillar report no AEO tool can produce: it closes the loop from AI crawls to AI-referred traffic to conversions '
-         + 'to revenue, per page. For a named goal it joins which AI bots crawl each page, which AI engines then referred real visitors there, which '
-         + 'converted, and what each conversion is worth. Returns a per-page funnel (crawls, AI-referred sessions, conversions, AI versus organic '
-         + 'conversion rate, revenue when the goal has a value) plus the money moves (pages AI crawls but never refers, pages where AI out-converts '
+      description: 'The flagship cross-pillar report no AEO tool can produce: it closes the loop from AI-referred traffic to conversions '
+         + 'to revenue, per page. For a named goal it joins which AI engines referred real visitors to each page, which '
+         + 'converted, and what each conversion is worth. Returns a per-page funnel (AI-referred sessions, conversions, AI versus organic '
+         + 'conversion rate, revenue when the goal has a value) plus the money moves (pages where AI out-converts '
          + 'organic, pages AI sends traffic to that never convert). When a layer has no data it says so rather than fabricate a rate off a zero baseline.',
-      whenToUse: 'Use to prove or disprove that AI visibility pays: the end-to-end return from AI crawls through to revenue, per page, and the single '
-         + 'highest-value AEO move. This is the join across AI crawler hits, AI referral traffic, and conversion goals that no standalone AEO tool has.',
+      whenToUse: 'Use to prove or disprove that AI visibility pays: the end-to-end return from AI-referred traffic through to revenue, per page, and the single '
+         + 'highest-value AEO move. This is the join across AI referral traffic and conversion goals that no standalone AEO tool has.',
       examplePrompt: 'Is AI search making me money?',
    },
 ];
@@ -1067,7 +1052,7 @@ const setup = {
       + 'give s33k one bare domain and it creates the domain, discovers keywords, queues live Google rank scrapes, '
       + 'provisions an analytics website, and hands back the tracking snippet. Rankings appear shortly after onboarding '
       + '(rankingsPending comes back true while the background scrape runs).',
-   addTrackingCode: 'Analytics, autocapture engagement, and AI-crawler signal only flow once the tracking script is on the '
+   addTrackingCode: 'Analytics, autocapture engagement, and AI-referral signal only flow once the tracking script is on the '
       + 'site. After onboarding, call install_instructions for your platform to get the exact snippet and copy-paste steps '
       + '(raw HTML, Google Tag Manager, WordPress, Webflow, Shopify, Squarespace, Wix, Next.js/React).',
    connectSearchConsole: 'Google Search Console is an optional richer layer, not the first step. It gives real impression '
@@ -1146,12 +1131,11 @@ const troubleshooting: TroubleshootingEntry[] = [
    },
    {
       id: 'empty_ai_funnel',
-      problem: 'My AI visibility / AI referrals / AI crawlers come back empty.',
-      resolution: 'AEO measurement is first-party and new: s33k reports AI crawls and AI referrals it has actually recorded, '
-         + 'and it only starts recording them once the tracking script is on the site and AI engines begin crawling or '
-         + 'referring. Empty early on is expected, not a bug. AI crawls (ai_crawlers) show up before AI referrals '
-         + '(ai_referrals), so a healthy crawl count with zero referrals is the normal early state. When first-party data is '
-         + 'thin, ai_visibility falls back to a deterministic AI-readiness audit so you still get a signal.',
+      problem: 'My AI visibility / AI referrals come back empty.',
+      resolution: 'AEO measurement is first-party and new: s33k reports AI referrals it has actually recorded, '
+         + 'and it only starts recording them once the tracking script is on the site and AI engines begin '
+         + 'referring visitors. Empty early on is expected, not a bug: AI referral traffic to most sites builds slowly. '
+         + 'When first-party data is thin, ai_visibility falls back to a deterministic AI-readiness audit so you still get a signal.',
    },
    {
       id: 'analytics_needs_script',
@@ -1361,9 +1345,9 @@ const capabilityHaystacks: Set<string>[] = matchableCapabilities.map(
 // Document frequency of every term across the matchable haystacks. A term in FEW capability docs
 // is distinctive (it points at a specific tool); a term in many is generic filler. We use this only
 // as a TIE-BREAK so a raw-count tie resolves to the capability whose matched terms are rarer, i.e.
-// the genuinely more specific tool. Example: "which AI crawlers like GPTBot crawled my site" ties
-// ai_crawlers and a generic report on raw count, and the rarer terms (crawlers, gptbot) pick
-// ai_crawlers. This NEVER changes the matched/novel boundary (that still rests on raw count below).
+// the genuinely more specific tool. Example: "how far do visitors scroll on my pages" ties
+// scroll_depth and a generic analytics report on raw count, and the rarer term (scroll) picks
+// scroll_depth. This NEVER changes the matched/novel boundary (that still rests on raw count below).
 const documentFrequency = ((): Map<string, number> => {
    const df = new Map<string, number>();
    for (const hay of capabilityHaystacks) {

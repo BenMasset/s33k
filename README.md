@@ -32,7 +32,7 @@ Beyond rank tracking and traffic, s33k now has the higher-level capabilities a m
 
 ## MCP tools
 
-s33k is fully controllable from an LLM over MCP. The server exposes 82 tools and 5 knowledge resources. The authoritative registry is `mcp/src/tools.ts`, shared by the stdio entry and hosted HTTP endpoint. The table below groups the main tools by pillar; `mcp/README.md` and `utils/knowledge.ts` carry the full per-tool descriptions. The example prompts are what you would type into Claude or Cursor; the LLM picks the tool.
+s33k is fully controllable from an LLM over MCP. The server exposes 81 tools and 5 knowledge resources. The authoritative registry is `mcp/src/tools.ts`, shared by the stdio entry and hosted HTTP endpoint. The table below groups the main tools by pillar; `mcp/README.md` and `utils/knowledge.ts` carry the full per-tool descriptions. The example prompts are what you would type into Claude or Cursor; the LLM picks the tool.
 
 ### Cross-pillar (start here)
 
@@ -73,9 +73,8 @@ s33k is fully controllable from an LLM over MCP. The server exposes 82 tools and
 | Tool | What it does | Example prompt |
 |---|---|---|
 | `ai_referrals` | Reports which AI engines are sending real visitors (per-engine visitors and page views, plus the AI share of referred traffic). | "Which AI engines are sending traffic to getmasset.com?" |
-| `ai_crawlers` | Reports which AI and search crawlers (GPTBot, ClaudeBot, PerplexityBot, Google-Extended, Bingbot, and more) are crawling a domain. The leading indicator of AEO: AI bots crawl a site before they cite it. | "Are any AI crawlers hitting getmasset.com yet?" |
-| `ai_visibility` | The AI-visibility funnel. Joins crawl (an AI engine is learning about you) to referral (an AI engine is recommending you), per engine and per page, and flags crawled-not-cited pages and aware-not-recommending engines. Uses only first-party behavior, never queries an LLM. | "How visible is getmasset.com in AI search, and where is the gap?" |
-| `aeo_report` | A prebuilt one-call AEO snapshot: AI referrals per engine, AI crawlers per bot, and the crawl-vs-referral funnel per engine. | "Give me the full AEO snapshot for getmasset.com." |
+| `ai_visibility` | Per-page and per-engine view of AI referrals: which AI engines cite you and on which pages. When referral data is thin it falls back to a deterministic AI-readiness audit. Uses only first-party behavior, never queries an LLM. | "How visible is getmasset.com in AI search, and where is the gap?" |
+| `aeo_report` | A prebuilt one-call AEO snapshot: AI referrals per engine plus a per-engine summary. | "Give me the full AEO snapshot for getmasset.com." |
 
 ### Analytics (owned traffic, plus autocapture)
 
@@ -160,32 +159,13 @@ These manage the invite-only multi-tenant system and are active when `MULTI_TENA
 
 Five read-only MCP resources expose the same product-knowledge layer the `help` tool reads, so a client can pull a whole doc into context with `resources/read`: `knowledge://capabilities`, `knowledge://setup`, `knowledge://reasoning`, `knowledge://troubleshooting`, and `knowledge://trust`.
 
-## AI crawler detection (the flagship AEO signal)
-
-AI answer engines crawl a site before they ever cite it or send a visitor, so the crawl is the earliest AEO signal s33k can surface. The detection engine lives entirely inside s33k:
-
-- `utils/ai-crawlers.ts` classifies a raw `User-Agent` into `{ isCrawler, bot, owner, isAiEngine }` against an editable list of known bots (OpenAI GPTBot / OAI-SearchBot / ChatGPT-User, Anthropic ClaudeBot / Claude-Web / Claude-User / anthropic-ai, PerplexityBot / Perplexity-User, Google-Extended, Googlebot, Applebot-Extended, Bingbot / BingPreview, Amazonbot, Bytespider, CCBot, Meta-ExternalAgent / FacebookBot, DuckAssistBot, cohere-ai, YouBot, Diffbot, ImagesiftBot). The function never throws.
-- `POST /api/crawler-hit` with `{ domain, path, userAgent }` (Bearer-key auth) classifies the UA and records a row in the `crawler_hit` table only when it is a recognized crawler. Normal browser traffic is classified and echoed back, but never stored.
-- `GET /api/ai-crawlers?domain=&period=` returns the per-bot breakdown (bot, owner, isAiEngine, hits, lastSeen, sorted by hits), totals (aiEngineHits, allCrawlerHits), and a recent sample.
-- The `ai_crawlers` MCP tool exposes the report to your LLM.
-
-### Production feed (follow-up, touches the live site, not done here)
-
-The engine above is fully self-contained; it just needs to be fed real crawler hits from the production site. The follow-up is a tiny shipper on getmasset.com (or any tracked site) that, for each inbound request, POSTs `{ domain, path, userAgent }` to this instance's `/api/crawler-hit` with the Bearer API key. Two ways to do it:
-
-- **Edge/middleware (real-time):** in the site's Next.js `middleware.ts` (or a Vercel Edge Function / Cloudflare Worker), fire-and-forget a `fetch` to `/api/crawler-hit` on every request. Keep it non-blocking so it never adds latency, and only forward the UA, path, and host (no PII, no cookies).
-- **Log shipper (batch):** a small cron/worker that tails the web server or CDN access logs and POSTs one hit per request line.
-
-Either way the classifier runs s33k-side, so the shipper stays dumb (it forwards every UA and lets `/api/crawler-hit` decide what to keep). This change lives in the production site repo and was intentionally left out of this branch.
-
 ## What V1 is and is not
 
 V1 is honest about its scope. It is a working, installable product, not a finished SaaS.
 
 - There is **no web dashboard for the s33k features in V1**. You drive everything from your LLM over MCP. The forked SerpBear web UI still exists for logging in and pasting your scraper key, but the SEO, AEO, and analytics features are MCP-first by design.
 - s33k stores its own data in **Postgres in production and SQLite locally**, selected automatically by whether `DATABASE_URL` is set. The analytics data lives in whatever provider you point it at (your own Umami, or Lodd as a legacy option), and the autocapture event store lives in s33k's own database.
-- **AI-referral (AEO) detection reads real referral and crawler data.** It does not call any LLM to guess at citations, and it cannot show AI visibility until your site actually starts getting AI referrals or crawler hits.
-- The **AI-crawler feed needs a small shipper on your production site** to POST crawler hits to s33k. The detection engine is built and shipped here; wiring it into a live site is a follow-up that lives in your site's repo, not this one. See the AI crawler detection section above.
+- **AI-referral (AEO) detection reads real referral data.** It does not call any LLM to guess at citations, and it cannot show AI visibility until your site actually starts getting AI referrals.
 - **Single admin account by default.** The invite-only multi-tenant mode (invites, read-only members, waitlist) is flag-gated behind `MULTI_TENANT` and off by default. With the flag off, behavior is byte-for-byte single-tenant. It is documented in `MULTI_TENANT.md`.
 - **No server-side LLM, ever.** The AI features (briefing, insights, ai_visibility, alerts, entry_pages) are rules-based: they compute structured findings on your data and hand them to your own LLM to narrate. s33k makes no model-provider calls and has no model-training path. Your data is never used to train any model. See `SECURITY.md`.
 

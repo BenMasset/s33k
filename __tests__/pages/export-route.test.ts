@@ -4,9 +4,8 @@
  * SECURITY-CRITICAL contract under test (with MULTI_TENANT = 'true'):
  *   1. TENANT-SCOPED. A real tenant's export only ever contains the caller's OWN data:
  *      domains are read with { owner_id: tenant.ID }; keywords and events are read with
- *      BOTH owner_id AND a domain-IN filter restricted to the caller's own domain names;
- *      crawler hits are read by the caller's own domain set only. A second tenant's
- *      domains, keywords, crawler hits, and events are never returned.
+ *      BOTH owner_id AND a domain-IN filter restricted to the caller's own domain names.
+ *      A second tenant's domains, keywords, and events are never returned.
  *   2. NO SECRETS EVER LEAVE. The encrypted Search Console blob on a domain is stripped to
  *      a boolean (search_console_configured); api keys are emitted as metadata only and the
  *      key_hash is NEVER present anywhere in the response.
@@ -27,7 +26,6 @@ jest.mock('sequelize', () => ({ __esModule: true, Op: { in: Symbol('in') } }));
 
 jest.mock('../../database/models/domain', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../database/models/keyword', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
-jest.mock('../../database/models/crawlerHit', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../database/models/s33kEvent', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../database/models/account', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
 jest.mock('../../database/models/apiKey', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
@@ -48,8 +46,6 @@ import DomainModel from '../../database/models/domain';
 // eslint-disable-next-line import/first
 import KeywordModel from '../../database/models/keyword';
 // eslint-disable-next-line import/first
-import CrawlerHitModel from '../../database/models/crawlerHit';
-// eslint-disable-next-line import/first
 import S33kEventModel from '../../database/models/s33kEvent';
 // eslint-disable-next-line import/first
 import AccountModel from '../../database/models/account';
@@ -64,7 +60,6 @@ import authorizeFn from '../../utils/authorize';
 
 const mockDomain = DomainModel as unknown as { findAll: jest.Mock };
 const mockKeyword = KeywordModel as unknown as { findAll: jest.Mock };
-const mockCrawlerHit = CrawlerHitModel as unknown as { findAll: jest.Mock };
 const mockEvent = S33kEventModel as unknown as { findAll: jest.Mock };
 const mockAccount = AccountModel as unknown as { findOne: jest.Mock };
 const mockApiKey = ApiKeyModel as unknown as { findAll: jest.Mock };
@@ -104,7 +99,6 @@ beforeEach(() => {
    // Sensible defaults so every query returns empty unless a test overrides it.
    mockDomain.findAll.mockResolvedValue([]);
    mockKeyword.findAll.mockResolvedValue([]);
-   mockCrawlerHit.findAll.mockResolvedValue([]);
    mockEvent.findAll.mockResolvedValue([]);
    mockAccount.findOne.mockResolvedValue(null);
    mockApiKey.findAll.mockResolvedValue([]);
@@ -120,7 +114,6 @@ describe('GET /api/export tenant scoping', () => {
       // The tenant owns exactly a.com; b.com belongs to another tenant and must never appear.
       mockDomain.findAll.mockResolvedValue([row({ ID: 1, domain: 'a.com', owner_id: TENANT_A.ID, search_console: null })]);
       mockKeyword.findAll.mockResolvedValue([row({ ID: 11, keyword: 'seo', domain: 'a.com', owner_id: TENANT_A.ID })]);
-      mockCrawlerHit.findAll.mockResolvedValue([row({ ID: 21, domain: 'a.com', bot: 'GPTBot' })]);
       mockEvent.findAll.mockResolvedValue([row({ ID: 31, domain: 'a.com', name: 'pageview' })]);
 
       const res = makeRes();
@@ -139,10 +132,6 @@ describe('GET /api/export tenant scoping', () => {
       expect(evWhere.owner_id).toBe(TENANT_A.ID);
       expect(evWhere.domain[Op.in]).toEqual(['a.com']);
 
-      // Crawler hits: no owner_id column, so scoped purely by the caller's own domain set.
-      const chWhere = mockCrawlerHit.findAll.mock.calls[0][0].where;
-      expect(chWhere.domain[Op.in]).toEqual(['a.com']);
-
       // Account + api-key metadata are read for THIS account id only.
       expect(mockAccount.findOne.mock.calls[0][0].where).toEqual({ ID: TENANT_A.ID });
       expect(mockApiKey.findAll.mock.calls[0][0].where).toEqual({ account_id: TENANT_A.ID });
@@ -151,7 +140,7 @@ describe('GET /api/export tenant scoping', () => {
       const payload = res.payload as Record<string, any>;
       expect(payload.accountId).toBe(TENANT_A.ID);
       expect(payload.domains.map((d: any) => d.domain)).toEqual(['a.com']);
-      expect(payload.counts).toMatchObject({ domains: 1, keywords: 1, crawlerHits: 1, events: 1 });
+      expect(payload.counts).toMatchObject({ domains: 1, keywords: 1, events: 1 });
    });
 
    it('scopes keyword and event reads to an EMPTY domain set when the tenant owns no domains', async () => {
@@ -163,8 +152,6 @@ describe('GET /api/export tenant scoping', () => {
       // With no owned domains, the domain-IN filter is an empty list, so no foreign rows can leak.
       expect(mockKeyword.findAll.mock.calls[0][0].where.domain[Op.in]).toEqual([]);
       expect(mockEvent.findAll.mock.calls[0][0].where.domain[Op.in]).toEqual([]);
-      // Crawler hits aren't even queried when there are no owned domains.
-      expect(mockCrawlerHit.findAll).not.toHaveBeenCalled();
    });
 
    it('does NOT scope the admin / single-tenant export (no owner_id key)', async () => {
