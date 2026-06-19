@@ -1,4 +1,4 @@
-import { crawlSite, MAX_PAGES } from '../../utils/site-crawl';
+import { crawlSite, MAX_PAGES, pinnedLookup } from '../../utils/site-crawl';
 
 /**
  * Tests for the dependency-free onboarding site crawler (utils/site-crawl.ts).
@@ -14,6 +14,26 @@ import { crawlSite, MAX_PAGES } from '../../utils/site-crawl';
  * fetch is mocked per-URL so the tests are pure (no network). Each test installs
  * its own global.fetch and tears it down afterwards.
  */
+
+describe('pinnedLookup (SSRF IP pinning must satisfy both dns.lookup callback shapes)', () => {
+   // Regression: undici calls connect.lookup with { all: true } and expects the ARRAY form. Returning
+   // only the 3-arg form there fails the connection, which made the crawler reach 0 pages on real
+   // Vercel/CDN hosts (e.g. getmasset.com 307-redirecting apex to www). Lock both shapes.
+   type Cb = Parameters<ReturnType<typeof pinnedLookup>>[2];
+   it('returns the array form [{ address, family }] when undici asks for { all: true }', () => {
+      let recorded: unknown[] = [];
+      const cb = ((...args: unknown[]) => { recorded = args; }) as unknown as Cb;
+      pinnedLookup('64.29.17.1', 4)('www.getmasset.com', { all: true }, cb);
+      expect(recorded).toEqual([null, [{ address: '64.29.17.1', family: 4 }]]);
+   });
+
+   it('returns the 3-arg (address, family) form when all is not requested', () => {
+      let recorded: unknown[] = [];
+      const cb = ((...args: unknown[]) => { recorded = args; }) as unknown as Cb;
+      pinnedLookup('64.29.17.1', 4)('www.getmasset.com', undefined, cb);
+      expect(recorded).toEqual([null, '64.29.17.1', 4]);
+   });
+});
 
 /** Build a minimal Response-like object that the crawler's safeFetchText reads. */
 const textResponse = (body: string, ok = true, status = 200) => ({

@@ -233,6 +233,32 @@ export const isResolvedHostPublic = async (hostname: string): Promise<boolean> =
  * @returns {Promise<{ dispatcher: Agent } | null>} A pinned dispatcher, or null if unsafe.
  */
 type PinResult = { dispatcher: { close: () => Promise<void> } | null, ok: boolean };
+// undici's connect.lookup follows Node's dns.lookup contract, which has two callback shapes depending
+// on whether the caller asked for `{ all: true }`. We must satisfy both or the pinned connection fails.
+type LookupCallback = {
+   (err: Error | null, address: string, family: number): void,
+   (err: Error | null, addresses: Array<{ address: string, family: number }>): void,
+};
+
+/**
+ * Build the undici connect.lookup that pins to exactly one pre-validated IP. undici calls this with
+ * Node's dns.lookup contract: when it passes `{ all: true }` it expects the ARRAY form
+ * `[{ address, family }]`, otherwise the 3-arg `(address, family)` form. Returning the wrong shape for
+ * `{ all: true }` silently fails the connection (real symptom: fetches to Vercel / CDN-fronted hosts
+ * like getmasset.com threw "fetch failed" and the crawler reached 0 pages). Handle both shapes.
+ * @param {string} ip - The single pre-vetted public IP to pin the connection to.
+ * @param {number} family - The IP family (4 or 6).
+ * @returns {Function} A lookup function honoring both dns.lookup callback shapes.
+ */
+export const pinnedLookup = (ip: string, family: number) => (
+   _hostname: string,
+   opts: { all?: boolean } | undefined,
+   cb: LookupCallback,
+): void => {
+   if (opts && opts.all) { cb(null, [{ address: ip, family }]); }
+   else { cb(null, ip, family); }
+};
+
 const pinnedDispatcherFor = async (hostname: string): Promise<PinResult> => {
    const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
    if (!host) { return { dispatcher: null, ok: false }; }
@@ -266,13 +292,7 @@ const pinnedDispatcherFor = async (hostname: string): Promise<PinResult> => {
    // already guarded by this same resolve-and-revalidate logic.
    const AgentCtor = loadUndiciAgent();
    if (!AgentCtor) { return { dispatcher: null, ok: true }; }
-   const dispatcher = new AgentCtor({
-      connect: {
-         lookup: (_h: string, _opts: unknown, cb: (err: Error | null, address: string, fam: number) => void) => {
-            cb(null, pinnedIp, family);
-         },
-      },
-   });
+   const dispatcher = new AgentCtor({ connect: { lookup: pinnedLookup(pinnedIp, family) } });
    return { dispatcher, ok: true };
 };
 
