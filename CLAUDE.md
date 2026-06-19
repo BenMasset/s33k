@@ -241,6 +241,40 @@ hard-won lesson, so the next session never relearns it.
 
 ---
 
+## E. The Tyler review gate (run this on risky changes before deploy)
+
+A change to the security/architecture surface gets a CTO-grade adversarial review BEFORE it deploys,
+not just a green gate. This is a standing rule for every session (Claude or Codex): apply it
+automatically, do not wait to be asked.
+
+**When it fires:** after a change is built and passes the mechanical gate (lint + jest + build), and
+BEFORE `railway up`. Run `git diff --name-only <base>..HEAD` (or check the working tree) and if any
+changed path matches the TRIGGER SURFACE below, launch the review. Then GATE the deploy on the
+verdict: a clean verdict ships; a must-fix gets fixed and RE-reviewed before shipping.
+
+**Trigger surface (any of these = review required):**
+- Auth + multi-tenant isolation: `utils/authorize.ts`, `utils/resolveAccount.ts`, `utils/scope.ts`,
+  `utils/domain-access.ts`, `utils/canonical-domain.ts`, `utils/allowedApiRoutes.ts`.
+- Billing: `pages/api/billing/*`, `utils/stripe.ts`, `utils/plans.ts`.
+- Any new PUBLIC or authed API route, the hosted MCP route, or the invite/share/accept mint paths.
+- Database migrations, and anything that reads/writes credentials or secrets.
+- Product-fact claims in docs / `utils/knowledge.ts` / marketing copy (the stale-claim catch).
+
+**What SKIPS it:** trivial UI/copy/doc/label changes, test-only edits, dependency bumps. Do not burn a
+CTO review on those.
+
+**How to invoke:** the `tyler-cto-advisor` agent (Agent tool, `subagent_type: tyler-cto-advisor`) for
+the CTO-lens architecture/security read, or a `general-purpose` adversarial security reviewer for a
+pure exploit pass. For multi-agent orchestrated builds, make the review a built-in PHASE between build
+and deploy so a risky change structurally cannot ship unreviewed. Tell the reviewer to RUN the gate
+itself and READ the code, then return a prioritized must-fix / should-fix / leave-it verdict.
+
+Why: this codebase ships fast via many AI agents, so the mechanical gate (green tests) is necessary
+but not sufficient on the surfaces where a subtle defect is a cross-tenant leak, a billing forge, or a
+data-loss migration. The adversarial review is what has repeatedly caught exactly those classes.
+
+---
+
 ## Quick map
 
 - `database/database.ts`, `database/config.js` · Postgres-or-SQLite selection via `DATABASE_URL`.
