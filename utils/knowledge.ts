@@ -128,17 +128,20 @@ const capabilities: CapabilityEntry[] = [
       id: 'start_here',
       toolName: 'start_here',
       category: 'onboarding',
-      title: 'Start here: the guided entry point (call this first)',
-      description: 'The FIRST call to make when you connect your LLM to s33k and do not know what to ask. Give it a domain, or no '
-         + 'domain to pick one, and it answers in priority order: which domain (one tracked uses it, many returns a pick-domain list, '
-         + 'none returns no-domain), your setup state (if incomplete it returns mode "setup" with the single next step and the exact '
-         + 'tool to call, and stops rather than dumping analytics on a half-set-up site), the single most important thing to do now, '
-         + 'and a short curated nextSteps list that always surfaces entry_pages (which pages AI search lands on), striking_distance '
-         + '(the quickest SEO wins), and dashboard (the full overview), plus a ready-to-show rendered text block. Composes existing '
-         + 'data; never queries an LLM; never fails.',
-      whenToUse: 'Use as the very first call when someone does not know where to start, or asks "what should I do?", "where do I '
-         + 'begin?", or "give me the most important thing". Prefer it over dashboard for a cold start: it checks setup first and hands '
-         + 'back one clear next move instead of a full overview.',
+      title: 'Start here: the 5-minutes-to-value tour (call this first)',
+      description: 'The FIRST call to make when you connect your LLM to s33k. The 5-minutes-to-value tour. Give it a domain, or no '
+         + 'domain to pick one (one tracked uses it, many returns a pick-domain list, none returns no-domain). If setup is incomplete '
+         + 'it returns mode "setup" with the checklist, percentComplete, the single next step, the INSTALL snippet and per-platform '
+         + 'steps (installing the tracking script is the gating step for analytics), and a preview of what each report unlocks, then '
+         + 'stops rather than dumping analytics on a half-set-up site. Once set up it returns mode "ready" with a headline, your 3 '
+         + 'prebuilt reports (Analytics, SEO, AI-search) each with a LIVE teaser of your own numbers and the tool to run it, '
+         + 'whatYouCanSee (the data surfaces you now have), questionsYouCanAsk (concrete questions you can say), the single top '
+         + 'action, a curated nextSteps list that always surfaces entry_pages (which pages AI search lands on), striking_distance '
+         + '(the quickest SEO wins), and dashboard, plus a ready-to-show rendered tour. Composes existing data; never queries an LLM; '
+         + 'never fails.',
+      whenToUse: 'Use as the very first call when someone connects s33k, does not know where to start, or asks "what should I do?", '
+         + '"where do I begin?", "how do I install s33k?", or "give me the most important thing". Prefer it over dashboard for a cold '
+         + 'start: it checks setup first, walks install if needed, then shows the 3 reports with your numbers and what to ask.',
       examplePrompt: 'I just connected s33k. Where do I start?',
    },
    // --- SEO (rank tracking + Search Console) ---

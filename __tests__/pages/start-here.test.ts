@@ -93,7 +93,7 @@ beforeEach(() => {
 });
 
 describe('GET /api/start-here', () => {
-   it('returns mode "setup" with the next step when the domain is half set up, and does not dump analytics', async () => {
+   it('returns mode "setup" with the next step, the install snippet, and the unlock previews, and does not dump analytics', async () => {
       // Owned + keywords tracked, but no tracking events yet -> setup incomplete at "install tracking".
       mockKeyword.count.mockResolvedValue(5);
       mockEvent.count.mockResolvedValue(0);
@@ -107,15 +107,30 @@ describe('GET /api/start-here', () => {
       expect(res.payload.percentComplete).toBeLessThan(100);
       expect(res.payload.nextStep).toBe('Install the tracking script');
       expect(res.payload.nextTool).toContain('install_instructions');
-      // It stopped at setup: no analytics dashboard fields leaked.
-      expect(res.payload.rendered).toBeUndefined();
-      expect(res.payload.nextSteps).toBeUndefined();
+      // The checklist of the five setup steps is present.
+      expect(Array.isArray(res.payload.checklist)).toBe(true);
+      expect(res.payload.checklist.length).toBe(5);
+      // The INSTALL payload is surfaced inline (snippet + per-platform steps).
+      expect(res.payload.install).toBeDefined();
+      expect(typeof res.payload.install.snippet).toBe('string');
+      expect(res.payload.install.snippet).toContain('<script');
+      expect(Array.isArray(res.payload.install.platforms)).toBe(true);
+      expect(res.payload.install.platforms.length).toBeGreaterThan(0);
+      // The UNLOCKS preview the 3 reports as motivation to finish.
+      expect(Array.isArray(res.payload.unlocks)).toBe(true);
+      const unlockKeys = res.payload.unlocks.map((u: any) => u.key);
+      expect(unlockKeys).toEqual(expect.arrayContaining(['analytics', 'seo', 'aeo']));
+      // A staged rendered walkthrough that names install + the unlocks.
+      expect(typeof res.payload.rendered).toBe('string');
+      expect(res.payload.rendered).toContain('INSTALL');
+      // It stopped at setup: no analytics teasers leaked (those are ready-mode only).
+      expect(res.payload.reports).toBeUndefined();
       // And it did NOT do the expensive dashboard reads.
       expect(mockKeyword.findAll).not.toHaveBeenCalled();
       expect(mockProvider).not.toHaveBeenCalled();
    });
 
-   it('returns mode "ready" with a headline, top action, the entry_pages pointer, and a rendered block', async () => {
+   it('returns mode "ready" with the 3 reports (live teasers), whatYouCanSee, questionsYouCanAsk, and a rendered tour', async () => {
       // Fully set up: owned + keywords + recent events + a goal.
       mockKeyword.count.mockResolvedValue(3);
       mockEvent.count.mockResolvedValue(50);
@@ -150,6 +165,30 @@ describe('GET /api/start-here', () => {
       // The single most important thing to do now is present.
       expect(typeof res.payload.topAction).toBe('string');
       expect(res.payload.topAction.length).toBeGreaterThan(0);
+
+      // The 3 prebuilt reports, each with a name, whatItTells, tool, and a LIVE teaser.
+      expect(Array.isArray(res.payload.reports)).toBe(true);
+      expect(res.payload.reports.length).toBe(3);
+      const byKey: Record<string, any> = {};
+      res.payload.reports.forEach((r: any) => { byKey[r.key] = r; });
+      expect(byKey.analytics.tool).toBe('dashboard');
+      expect(byKey.seo.tool).toBe('seo_report');
+      expect(byKey.aeo.tool).toBe('aeo_report');
+      res.payload.reports.forEach((r: any) => {
+         expect(typeof r.teaser).toBe('string');
+         expect(r.teaser.length).toBeGreaterThan(0);
+      });
+      // The live numbers landed in the teasers (50 visitors, 1 keyword tracked, 9 AI visitors).
+      expect(byKey.analytics.teaser).toContain('50 visitor');
+      expect(byKey.seo.teaser).toContain('1 keyword');
+      expect(byKey.aeo.teaser).toContain('9 AI-referred');
+
+      // The curated "what you can see" and "questions you can ask" lists.
+      expect(Array.isArray(res.payload.whatYouCanSee)).toBe(true);
+      expect(res.payload.whatYouCanSee.length).toBeGreaterThanOrEqual(5);
+      expect(Array.isArray(res.payload.questionsYouCanAsk)).toBe(true);
+      expect(res.payload.questionsYouCanAsk.length).toBeGreaterThanOrEqual(5);
+
       // The curated pointers ALWAYS surface entry_pages (the #3 brief requirement).
       const tools = res.payload.nextSteps.map((p: any) => p.tool);
       expect(tools).toContain('entry_pages');
@@ -157,9 +196,50 @@ describe('GET /api/start-here', () => {
       expect(tools).toContain('dashboard');
       const aiLanding = res.payload.nextSteps.find((p: any) => p.tool === 'entry_pages');
       expect(aiLanding.label.toLowerCase()).toContain('ai search');
-      // A ready-to-show rendered block.
+      // A ready-to-show rendered tour naming the report sections.
       expect(typeof res.payload.rendered).toBe('string');
       expect(res.payload.rendered).toContain('START HERE');
+      expect(res.payload.rendered).toContain('YOUR 3 REPORTS');
+      expect(res.payload.rendered).toContain('QUESTIONS YOU CAN ASK');
+   });
+
+   it('degrades a single report teaser gracefully when its provider read throws, and never 500s', async () => {
+      // Fully set up so we reach ready mode.
+      mockKeyword.count.mockResolvedValue(3);
+      mockEvent.count.mockResolvedValue(50);
+      mockGoal.count.mockResolvedValue(1);
+      mockKeyword.findAll.mockResolvedValue([
+         kw('dam mcp', 14, '["https://getmasset.com/mcp"]', '/mcp', JSON.stringify({ '2026-05-01': 20, '2026-06-01': 14 })),
+      ]);
+      mockEvent.findAll.mockResolvedValueOnce([
+         pv('A', '/', 'direct', false, '2026-06-10T10:00:00.000Z'),
+      ]).mockResolvedValueOnce([]);
+      mockGoal.findAll.mockResolvedValue([]);
+      // The referral source read REJECTS. The route wraps it (.catch -> { sources: [], error }),
+      // so the AEO + analytics-source teasers degrade to an empty/"unavailable"-style line, but the
+      // whole response must still be a 200 ready payload with all 3 report cards present.
+      mockProvider.mockReturnValue({
+         getPageTraffic: jest.fn(async () => ({ pages: [{ url: 'https://getmasset.com/', pathClean: '/', page_views: 120 }], error: null })),
+         getReferralSources: jest.fn(async () => { throw new Error('referrals provider down'); }),
+         getSummary: jest.fn(async () => ({ pageviews: 160, visitors: 50, bounceRate: 40, avgDuration: 30, pagesPerVisit: 1.6, error: null })),
+      });
+
+      const res = makeRes();
+      await handler(makeReq({ domain: 'getmasset.com', period: '30d' }), res);
+
+      // Never 500: a degraded pillar still yields a 200 ready payload with all 3 reports.
+      expect(res.statusCode).toBe(200);
+      expect(res.payload.mode).toBe('ready');
+      expect(res.payload.reports.length).toBe(3);
+      const byKey: Record<string, any> = {};
+      res.payload.reports.forEach((r: any) => { byKey[r.key] = r; });
+      // Analytics still has its visitor count (summary survived); every teaser is a non-empty string.
+      res.payload.reports.forEach((r: any) => {
+         expect(typeof r.teaser).toBe('string');
+         expect(r.teaser.length).toBeGreaterThan(0);
+      });
+      // AEO degraded to the "no measurable AI visitors" line since referrals were empty after the throw.
+      expect(byKey.aeo.teaser.toLowerCase()).toContain('ai');
    });
 
    it('returns mode "pick-domain" with the list when no domain is given and several are tracked', async () => {

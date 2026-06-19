@@ -127,18 +127,20 @@ export function registerS33kTools(server: McpServer, fetchImpl: FetchImpl): { to
 server.registerTool(
    'start_here',
    {
-      title: 'Start here: the guided entry point (call this FIRST)',
+      title: 'Start here: the 5-minutes-to-value tour (call this FIRST)',
       description:
-         'Call this FIRST. The guided entry point for s33k: give it a domain (or no domain to pick one) and it tells you, '
-         + 'in priority order, your setup state, the single most important thing to do now, and where to look next, including '
-         + 'which pages AI search lands on. If you do not know where to start, start here. With no domain it resolves which '
-         + 'site to use (one tracked -> uses it; many -> returns mode "pick-domain" with the list; none -> mode "no-domain"). '
-         + 'If setup is incomplete it returns mode "setup" with the single next step and the exact tool to call, and stops '
-         + 'there rather than dumping analytics on a half-set-up site. When the site is set up it returns mode "ready" with a '
-         + 'one-line headline (human and AI-referred visitors), the top action to take now, a short curated nextSteps list '
-         + '(entry_pages for which pages AI search lands on, striking_distance for the quickest SEO wins, dashboard for the '
-         + 'full overview), and a ready-to-show rendered text block. Composes existing data (dashboard + setup); never queries '
-         + 'an LLM; never fails, every mode is a usable next move.',
+         'Call this FIRST. The 5-minutes-to-value tour: if a site is not set up it walks you through installing s33k; once set '
+         + 'up it shows your 3 prebuilt reports (Analytics, SEO, AI-search) with your own numbers, the data you now have, and '
+         + 'the exact questions you can ask. Start here. With no domain it resolves which site to use (one tracked -> uses it; '
+         + 'many -> mode "pick-domain" with the list; none -> mode "no-domain"). If setup is incomplete it returns mode "setup" '
+         + 'with the checklist, percentComplete, the single next step, the INSTALL snippet plus per-platform steps (installing '
+         + 'the tracking script is the gating step), and a preview of what each report unlocks, then stops rather than dumping '
+         + 'analytics on a half-set-up site. When the site is set up it returns mode "ready" with a one-line headline, the 3 '
+         + 'reports each with a LIVE teaser of your own numbers and the tool to run it, whatYouCanSee (the data surfaces you '
+         + 'now have), questionsYouCanAsk (concrete natural-language questions), the single top action, a curated nextSteps '
+         + 'list (entry_pages for which pages AI search lands on, striking_distance for the quickest SEO wins, dashboard for '
+         + 'the full overview), and a ready-to-show rendered tour. Composes existing data (dashboard + setup + reports); never '
+         + 'queries an LLM; never fails, every mode is a usable next move.',
       inputSchema: {
          domain: z.string().optional().describe('The domain to start on, e.g. "getmasset.com". Omit to pick from your tracked domains.'),
       },

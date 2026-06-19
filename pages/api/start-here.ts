@@ -44,24 +44,21 @@ import {
 } from '../../utils/analytics';
 import type { WebVitalRow } from '../../utils/web-vitals';
 import {
-   buildDashboard, DashboardGoal, DashboardKeyword,
+   buildDashboard, deriveDashboardState, DashboardGoal, DashboardKeyword,
 } from '../../utils/dashboard';
+import { selectSuggestedQuestions } from '../../utils/suggested-questions';
+import { getInstallGuides } from '../../utils/install-guides';
+import { findStrikingDistance, StrikingInput } from '../../utils/striking-distance';
 import {
-   computeSetupState, buildReady, NextStepPointer, ReadyResult,
+   computeSetupState, buildOnboarding, buildReady, InstallPayload, ReportTeasers,
+   analyticsTeaser, seoTeaser, aeoTeaser, TEASER_UNAVAILABLE,
+   OnboardingResult, ReadyResult,
 } from '../../utils/start-here';
 
 type StartHereResponse =
    | { mode: 'no-domain', message: string, error?: string | null }
    | { mode: 'pick-domain', domains: string[], message: string, error?: string | null }
-   | {
-      mode: 'setup',
-      domain: string,
-      percentComplete: number,
-      nextStep: string | null,
-      nextTool: string | null,
-      message: string,
-      error?: string | null,
-   }
+   | (OnboardingResult & { error?: string | null })
    | (ReadyResult & { error?: string | null })
    | { error: string | null };
 
@@ -124,23 +121,32 @@ const getStartHere = async (req: NextApiRequest, res: NextApiResponse<StartHereR
          owned: Boolean(owned), keywordCount, recentEvents, goalCount, domain,
       });
 
-      // Incomplete setup (including a not-owned/not-added domain): give the one next step and STOP.
-      // Dumping analytics on a half-set-up site is exactly the overwhelm start_here exists to avoid.
+      // Incomplete setup (including a not-owned/not-added domain): walk the user through INSTALL and
+      // preview what each report UNLOCKS, then STOP. Dumping analytics on a half-set-up site is the
+      // overwhelm start_here exists to avoid; but "here is how you put s33k on your site" belongs
+      // inline, because installing the tracking script is the gating step for the analytics pillar.
       if (!setup.complete) {
-         const next = setup.nextStep;
-         const message = next
-            ? `Setup for ${domain} is ${setup.percentComplete}% done. Do this next: ${next.title}. ${next.detail} `
-               + `Use ${next.nextTool}. Then call start_here again.`
-            : `Setup for ${domain} is ${setup.percentComplete}% done. Call start_here again once you finish setup.`;
-         return res.status(200).json({
-            mode: 'setup',
-            domain,
-            percentComplete: setup.percentComplete,
-            nextStep: next ? next.title : null,
-            nextTool: next ? next.nextTool : null,
-            message,
-            error: null,
-         });
+         // Resolve the per-domain tracking website id the same way onboarding/install-instructions
+         // do: the owned Domain's umami_website_id, falling back to the legacy env so getmasset.com
+         // still yields a usable snippet. getInstallGuides is pure (no IO); never throws here.
+         // NOTE (deliberate, safe): for a NOT-owned domain this returns the snippet built from the
+         // legacy env website id only (a public tracking tag), never another tenant's per-domain id
+         // (the `owned && owned.umami_website_id` guard ensures that). install-instructions 403s here
+         // instead; start_here intentionally never walls, so it degrades to the env tag. No leak.
+         const websiteId = (owned && owned.umami_website_id)
+            ? String(owned.umami_website_id)
+            : (process.env.UMAMI_WEBSITE_ID || '');
+         const guides = getInstallGuides(domain, websiteId);
+         const install: InstallPayload = {
+            snippet: guides.snippet,
+            scriptUrl: guides.scriptUrl,
+            websiteId: guides.websiteId,
+            platforms: guides.platforms.map((p) => ({ platform: p.platform, steps: p.steps })),
+            note: 'Paste this one line into your site head. It is the gating step for the Analytics and AI-search '
+               + 'pillars. Ask install_instructions for steps on any specific platform.',
+         };
+         const onboarding = buildOnboarding(domain, setup, install);
+         return res.status(200).json({ ...onboarding, error: null });
       }
 
       // ---- Step 3 + 4: ready. Compose the dashboard for the headline + top action. ----
@@ -206,31 +212,98 @@ const getStartHere = async (req: NextApiRequest, res: NextApiResponse<StartHereR
          },
       });
 
+      // ---- The 3 LIVE report teasers, computed in parallel, each degrading on its own. ----
+      // The brief: show the 3 prebuilt reports WITH THE USER'S OWN NUMBERS. We already loaded
+      // everything each teaser needs above (keywords for SEO, referralSources/summary for analytics
+      // and AEO), so we compute from those rather than re-querying. Promise.allSettled means one
+      // teaser throwing degrades ONLY itself to TEASER_UNAVAILABLE; the others and the whole response
+      // never 500. The teaser composers are pure, so a rejection here would only come from a bad
+      // input shape, but we still isolate each per the brief's never-500 guarantee.
+      const [analyticsT, seoT, aeoT] = await Promise.allSettled([
+         // Analytics teaser: total visitors (summary, or human sessions) + the biggest referral source.
+         (async () => {
+            const visitors = summaryData.error ? dashboard.headline.humanVisitors : (summaryData.visitors || 0);
+            // The single biggest specific referral source (skip the direct/blank bucket so it is a
+            // real "where did they come from" line). referralSources is already error-stripped.
+            const named = referralSources
+               .filter((s) => {
+                  const n = String(s.name || '').trim().toLowerCase();
+                  return n && n !== 'direct' && n !== '(direct)' && n !== '(none)' && n !== 'none';
+               })
+               .map((s) => ({ name: s.name, visitors: Number(s.unique_visitors ?? 0) }))
+               .sort((a, b) => b.visitors - a.visitors);
+            const top = named[0] || null;
+            return analyticsTeaser({
+               visitors,
+               period,
+               topSourceName: top ? top.name : null,
+               topSourceVisitors: top ? top.visitors : 0,
+            });
+         })(),
+         // SEO teaser: tracked count + on-page-one + striking-distance count, reusing the shared util.
+         (async () => {
+            const onPageOne = keywords.filter((k) => {
+               const pos = Number(k.position) || 0;
+               return pos > 0 && pos <= 10;
+            }).length;
+            const strikingInput: StrikingInput[] = keywords.map((k) => ({
+               keyword: k.keyword,
+               position: Number(k.position) || 0,
+               url: String(k.url || ''),
+               history: typeof k.history === 'string' ? k.history : JSON.stringify(k.history || {}),
+            }));
+            const striking = findStrikingDistance(strikingInput, 4, 30);
+            return seoTeaser({ keywordsTracked: keywords.length, onPageOne, strikingDistance: striking.length });
+         })(),
+         // AEO teaser: AI visitors + AI share of referred traffic + top engine, from the dashboard's
+         // already-computed AI-engine split and the referral totals.
+         (async () => {
+            const aiVisitors = dashboard.aiReferrals.data.totalAiVisitors;
+            const allVisitors = referralSources.reduce((sum, s) => sum + Number(s.unique_visitors ?? 0), 0);
+            const aiSharePct = allVisitors > 0 ? Math.round((aiVisitors / allVisitors) * 1000) / 10 : 0;
+            const topEngineRow = dashboard.aiReferrals.data.byEngine[0] || null;
+            return aeoTeaser({
+               aiVisitors,
+               aiSharePct,
+               topEngine: topEngineRow ? topEngineRow.engine : null,
+               topEngineVisitors: topEngineRow ? topEngineRow.visitors : 0,
+            });
+         })(),
+      ]);
+
+      const teasers: ReportTeasers = {
+         analytics: analyticsT.status === 'fulfilled' ? analyticsT.value : TEASER_UNAVAILABLE,
+         seo: seoT.status === 'fulfilled' ? seoT.value : TEASER_UNAVAILABLE,
+         aeo: aeoT.status === 'fulfilled' ? aeoT.value : TEASER_UNAVAILABLE,
+      };
+
+      // Fold the dashboard's CONTEXTUAL suggested questions into the fixed ask-list (deduped in
+      // buildReady), so the questions a user sees match what their actual data supports.
+      const extraQuestions = selectSuggestedQuestions(deriveDashboardState(dashboard)).map((q) => q.question);
+
       const ready = buildReady({
          domain,
          period,
          humanVisitors: dashboard.headline.humanVisitors,
          aiReferredVisitors: dashboard.headline.aiReferredVisitors,
          topAction: dashboard.headline.topAction,
+         teasers,
+         extraQuestions,
       });
       return res.status(200).json({ ...ready, error: null });
    } catch (error) {
       // Last-resort guard. The per-pillar catches mean we should never get here; if we do, still
-      // return a usable next move (the curated pointers) rather than a 500, honoring "never wall".
+      // return a usable ready payload (curated reports/see/ask, teasers degraded) rather than a 500,
+      // honoring "never wall". buildReady gives the full ready shape with the unavailable fallbacks.
       console.log('[ERROR] Building start-here for ', requested || '(no domain)', error);
-      const nextSteps: NextStepPointer[] = [
-         { label: 'See which pages AI search lands on', tool: 'entry_pages' },
-         { label: 'Your quickest SEO wins', tool: 'striking_distance' },
-         { label: 'Full cross-pillar overview', tool: 'dashboard' },
-      ];
-      return res.status(200).json({
-         mode: 'ready',
+      const fallback = buildReady({
          domain: requested,
-         headline: `Could not load a full overview for ${requested || 'your site'} this period.`,
+         period,
+         humanVisitors: 0,
+         aiReferredVisitors: 0,
          topAction: 'Ask dashboard for the full overview, or retry shortly.',
-         nextSteps,
-         rendered: '=== START HERE ===\nCould not load a full overview right now. Try dashboard, or retry shortly.',
-         error: 'Error Building Start Here for this Domain.',
+         teasers: { analytics: TEASER_UNAVAILABLE, seo: TEASER_UNAVAILABLE, aeo: TEASER_UNAVAILABLE },
       });
+      return res.status(200).json({ ...fallback, error: 'Error Building Start Here for this Domain.' });
    }
 };

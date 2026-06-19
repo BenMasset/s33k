@@ -130,15 +130,340 @@ export const readyNextSteps = (): NextStepPointer[] => [
    { label: 'Full cross-pillar overview', tool: 'dashboard' },
 ];
 
-// --- The ready-mode response shape + its plain-text render. ------------------
+// --- ONBOARDING mode: install + unlock previews. -----------------------------
+//
+// When setup is incomplete, start_here is the "here is how you put s33k on your
+// site, and here is what you unlock once it is on" tour. It carries the install
+// snippet + per-platform steps inline (installing the script is the gating step
+// for analytics) and a one-line preview of each of the 3 prebuilt reports as
+// motivation to finish. None of this dumps live numbers (there are none yet); it
+// previews the SHAPE of value so the user knows what they are working toward.
 
-/** The inputs the route hands the ready-mode renderer, lifted from the dashboard headline. */
+/** The install payload start_here surfaces inline in onboarding mode. */
+export type InstallPayload = {
+   /** The one-line <script> snippet to paste into the site head. */
+   snippet: string,
+   /** Full URL of the tracker script (so a client can show/verify the host). */
+   scriptUrl: string,
+   /** The per-domain tracking website id embedded in the snippet. */
+   websiteId: string,
+   /** Per-platform copy-paste install steps (raw HTML, GTM, WordPress, ...). */
+   platforms: { platform: string, steps: string[] }[],
+   /** One-line "what this does and why it is the gating step" note. */
+   note: string,
+};
+
+/** A one-line preview of a prebuilt report shown as motivation during setup. */
+export type UnlockPreview = {
+   /** Stable key matching the ready-mode report card key. */
+   key: 'analytics' | 'seo' | 'aeo',
+   /** Friendly report name. */
+   name: string,
+   /** What the report will tell you once setup is done. */
+   preview: string,
+   /** The exact tool that produces it. */
+   tool: string,
+};
+
+/**
+ * The fixed 3-report unlock previews. Same three pillars (and tool names) as the
+ * ready-mode report cards, so onboarding promises exactly what ready delivers.
+ * Returned fresh each call so a caller can never mutate the shared constant.
+ * @returns {UnlockPreview[]}
+ */
+export const buildUnlocks = (): UnlockPreview[] => [
+   {
+      key: 'analytics',
+      name: 'Analytics',
+      preview: 'Your traffic, where it comes from, and a real human-vs-bot split. Cookieless, no PII.',
+      tool: 'dashboard',
+   },
+   {
+      key: 'seo',
+      name: 'SEO',
+      preview: 'Your Google rank for every keyword you track, plus the quickest wins sitting just off page one.',
+      tool: 'seo_report',
+   },
+   {
+      key: 'aeo',
+      name: 'AI Search (AEO)',
+      preview: 'Whether ChatGPT, Claude, Gemini, and Perplexity send you visitors, and which pages they land on.',
+      tool: 'aeo_report',
+   },
+];
+
+/** The onboarding-mode payload: checklist + install + unlock previews + render. */
+export type OnboardingResult = {
+   mode: 'setup',
+   domain: string,
+   percentComplete: number,
+   nextStep: string | null,
+   nextTool: string | null,
+   checklist: SetupStep[],
+   install: InstallPayload,
+   unlocks: UnlockPreview[],
+   message: string,
+   rendered: string,
+};
+
+/**
+ * Build the staged onboarding walkthrough block. Plain-text, monospace, no color,
+ * no em dash, so a client can print it verbatim (same style as the ready render
+ * and the dashboard/daily_brief blocks). Stages it as: the checklist with the next
+ * step called out, then the install snippet + the steps for the first platform,
+ * then the unlock previews so the user sees what finishing buys them.
+ *
+ * @param {string} domain - The site being onboarded.
+ * @param {number} percentComplete - 0..100 setup progress.
+ * @param {SetupStep[]} checklist - The five setup steps.
+ * @param {SetupStep | null} nextStep - The single next step (null when complete).
+ * @param {InstallPayload} install - The tracking snippet + platform steps.
+ * @param {UnlockPreview[]} unlocks - The 3 report previews.
+ * @returns {string}
+ */
+const renderOnboarding = (
+   domain: string,
+   percentComplete: number,
+   checklist: SetupStep[],
+   nextStep: SetupStep | null,
+   install: InstallPayload,
+   unlocks: UnlockPreview[],
+): string => {
+   const out: string[] = [];
+   out.push('=== START HERE ===');
+   out.push(`Setting up ${domain}. ${percentComplete}% done. 5 minutes to value.`);
+   out.push('');
+   out.push('SETUP CHECKLIST:');
+   checklist.forEach((s) => out.push(`   [${s.done ? 'x' : ' '}] ${s.title}`));
+   out.push('');
+   if (nextStep) {
+      out.push('>> DO THIS NEXT:');
+      out.push(`   ${nextStep.title}: ${nextStep.detail}`);
+      out.push(`   Use ${nextStep.nextTool}.`);
+      out.push('');
+   }
+   out.push('INSTALL S33K ON YOUR SITE (the gating step for analytics):');
+   out.push(`   Paste this one line into your site head:`);
+   out.push(`   ${install.snippet}`);
+   if (install.platforms.length > 0) {
+      const first = install.platforms[0];
+      out.push(`   ${first.platform}:`);
+      first.steps.forEach((step, i) => out.push(`     ${i + 1}. ${step}`));
+      out.push('   Ask install_instructions for steps on WordPress, Webflow, Shopify, GTM, and more.');
+   }
+   out.push('');
+   out.push('WHAT YOU UNLOCK WHEN SETUP IS DONE:');
+   unlocks.forEach((u) => out.push(`   - ${u.name}: ${u.preview}  (${u.tool})`));
+   out.push('');
+   out.push('Finish the next step above, then call start_here again.');
+   return out.join('\n');
+};
+
+/**
+ * Assemble the full onboarding-mode result from the setup state + the resolved
+ * install payload. Pure. The route calls this once it knows setup is incomplete
+ * and has resolved the per-domain tracking website id for the snippet.
+ *
+ * @param {string} domain - The site being onboarded.
+ * @param {SetupState} setup - The computed setup state (checklist + next step).
+ * @param {InstallPayload} install - The tracking snippet + per-platform steps.
+ * @returns {OnboardingResult}
+ */
+export const buildOnboarding = (domain: string, setup: SetupState, install: InstallPayload): OnboardingResult => {
+   const next = setup.nextStep;
+   const unlocks = buildUnlocks();
+   const message = next
+      ? `Setup for ${domain} is ${setup.percentComplete}% done. Do this next: ${next.title}. ${next.detail} `
+         + `Use ${next.nextTool}. Installing s33k on your site is the gating step (snippet in install). `
+         + 'Then call start_here again.'
+      : `Setup for ${domain} is ${setup.percentComplete}% done. Call start_here again once you finish setup.`;
+   const rendered = renderOnboarding(domain, setup.percentComplete, setup.steps, next, install, unlocks);
+   return {
+      mode: 'setup',
+      domain,
+      percentComplete: setup.percentComplete,
+      nextStep: next ? next.title : null,
+      nextTool: next ? next.nextTool : null,
+      checklist: setup.steps,
+      install,
+      unlocks,
+      message,
+      rendered,
+   };
+};
+
+// --- READY mode: the 3 prebuilt reports with LIVE teasers + the tour. --------
+//
+// Once a site is set up, start_here is the "here are your 3 reports with YOUR
+// numbers, here is the data you now have, and here is what you can literally ask"
+// tour. The teaser strings are computed by the route from already-loaded live
+// data (Promise.allSettled so one failure degrades to 'Not available yet'); this
+// layer only shapes the three cards and the curated see/ask lists, plus renders.
+
+/** The graceful fallback when a teaser's underlying read failed. Never 500. */
+export const TEASER_UNAVAILABLE = 'Not available yet';
+
+// --- Pure teaser composers. --------------------------------------------------
+//
+// Each takes the already-loaded, already-scoped numbers the route gathered for a
+// pillar and returns a single live one-liner. Pure (no IO), so they are unit-safe
+// and the route can wrap each call in Promise.allSettled: a throw or a failed read
+// degrades to TEASER_UNAVAILABLE without ever touching the others or 500ing.
+
+/** The analytics teaser inputs: total visitors + the single biggest traffic source. */
+export type AnalyticsTeaserInput = {
+   visitors: number,
+   period: string,
+   topSourceName: string | null,
+   topSourceVisitors: number,
+};
+
+/**
+ * Compose the analytics teaser: total visitors over the window + the top source.
+ * @param {AnalyticsTeaserInput} a - The loaded analytics numbers.
+ * @returns {string}
+ */
+export const analyticsTeaser = (a: AnalyticsTeaserInput): string => {
+   if (a.visitors <= 0) {
+      return `No visitors measured over ${a.period} yet. Once the tracking script is live, this fills in.`;
+   }
+   const src = a.topSourceName
+      ? `top source ${a.topSourceName} (${a.topSourceVisitors})`
+      : 'no single top source yet';
+   return `${a.visitors} visitor(s) over ${a.period}, ${src}.`;
+};
+
+/** The SEO teaser inputs: tracked count + on-page-one count + striking-distance count. */
+export type SeoTeaserInput = {
+   keywordsTracked: number,
+   onPageOne: number,
+   strikingDistance: number,
+};
+
+/**
+ * Compose the SEO teaser: keywords tracked, how many on page one, and how many
+ * quick wins sit in striking distance.
+ * @param {SeoTeaserInput} s - The loaded SEO numbers.
+ * @returns {string}
+ */
+export const seoTeaser = (s: SeoTeaserInput): string => {
+   if (s.keywordsTracked <= 0) {
+      return 'No keywords tracked yet. Add the terms you want to rank for so s33k can watch your Google position.';
+   }
+   return `${s.keywordsTracked} keyword(s) tracked, ${s.onPageOne} on page one, `
+      + `${s.strikingDistance} quick win(s) in striking distance.`;
+};
+
+/** The AEO teaser inputs: AI visitors, AI share of referred traffic, and the top engine. */
+export type AeoTeaserInput = {
+   aiVisitors: number,
+   aiSharePct: number,
+   topEngine: string | null,
+   topEngineVisitors: number,
+};
+
+/**
+ * Compose the AEO teaser: AI visitors, the AI share of referred traffic, and the
+ * top AI engine sending them.
+ * @param {AeoTeaserInput} a - The loaded AEO numbers.
+ * @returns {string}
+ */
+export const aeoTeaser = (a: AeoTeaserInput): string => {
+   if (a.aiVisitors <= 0) {
+      return 'No measurable visitors from AI engines (ChatGPT, Claude, Gemini, Perplexity) yet. This is the leading AEO signal to grow.';
+   }
+   const engine = a.topEngine ? `, ${a.topEngine} top (${a.topEngineVisitors})` : '';
+   return `${a.aiVisitors} AI-referred visitor(s), ${a.aiSharePct}% of referred traffic${engine}.`;
+};
+
+/** One ready-mode report card: name, what it tells you, the tool, and a live teaser. */
+export type ReportCard = {
+   key: 'analytics' | 'seo' | 'aeo',
+   name: string,
+   whatItTells: string,
+   tool: string,
+   teaser: string,
+};
+
+/** The three live teaser strings the route computes and hands the ready builder. */
+export type ReportTeasers = {
+   analytics: string,
+   seo: string,
+   aeo: string,
+};
+
+/**
+ * Build the three report cards from the live teaser strings. The key/name/tool/
+ * whatItTells are fixed (and match the unlock previews); only the teaser is live.
+ * @param {ReportTeasers} teasers - The route-computed live teaser strings.
+ * @returns {ReportCard[]}
+ */
+export const buildReportCards = (teasers: ReportTeasers): ReportCard[] => [
+   {
+      key: 'analytics',
+      name: 'Analytics',
+      whatItTells: 'Traffic, sources, and human-vs-bot.',
+      tool: 'dashboard',
+      teaser: teasers.analytics || TEASER_UNAVAILABLE,
+   },
+   {
+      key: 'seo',
+      name: 'SEO',
+      whatItTells: 'Your Google rankings and quickest wins.',
+      tool: 'seo_report',
+      teaser: teasers.seo || TEASER_UNAVAILABLE,
+   },
+   {
+      key: 'aeo',
+      name: 'AI Search (AEO)',
+      whatItTells: 'Whether AI engines send and cite you, and which pages they land on (entry_pages).',
+      tool: 'aeo_report',
+      teaser: teasers.aeo || TEASER_UNAVAILABLE,
+   },
+];
+
+/**
+ * The curated "data surfaces you now have" list. Short phrases, not tools: the
+ * point is to make the breadth legible, not to dump the tool catalog. Returned
+ * fresh each call.
+ * @returns {string[]}
+ */
+export const whatYouCanSee = (): string[] => [
+   'Google rank for every keyword you track',
+   'Traffic and where it comes from, cookieless',
+   'Real human vs bot split',
+   'Which AI engines send visitors and which pages they land on',
+   'Conversions and revenue by source, including AI',
+   'Entry (landing) pages and their first-touch source',
+   'Competitor share of voice for your keywords',
+];
+
+/**
+ * The curated "questions you can literally say to your LLM" list. Concrete,
+ * natural-language, each answerable by a real s33k tool. The route folds in the
+ * dashboard's contextual suggestedQuestions on top of these (deduped).
+ * @returns {string[]}
+ */
+export const questionsYouCanAsk = (): string[] => [
+   'How is my site doing this week?',
+   'Which of my pages does ChatGPT send people to?',
+   'What are my quickest SEO wins?',
+   'Did AI search convert anyone last month?',
+   'How much of my traffic is bots?',
+   'Which keyword is closest to page one?',
+];
+
+/** The inputs the route hands the ready-mode builder, lifted from live data. */
 export type ReadyInput = {
    domain: string,
    period: string,
    humanVisitors: number,
    aiReferredVisitors: number,
    topAction: string | null,
+   /** The three live teaser strings (already degraded to a fallback on failure). */
+   teasers: ReportTeasers,
+   /** Extra contextual questions from the dashboard, folded into questionsYouCanAsk. */
+   extraQuestions?: string[],
 };
 
 /** The ready-mode payload start_here returns when a domain is fully set up. */
@@ -146,17 +471,20 @@ export type ReadyResult = {
    mode: 'ready',
    domain: string,
    headline: string,
+   reports: ReportCard[],
+   whatYouCanSee: string[],
+   questionsYouCanAsk: string[],
    topAction: string,
    nextSteps: NextStepPointer[],
    rendered: string,
 };
 
 /**
- * Compose the one-line "state of the site" headline from the dashboard numbers.
+ * Compose the one-line "state of the site" headline from the live numbers.
  * Mirrors the dashboard headline's spirit (human visitors, AI-referred visitors)
  * but as a single sentence start_here can lead with.
  *
- * @param {ReadyInput} d - The dashboard-derived numbers for the domain.
+ * @param {ReadyInput} d - The live numbers for the domain.
  * @returns {string}
  */
 const composeHeadline = (d: ReadyInput): string => {
@@ -167,35 +495,74 @@ const composeHeadline = (d: ReadyInput): string => {
 };
 
 /**
- * Build the compact, ready-to-show plain-text block for ready mode. Matches the
- * monospace, no-color, no-em-dash style of the dashboard/daily_brief rendered
- * blocks so a client can print it verbatim. Intentionally small: a headline, the
- * one top action, and the three pointers.
+ * Merge the fixed questionsYouCanAsk list with the dashboard's contextual
+ * questions, deduped case-insensitively, fixed list first. Keeps the result
+ * tight (the fixed six plus a few contextual ones) so it stays a menu, not a wall.
+ * @param {string[]} extra - The dashboard's contextual question strings.
+ * @returns {string[]}
+ */
+const mergeQuestions = (extra: string[]): string[] => {
+   const base = questionsYouCanAsk();
+   const seen = new Set(base.map((q) => q.trim().toLowerCase()));
+   const merged = [...base];
+   extra.forEach((q) => {
+      const key = String(q || '').trim().toLowerCase();
+      if (key && !seen.has(key)) { seen.add(key); merged.push(q); }
+   });
+   // Cap so the list stays a glanceable menu, not the full catalog.
+   return merged.slice(0, 9);
+};
+
+/**
+ * Build the ready-to-show plain-text tour. Matches the monospace, no-color,
+ * no-em-dash style of the dashboard/daily_brief rendered blocks so a client can
+ * print it verbatim: the headline, the 3 reports with teasers and the tool to run
+ * each, the "what you can see" list, the "questions you can ask" list, and the one
+ * top action.
  *
  * @param {string} headline - The composed state-of-the-site line.
+ * @param {ReportCard[]} reports - The 3 report cards with live teasers.
+ * @param {string[]} canSee - The curated data-surfaces list.
+ * @param {string[]} canAsk - The merged questions list.
  * @param {string} topAction - The single highest-priority recommendation.
- * @param {NextStepPointer[]} nextSteps - The curated pointer list.
  * @returns {string}
  */
-const renderReady = (headline: string, topAction: string, nextSteps: NextStepPointer[]): string => {
+const renderReady = (
+   headline: string,
+   reports: ReportCard[],
+   canSee: string[],
+   canAsk: string[],
+   topAction: string,
+): string => {
    const out: string[] = [];
    out.push('=== START HERE ===');
    out.push(headline);
    out.push('');
+   out.push('YOUR 3 REPORTS (with your own numbers):');
+   reports.forEach((r) => {
+      out.push(`   ${r.name}: ${r.whatItTells}`);
+      out.push(`      ${r.teaser}`);
+      out.push(`      Run it: ${r.tool}`);
+   });
+   out.push('');
+   out.push('WHAT YOU CAN NOW SEE:');
+   canSee.forEach((s) => out.push(`   - ${s}`));
+   out.push('');
+   out.push('QUESTIONS YOU CAN ASK (say any of these):');
+   canAsk.forEach((q) => out.push(`   - "${q}"`));
+   out.push('');
    out.push('>> DO THIS NEXT:');
    out.push(`   ${topAction}`);
-   out.push('');
-   out.push('THEN LOOK AT:');
-   nextSteps.forEach((p) => out.push(`   - ${p.label}  ->  ${p.tool}`));
    return out.join('\n');
 };
 
 /**
- * Assemble the full ready-mode result (headline + topAction + curated pointers +
- * rendered block) from the dashboard-derived numbers. Pure. The route calls this
- * once it has confirmed setup is complete and composed the dashboard.
+ * Assemble the full ready-mode result (headline + 3 report cards with live teasers
+ * + the see/ask lists + topAction + curated pointers + rendered tour) from the
+ * live numbers. Pure. The route calls this once setup is complete and it has
+ * computed the three teasers (Promise.allSettled) and composed the dashboard.
  *
- * @param {ReadyInput} d - The dashboard-derived numbers for the domain.
+ * @param {ReadyInput} d - The live numbers + teasers for the domain.
  * @returns {ReadyResult}
  */
 export const buildReady = (d: ReadyInput): ReadyResult => {
@@ -204,7 +571,20 @@ export const buildReady = (d: ReadyInput): ReadyResult => {
    // wire field is never empty (it is the whole point of "do this next").
    const topAction = d.topAction
       || 'No urgent gap this period. Ask dashboard for the full overview, or widen the window (period=90d).';
+   const reports = buildReportCards(d.teasers);
+   const canSee = whatYouCanSee();
+   const canAsk = mergeQuestions(d.extraQuestions || []);
    const nextSteps = readyNextSteps();
-   const rendered = renderReady(headline, topAction, nextSteps);
-   return { mode: 'ready', domain: d.domain, headline, topAction, nextSteps, rendered };
+   const rendered = renderReady(headline, reports, canSee, canAsk, topAction);
+   return {
+      mode: 'ready',
+      domain: d.domain,
+      headline,
+      reports,
+      whatYouCanSee: canSee,
+      questionsYouCanAsk: canAsk,
+      topAction,
+      nextSteps,
+      rendered,
+   };
 };
