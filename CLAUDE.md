@@ -104,9 +104,12 @@ hard-won lesson, so the next session never relearns it.
   On SQLite (case-insensitive) it worked; on Postgres `"id"` != `"ID"`, so every read of that model
   threw "column does not exist" and the route returned a generic 400. Rule: the model attribute's
   column name (the `field:` if set, else the attribute name) must byte-match the column the
-  migration creates. Also register every new model in `database/database.ts`'s `models` array, and
-  remember migrations run on boot via `entrypoint.sh` (`sequelize-cli db:migrate`), which does NOT
-  exit on failure, so a broken migration lets the server boot with a missing/mismatched table.
+  migration creates. Also register every new model in `database/database.ts`'s `models` array.
+  Migrations run on boot via `entrypoint.sh` (`sequelize-cli db:migrate --env production`), which now
+  FAILS LOUD: a non-zero migrate exit triggers `exit 1`, so the container refuses to boot on a broken
+  migration rather than starting against a missing/mismatched table. (This replaced the earlier
+  boot-through-failure behavior; do not reintroduce that.) The migrations themselves only swallow
+  IDEMPOTENCY (already-applied) errors, never real ones.
 
 ### Import provider/util classes STATICALLY, never via runtime `require('./x').Named`
 - A dynamic `const { UmamiProvider } = require('./umami')` resolved to `undefined` in the Next

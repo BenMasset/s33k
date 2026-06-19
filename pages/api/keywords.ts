@@ -54,7 +54,12 @@ const getKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGet
       return res.status(400).json({ error: 'Domain is Required!' });
    }
    const settings = await getAppSettings();
-   const domain = (req.query.domain as string);
+   // Query by the CANONICAL domain, not the raw query param. authorize() gates a scoped share key on
+   // the canonical form and registration stores the canonical form, so reading the raw param would
+   // diverge (a non-canonical variant would match no row). scopeWhere(account) still scopes the read
+   // to the caller's account, so this stays leak-safe; canonicalizing just removes the raw-vs-canonical
+   // mismatch and keeps this read consistent with the gate and with domains.ts / share.ts.
+   const domain = canonicalizeDomain(req.query.domain as string);
    const integratedSC = process.env.SEARCH_CONSOLE_PRIVATE_KEY && process.env.SEARCH_CONSOLE_CLIENT_EMAIL;
    const { search_console_client_email, search_console_private_key } = settings;
    const domainSCData = integratedSC || (search_console_client_email && search_console_private_key) ? await readLocalSCData(domain) : false;
