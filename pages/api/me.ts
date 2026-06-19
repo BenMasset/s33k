@@ -23,7 +23,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       return res.status(401).json({ error: error || 'Not authorized' });
    }
    if (req.method !== 'GET') {
-      return res.status(502).json({ error: 'Unrecognized Route.' });
+      return res.status(405).json({ error: 'Method Not Allowed.' });
    }
    // The legacy/cookie admin caller resolves to a bare in-memory sentinel ({ ID }) with no
    // name/plan/status, so we fall back to the seeded admin defaults to keep the response

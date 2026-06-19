@@ -46,7 +46,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
    if (req.method === 'DELETE') {
       return disconnectSearchConsole(req, res, account);
    }
-   return res.status(502).json({ error: 'Unrecognized Route.' });
+   return res.status(405).json({ error: 'Method Not Allowed.' });
 }
 
 const getDomainSearchConsoleData = async (req: NextApiRequest, res: NextApiResponse<searchConsoleRes>, account?: Account | null) => {

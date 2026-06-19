@@ -27,7 +27,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
    if (req.method === 'PUT') {
       return updateSettings(req, res);
    }
-   return res.status(502).json({ error: 'Unrecognized Route.' });
+   return res.status(405).json({ error: 'Method Not Allowed.' });
 }
 
 const getSettings = async (req: NextApiRequest, res: NextApiResponse<SettingsGetResponse>) => {
@@ -44,7 +44,8 @@ const updateSettings = async (req: NextApiRequest, res: NextApiResponse<Settings
    const { settings } = req.body || {};
    // console.log('### settings: ', settings);
    if (!settings) {
-      return res.status(200).json({ error: 'Settings Data not Provided!' });
+      // A13: missing request body is a client error, not a success.
+      return res.status(400).json({ error: 'Settings Data not Provided!' });
    }
    try {
       const cryptr = new Cryptr(process.env.SECRET as string);
@@ -73,7 +74,8 @@ const updateSettings = async (req: NextApiRequest, res: NextApiResponse<Settings
       return res.status(200).json({ settings });
    } catch (error) {
       console.log('[ERROR] Updating App Settings. ', error);
-      return res.status(200).json({ error: 'Error Updating Settings!' });
+      // A13: encrypt or file write threw, so settings were NOT saved. Server error, not 200.
+      return res.status(500).json({ error: 'Error Updating Settings!' });
    }
 };
 

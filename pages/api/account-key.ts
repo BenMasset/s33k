@@ -44,7 +44,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
    if (req.method === 'DELETE') {
       return revokeKey(req, res, account);
    }
-   return res.status(502).json({ error: 'Unrecognized Route.' });
+   return res.status(405).json({ error: 'Method Not Allowed.' });
 }
 
 const mintKey = async (req: NextApiRequest, res: NextApiResponse<KeyCreateRes>, account: Account | null) => {

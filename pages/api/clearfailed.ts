@@ -20,7 +20,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
    if (req.method === 'PUT') {
       return clearFailedQueue(req, res);
    }
-   return res.status(502).json({ error: 'Unrecognized Route.' });
+   return res.status(405).json({ error: 'Method Not Allowed.' });
 }
 
 const clearFailedQueue = async (req: NextApiRequest, res: NextApiResponse<SettingsGetResponse>) => {
@@ -29,6 +29,8 @@ const clearFailedQueue = async (req: NextApiRequest, res: NextApiResponse<Settin
       return res.status(200).json({ cleared: true });
    } catch (error) {
       console.log('[ERROR] Clearing Failed Queue File.', error);
-      return res.status(200).json({ error: 'Error Clearing Failed Queue!' });
+      // A13: the file write failed, so the queue was NOT cleared. That is a server-side
+      // failure, not a success, and must not report 200.
+      return res.status(500).json({ error: 'Error Clearing Failed Queue!' });
    }
 };

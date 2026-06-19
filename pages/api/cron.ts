@@ -24,7 +24,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
    if (req.method === 'POST') {
       return cronRefreshkeywords(req, res, account);
    }
-   return res.status(502).json({ error: 'Unrecognized Route.' });
+   return res.status(405).json({ error: 'Method Not Allowed.' });
 }
 
 // Build a map of owner_id -> isActive for the owners of the given keywords, so the cron spend-brake

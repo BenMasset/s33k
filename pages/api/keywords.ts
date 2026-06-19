@@ -46,7 +46,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
    if (req.method === 'PUT') {
       return updateKeywords(req, res, account);
    }
-   return res.status(502).json({ error: 'Unrecognized Route.' });
+   return res.status(405).json({ error: 'Method Not Allowed.' });
 }
 
 const getKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGetResponse>, account?: Account | null) => {
@@ -280,6 +280,7 @@ const updateKeywords = async (req: NextApiRequest, res: NextApiResponse<Keywords
       return res.status(400).json({ error: 'Invalid Payload!' });
    } catch (error) {
       console.log('[ERROR] Updating Keyword. ', error);
-      return res.status(200).json({ error: 'Error Updating keywords!' });
+      // A13: the DB update threw, so the keywords were NOT updated. Server error, not 200.
+      return res.status(500).json({ error: 'Error Updating keywords!' });
    }
 };

@@ -53,7 +53,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
    if (req.method === 'PUT') {
       return updateDomain(req, res, account);
    }
-   return res.status(502).json({ error: 'Unrecognized Route.' });
+   return res.status(405).json({ error: 'Method Not Allowed.' });
 }
 
 export const getDomains = async (req: NextApiRequest, res: NextApiResponse<DomainsGetRes>, account?: Account | null) => {
