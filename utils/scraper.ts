@@ -1,9 +1,11 @@
 import axios, { AxiosResponse, CreateAxiosDefaults } from 'axios';
 import * as cheerio from 'cheerio';
-import { readFile, writeFile } from 'fs/promises';
+import { writeFile } from 'fs/promises';
+import { Op } from 'sequelize';
 import HttpsProxyAgent from 'https-proxy-agent';
 import countries from './countries';
 import allScrapers from '../scrapers/index';
+import Keyword from '../database/models/keyword';
 
 type SearchResult = {
    title: string,
@@ -456,50 +458,55 @@ export const getSerp = (domainURL:string, result:SearchResult[], subdomainMatchi
    return { position: foundItem ? foundItem.position : 0, url: foundItem && foundItem.url ? foundItem.url : '' };
 };
 
-/**
- * When a Refresh request is failed, automatically add the keyword id to a failed_queue.json file
- * so that the retry cron tries to scrape it every hour until the scrape is successful.
- * @param {string} keywordID - The keywordID of the failed Keyword Scrape.
- * @returns {void}
- */
-export const retryScrape = async (keywordID: number) : Promise<void> => {
-   if (!keywordID && !Number.isInteger(keywordID)) { return; }
-   let currentQueue: number[] = [];
+// The failed-retry queue is now DB-BACKED, not a data/failed_queue.json file. A keyword "needs
+// retry" purely as a function of its own row: refresh.ts (updateKeywordPosition) already SETS
+// lastUpdateError to a JSON error blob on a failed scrape and CLEARS it to 'false' on success, and
+// sets updating=false when the scrape settles. So the retry set is just a query (see
+// failedRetryWhere / getFailedRetryKeywordIds below), with no separate queue file to keep in sync,
+// and it is naturally tenant-scoped because each keyword carries owner_id.
+//
+// Sentinels for "no error": the DB default and the cleared value is 'false'; an empty string and an
+// empty-object string are also treated as "no error" for safety. Anything else is a real error blob.
+const NON_ERROR_SENTINELS = ['false', '', '{}'];
 
-   const filePath = `${process.cwd()}/data/failed_queue.json`;
-   const currentQueueRaw = await readFile(filePath, { encoding: 'utf-8' }).catch((err) => { console.error(err); return '[]'; });
-   try {
-      currentQueue = currentQueueRaw ? JSON.parse(currentQueueRaw) : [];
-   } catch (e) {
-      console.log('[WARN] Corrupt failed_queue.json, resetting queue.', e);
-      currentQueue = [];
-   }
+// Sequelize `where` fragment selecting keywords that NEED a retry: a real (non-sentinel) lastUpdateError
+// AND not currently mid-scrape (updating=false), so the hourly retry never double-fires a keyword the
+// main scrape is already processing. Spread a scope fragment in on top to tenant-scope it.
+export const failedRetryWhere = (): Record<string, unknown> => ({
+   updating: false,
+   lastUpdateError: { [Op.notIn]: NON_ERROR_SENTINELS },
+   // Guard against NULL (no Postgres NULL is in notIn, but be explicit so the intent is unmistakable).
+   [Op.and]: [{ lastUpdateError: { [Op.ne]: null } }],
+});
 
-   if (!currentQueue.includes(keywordID)) {
-      currentQueue.push(Math.abs(keywordID));
-   }
-
-   await writeFile(filePath, JSON.stringify(currentQueue), { encoding: 'utf-8' }).catch((err) => { console.error(err); return '[]'; });
+// The DB-backed replacement for reading failed_queue.json: the keyword IDs that currently need a
+// retry, optionally scoped (the caller spreads a scopeWhere fragment in). Used by getAppSettings to
+// compute the `failed_queue` field the settings UI shows, with no file involved.
+export const getFailedRetryKeywordIds = async (scope: Record<string, unknown> = {}): Promise<number[]> => {
+   const rows = await Keyword.findAll({ where: { ...failedRetryWhere(), ...scope }, attributes: ['ID'] });
+   return rows.map((row) => row.get('ID') as number);
 };
 
 /**
- * When a Refresh request is completed, remove it from the failed retry queue.
- * @param {string} keywordID - The keywordID of the failed Keyword Scrape.
+ * Marks a keyword for retry. The retry queue is now DERIVED from the keyword's own lastUpdateError,
+ * which refresh.ts already sets on a failed scrape, so there is no separate queue to write. This is
+ * kept as an exported no-op so existing call sites (refresh.ts on a failed scrape) stay valid without
+ * any file I/O. The hourly retry cron now finds these keywords via getFailedRetryKeywordIds().
+ * @param {number} _keywordID - retained for call-site compatibility; unused.
  * @returns {void}
  */
-export const removeFromRetryQueue = async (keywordID: number) : Promise<void> => {
-   if (!keywordID && !Number.isInteger(keywordID)) { return; }
-   let currentQueue: number[] = [];
+export const retryScrape = async (_keywordID: number) : Promise<void> => {
+   // No-op: lastUpdateError on the keyword row IS the queue now (see failedRetryWhere).
+};
 
-   const filePath = `${process.cwd()}/data/failed_queue.json`;
-   const currentQueueRaw = await readFile(filePath, { encoding: 'utf-8' }).catch((err) => { console.error(err); return '[]'; });
-   try {
-      currentQueue = currentQueueRaw ? JSON.parse(currentQueueRaw) : [];
-   } catch (e) {
-      console.log('[WARN] Corrupt failed_queue.json, resetting queue.', e);
-      currentQueue = [];
-   }
-   currentQueue = currentQueue.filter((item) => item !== Math.abs(keywordID));
-
-   await writeFile(filePath, JSON.stringify(currentQueue), { encoding: 'utf-8' }).catch((err) => { console.error(err); return '[]'; });
+/**
+ * Removes a keyword from the retry queue. The retry queue is now DERIVED from lastUpdateError, which
+ * refresh.ts clears to 'false' on a successful scrape (and the row is gone entirely when a keyword or
+ * its domain is deleted), so there is no separate queue to prune. Kept as an exported no-op so
+ * existing call sites (refresh.ts on success, domain/keyword delete) stay valid without file I/O.
+ * @param {number} _keywordID - retained for call-site compatibility; unused.
+ * @returns {void}
+ */
+export const removeFromRetryQueue = async (_keywordID: number) : Promise<void> => {
+   // No-op: a cleared lastUpdateError (or a deleted keyword row) drops it from the derived queue.
 };

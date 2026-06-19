@@ -5,6 +5,7 @@ import { readFile, writeFile, unlink } from 'fs/promises';
 import { getCountryCodeFromAlphaThree } from './countries';
 import Domain from '../database/models/domain';
 import { GSC_OAUTH_SCOPE } from './searchConsoleOAuth';
+import { getStoredSettings } from './settingsStore';
 
 // s33k ENCRYPTION-AT-REST MARKER: Search Console credentials (client_email,
 // private_key, and the OAuth refresh_token) are stored encrypted with cryptr +
@@ -242,10 +243,10 @@ export const getSearchConsoleApiInfo = async (domain: DomainType): Promise<SCAPI
       }
    }
    // Check if the App Settings Has the API Data. Only needed when neither a per-domain OAuth token
-   // nor a per-domain service-account pair was found above.
+   // nor a per-domain service-account pair was found above. Settings now come from the global
+   // Postgres `setting` row (was data/settings.json); the stored fields are still cryptr-encrypted.
    if (!scAPIData?.refresh_token && !scAPIData?.private_key) {
-      const settingsRaw = await readFile(`${process.cwd()}/data/settings.json`, { encoding: 'utf-8' });
-      const settings: SettingsType = settingsRaw ? JSON.parse(settingsRaw) : {};
+      const settings = await getStoredSettings();
       const cryptr = new Cryptr(process.env.SECRET as string);
       scAPIData.client_email = settings.search_console_client_email ? cryptr.decrypt(settings.search_console_client_email) : '';
       scAPIData.private_key = settings.search_console_private_key ? cryptr.decrypt(settings.search_console_private_key) : '';

@@ -1,11 +1,19 @@
 /* eslint-disable no-new */
-const Cryptr = require('cryptr');
-const { promises } = require('fs');
-const { readFile } = require('fs');
 const { Cron } = require('croner');
 require('dotenv').config({ path: './.env.local' });
 
-// Build the internal base URL for cron→server requests.
+// THIN, FILE-FREE, ENV-CONFIGURED SCHEDULER.
+//
+// cron.js no longer reads data/settings.json or data/failed_queue.json (or any file). The SERVER owns
+// all DB state: this process only fires timed POSTs to the API, which decide server-side (from the
+// Postgres-backed settings row and the keyword rows) whether to actually scrape, notify, or retry.
+// Schedules come from env vars so a self-hoster can tune cadence without a settings file:
+//   - SCRAPE_INTERVAL       (default 'weekly')  -> POST /api/cron        (full rank scrape)
+//   - NOTIFICATION_INTERVAL (default 'never')   -> POST /api/notify      (email digest)
+//   - hourly (fixed)                            -> POST /api/cron?mode=retry (DB-backed failed retry)
+//   - SEARCH_CONSOLE_* env present              -> daily POST /api/searchconsole
+
+// Build the internal base URL for cron->server requests.
 // NEXT_PUBLIC_APP_URL is the external/browser URL which may use a different port
 // (e.g. Docker -p 5000:3000). Inside the container the server listens on PORT (default 3000).
 const getInternalBaseURL = () => {
@@ -14,61 +22,6 @@ const getInternalBaseURL = () => {
 };
 
 const INTERNAL_BASE_URL = getInternalBaseURL();
-
-const getAppSettings = async () => {
-   const defaultSettings = {
-      scraper_type: 'none',
-      notification_interval: 'never',
-      notification_email: '',
-      smtp_server: '',
-      smtp_port: '',
-      smtp_username: '',
-      smtp_password: '',
-   };
-   // console.log('process.env.SECRET: ', process.env.SECRET);
-   try {
-      let decryptedSettings = {};
-      const exists = await promises.stat(`${process.cwd()}/data/settings.json`).then(() => true).catch(() => false);
-      if (exists) {
-         const settingsRaw = await promises.readFile(`${process.cwd()}/data/settings.json`, { encoding: 'utf-8' });
-         let settings;
-         try {
-            settings = settingsRaw ? JSON.parse(settingsRaw) : {};
-         } catch (parseError) {
-            // File exists but JSON is corrupt: back it up instead of overwriting
-            const backupPath = `${process.cwd()}/data/settings.json.${Date.now()}.corrupt`;
-            console.log(`[WARN] Corrupt settings.json detected. Backing up to ${backupPath}`);
-            await promises.rename(`${process.cwd()}/data/settings.json`, backupPath).catch(() => {});
-            await promises.writeFile(`${process.cwd()}/data/settings.json`, JSON.stringify(defaultSettings), { encoding: 'utf-8' }).catch(() => {});
-            return defaultSettings;
-         }
-
-         try {
-            const cryptr = new Cryptr(process.env.SECRET);
-            // Env fallback so the cron process resolves the same SERP key as the
-            // API. DB-stored value always wins; env only fills an empty key.
-            const scaping_api = settings.scaping_api
-               ? cryptr.decrypt(settings.scaping_api)
-               : (process.env.SERPER_API_KEY || process.env.SCAPING_API || '');
-            const scraper_type = (settings.scraper_type && settings.scraper_type !== 'none')
-               ? settings.scraper_type
-               : (process.env.SCRAPER_TYPE || settings.scraper_type);
-            const smtp_password = settings.smtp_password ? cryptr.decrypt(settings.smtp_password) : '';
-            decryptedSettings = { ...settings, scraper_type, scaping_api, smtp_password };
-         } catch (error) {
-            console.log('Error Decrypting Settings API Keys!');
-         }
-      } else {
-         throw Error('Settings file don\'t exist.');
-      }
-      return decryptedSettings;
-   } catch (error) {
-      // console.log('CRON ERROR: Reading Settings File. ', error);
-      await promises.mkdir(`${process.cwd()}/data`, { recursive: true }).catch(() => {});
-      await promises.writeFile(`${process.cwd()}/data/settings.json`, JSON.stringify(defaultSettings), { encoding: 'utf-8' }).catch(() => {});
-      return defaultSettings;
-   }
-};
 
 const generateCronTime = (interval) => {
    let cronTime = false;
@@ -95,76 +48,60 @@ const generateCronTime = (interval) => {
 };
 
 const runAppCronJobs = () => {
-   getAppSettings().then((settings) => {
-      // RUN SERP Scraping CRON. Default is WEEKLY (Monday 00:00, cron '0 0 * * 1'): rankings are
-      // checked once a week. This is the s33k default and the basis of the pricing margin (50
-      // keywords x ~4.3 weekly checks is about 217 SERP calls per site per month). A self-hoster can
-      // still override scrape_interval in settings (hourly/daily/other_day/weekly/monthly).
-      const scrape_interval = settings.scrape_interval || 'weekly';
-      if (scrape_interval !== 'never') {
-         const scrapeCronTime = generateCronTime(scrape_interval);
+   // RUN SERP Scraping CRON. Default is WEEKLY (Monday 00:00, cron '0 0 * * 1'): rankings are checked
+   // once a week, which is the s33k default and the basis of the pricing margin (50 keywords x ~4.3
+   // weekly checks is about 217 SERP calls per site per month). Override with SCRAPE_INTERVAL
+   // (hourly/daily/other_day/weekly/monthly, or 'never' to disable). The server decides from the DB
+   // settings whether scraping is actually configured, so this only fires the trigger.
+   const scrapeInterval = process.env.SCRAPE_INTERVAL || 'weekly';
+   if (scrapeInterval !== 'never') {
+      const scrapeCronTime = generateCronTime(scrapeInterval);
+      if (scrapeCronTime) {
          new Cron(scrapeCronTime, () => {
-            // console.log('### Running Keyword Position Cron Job!');
             const fetchOpts = { method: 'POST', headers: { Authorization: `Bearer ${process.env.APIKEY}` } };
             fetch(`${INTERNAL_BASE_URL}/api/cron`, fetchOpts)
             .then((res) => res.json())
-            // .then((data) =>{ console.log(data)})
             .catch((err) => {
                console.log('ERROR Making SERP Scraper Cron Request..');
                console.log(err);
             });
          }, { scheduled: true });
       }
+   }
 
-      // RUN Email Notification CRON
-      const notif_interval = (!settings.notification_interval || settings.notification_interval === 'never') ? false : settings.notification_interval;
-      if (notif_interval) {
-         const cronTime = generateCronTime(notif_interval === 'daily' ? 'daily_morning' : notif_interval);
-         if (cronTime) {
-            new Cron(cronTime, () => {
-               // console.log('### Sending Notification Email...');
-               const fetchOpts = { method: 'POST', headers: { Authorization: `Bearer ${process.env.APIKEY}` } };
-               fetch(`${INTERNAL_BASE_URL}/api/notify`, fetchOpts)
-               .then((res) => res.json())
-               .then((data) => console.log(data))
-               .catch((err) => {
-                  console.log('ERROR Making Cron Email Notification Request..');
-                  console.log(err);
-               });
-            }, { scheduled: true });
-         }
+   // RUN Email Notification CRON. Off by default ('never'); set NOTIFICATION_INTERVAL to enable.
+   const notifInterval = process.env.NOTIFICATION_INTERVAL || 'never';
+   if (notifInterval && notifInterval !== 'never') {
+      const cronTime = generateCronTime(notifInterval === 'daily' ? 'daily_morning' : notifInterval);
+      if (cronTime) {
+         new Cron(cronTime, () => {
+            const fetchOpts = { method: 'POST', headers: { Authorization: `Bearer ${process.env.APIKEY}` } };
+            fetch(`${INTERNAL_BASE_URL}/api/notify`, fetchOpts)
+            .then((res) => res.json())
+            .then((data) => console.log(data))
+            .catch((err) => {
+               console.log('ERROR Making Cron Email Notification Request..');
+               console.log(err);
+            });
+         }, { scheduled: true });
       }
-   });
+   }
 
-   // Run Failed scraping CRON (Every Hour)
+   // Run the DB-backed failed-scrape RETRY CRON (every hour). No file read: the server resolves the
+   // keywords that currently have a real lastUpdateError and re-scrapes only those.
    const failedCronTime = generateCronTime('hourly');
    new Cron(failedCronTime, () => {
-      // console.log('### Retrying Failed Scrapes...');
-
-      readFile(`${process.cwd()}/data/failed_queue.json`, { encoding: 'utf-8' }, (err, data) => {
-         if (data) {
-            try {
-               const keywordsToRetry = data ? JSON.parse(data) : [];
-               if (keywordsToRetry.length > 0) {
-                  const fetchOpts = { method: 'POST', headers: { Authorization: `Bearer ${process.env.APIKEY}` } };
-                  fetch(`${INTERNAL_BASE_URL}/api/refresh?id=${keywordsToRetry.join(',')}`, fetchOpts)
-                  .then((res) => res.json())
-                  .then((refreshedData) => console.log(refreshedData))
-                  .catch((fetchErr) => {
-                     console.log('ERROR Making failed_queue Cron Request..');
-                     console.log(fetchErr);
-                  });
-               }
-            } catch (error) {
-               console.log('ERROR Reading Failed Scrapes Queue File..', error);
-            }
-         } else {
-            console.log('ERROR Reading Failed Scrapes Queue File..', err);
-         }
+      const fetchOpts = { method: 'POST', headers: { Authorization: `Bearer ${process.env.APIKEY}` } };
+      fetch(`${INTERNAL_BASE_URL}/api/cron?mode=retry`, fetchOpts)
+      .then((res) => res.json())
+      .then((data) => console.log(data))
+      .catch((err) => {
+         console.log('ERROR Making failed-retry Cron Request..');
+         console.log(err);
       });
    }, { scheduled: true });
 
-   // Run Google Search Console Scraper Daily
+   // Run Google Search Console Scraper Daily (gated on the service-account env vars, unchanged).
    if (process.env.SEARCH_CONSOLE_PRIVATE_KEY && process.env.SEARCH_CONSOLE_CLIENT_EMAIL) {
       const searchConsoleCRONTime = generateCronTime('daily');
       new Cron(searchConsoleCRONTime, () => {

@@ -1,11 +1,11 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { OAuth2Client } from 'google-auth-library';
-import { readFile, writeFile } from 'fs/promises';
 import Cryptr from 'cryptr';
 import getConfig from 'next/config';
 import { ensureSynced } from '../../database/database';
 import verifyUser from '../../utils/verifyUser';
 import { getAdwordsCredentials, getAdwordsKeywordIdeas } from '../../utils/adwords';
+import { getStoredSettings, writeStoredSettings } from '../../utils/settingsStore';
 
 type adwordsValidateResp = {
    valid: boolean
@@ -24,8 +24,9 @@ type adwordsValidateResp = {
 //      server point that issues the consent URL where a signed state could be generated, so adding one
 //      would mean restructuring the React component, which is out of scope for this route-only fix.
 //   2. NO per-domain / per-owner target. Google Ads is a SINGLE GLOBAL ADMIN integration: one app-wide
-//      client_id / client_secret / refresh_token stored in the global data/settings.json file, not on
-//      any owned Domain row. The GSC signed state exists precisely to stop a forged callback attaching
+//      client_id / client_secret / refresh_token stored in the global Postgres `setting` row (was
+//      data/settings.json), not on any owned Domain row. The GSC signed state exists precisely to stop
+//      a forged callback attaching
 //      a token to a domain you do not own; Google Ads has no per-domain target, so a signed state would
 //      protect nothing here.
 //   3. It is already admin-only and lower-risk: the settings reads/writes around it go through
@@ -75,8 +76,9 @@ const getAdwordsRefreshToken = async (req: NextApiRequest, res: NextApiResponse<
 
       if (code) {
          try {
-            const settingsRaw = await readFile(`${process.cwd()}/data/settings.json`, { encoding: 'utf-8' });
-            const settings: SettingsType = settingsRaw ? JSON.parse(settingsRaw) : {};
+            // Settings now live in the global Postgres `setting` row (was data/settings.json); the
+            // adwords_* fields are cryptr-encrypted. Read the blob, exchange the code, and write back.
+            const settings = await getStoredSettings();
             const cryptr = new Cryptr(process.env.SECRET as string);
             const adwords_client_id = settings.adwords_client_id ? cryptr.decrypt(settings.adwords_client_id) : '';
             const adwords_client_secret = settings.adwords_client_secret ? cryptr.decrypt(settings.adwords_client_secret) : '';
@@ -84,7 +86,7 @@ const getAdwordsRefreshToken = async (req: NextApiRequest, res: NextApiResponse<
             const r = await oAuth2Client.getToken(code);
             if (r?.tokens?.refresh_token) {
                const adwords_refresh_token = cryptr.encrypt(r.tokens.refresh_token);
-               await writeFile(`${process.cwd()}/data/settings.json`, JSON.stringify({ ...settings, adwords_refresh_token }), { encoding: 'utf-8' });
+               await writeStoredSettings({ ...settings, adwords_refresh_token });
                return res.status(200).send('Google Ads Integrated Successfully! You can close this window.');
             }
             return res.status(400).send('Error Getting the Google Ads Refresh Token. Please Try Again!');
@@ -117,14 +119,14 @@ const validateAdwordsIntegration = async (req: NextApiRequest, res: NextApiRespo
       return res.status(400).json({ valid: false, error: 'Please Provide the Google Ads Developer Token and Test Account ID' });
    }
    try {
-      // Save the Adwords Developer Token & Google Ads Test Account ID in App Settings
-      const settingsRaw = await readFile(`${process.cwd()}/data/settings.json`, { encoding: 'utf-8' });
-      const settings: SettingsType = settingsRaw ? JSON.parse(settingsRaw) : {};
+      // Save the Adwords Developer Token & Google Ads Test Account ID in App Settings (the global
+      // Postgres `setting` row, was data/settings.json). The values are cryptr-encrypted before write.
+      const settings = await getStoredSettings();
       const cryptr = new Cryptr(process.env.SECRET as string);
       const adwords_developer_token = cryptr.encrypt(developer_token.trim());
       const adwords_account_id = cryptr.encrypt(account_id.trim());
       const securedSettings = { ...settings, adwords_developer_token, adwords_account_id };
-      await writeFile(`${process.cwd()}/data/settings.json`, JSON.stringify(securedSettings), { encoding: 'utf-8' });
+      await writeStoredSettings(securedSettings);
 
       // Make a test Request to Google Ads
       const adwordsCreds = await getAdwordsCredentials();

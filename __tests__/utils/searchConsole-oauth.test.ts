@@ -33,6 +33,9 @@ jest.mock('google-auth-library', () => ({
 // Avoid pulling the real Domain model (sequelize ESM) into this suite. searchConsole.ts imports it
 // for the store/clear helpers, which this suite does not call.
 jest.mock('../../database/models/domain', () => ({ __esModule: true, default: {} }));
+// searchConsole.ts now reads the app-settings SC credential fallback from the DB-backed settings
+// store; mock it so this suite does not pull sequelize (the store imports database/database).
+jest.mock('../../utils/settingsStore', () => ({ __esModule: true, getStoredSettings: jest.fn(async () => ({})) }));
 
 // eslint-disable-next-line import/first
 import fetchSearchConsoleData from '../../utils/searchConsole';

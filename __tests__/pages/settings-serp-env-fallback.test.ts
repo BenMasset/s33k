@@ -16,23 +16,23 @@
  *   3. With neither DB nor env set, the key resolves to '' (empty), not
  *      undefined, so downstream code is unchanged.
  *
- * fs/promises is mocked so no real settings.json is read or written, and Cryptr
+ * The DB-backed settings store (utils/settingsStore) is mocked so no real DB is touched, and Cryptr
  * is mocked so encrypt/decrypt are identity transforms (no real SECRET needed).
  * No network.
  */
 
-// fs/promises: readFile returns whatever the current mock settings JSON is;
-// stat/writeFile/rename are inert. Per-test we rewrite the readFile payload.
-let mockSettingsJSON = '{}';
-jest.mock('fs/promises', () => ({
+// Settings now come from the DB-backed store (utils/settingsStore), not data/settings.json. Mock the
+// store so getStoredSettings returns whatever stored (encrypted) settings the current test sets, and
+// mock the scraper's DB-backed failed-queue helper (it imports cheerio, which jest cannot parse).
+let mockStoredSettings: Record<string, unknown> = {};
+jest.mock('../../utils/settingsStore', () => ({
    __esModule: true,
-   readFile: jest.fn(async (path: string) => {
-      if (String(path).includes('failed_queue.json')) { return '[]'; }
-      return mockSettingsJSON;
-   }),
-   writeFile: jest.fn(async () => undefined),
-   rename: jest.fn(async () => undefined),
-   stat: jest.fn(async () => ({})),
+   getStoredSettings: jest.fn(async () => mockStoredSettings),
+   writeStoredSettings: jest.fn(async () => undefined),
+}));
+jest.mock('../../utils/scraper', () => ({
+   __esModule: true,
+   getFailedRetryKeywordIds: jest.fn(async () => []),
 }));
 
 // Cryptr: identity transform so decrypt(stored) === stored without a real SECRET.
@@ -54,8 +54,8 @@ import { getAppSettings } from '../../pages/api/settings';
 
 const ORIGINAL_ENV = { ...process.env };
 
-/** Set the JSON that the mocked readFile returns for settings.json. */
-const setStoredSettings = (obj: Record<string, unknown>) => { mockSettingsJSON = JSON.stringify(obj); };
+/** Set the stored (encrypted) settings the mocked getStoredSettings returns. */
+const setStoredSettings = (obj: Record<string, unknown>) => { mockStoredSettings = obj; };
 
 beforeEach(() => {
    jest.clearAllMocks();

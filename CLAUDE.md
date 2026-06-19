@@ -166,6 +166,26 @@ hard-won lesson, so the next session never relearns it.
 - The legacy `account.plan` column is UNUSED by billing (left in place, harmless). Status still
   returns `plan: 'admin'` for the single-tenant sentinel so the UI hides its billing notice.
 
+### Settings + the failed-retry queue are POSTGRES-BACKED, not files (A11, 2026-06-19)
+- `data/settings.json` is RETIRED. Instance settings now live in ONE global Postgres row, the
+  `setting` table (id = 1), via `utils/settingsStore.ts` (`getStoredSettings` / `writeStoredSettings`).
+  The encrypted blob shape is byte-for-byte what settings.json held (sensitive fields still cryptr-
+  encrypted). WHY one global row and not per-tenant: the OPERATOR runs the SERP scraper / SMTP /
+  integrations, so this is admin-only instance config, not tenant data. On first read, the store does
+  a ONE-TIME, race-safe (findOrCreate on id=1) import of an existing `data/settings.json` to preserve
+  any UI-entered credentials, then the row is authoritative and the file is never read again. The
+  three readers (`pages/api/settings.ts`, `utils/searchConsole.ts`, `utils/adwords.ts` +
+  `pages/api/adwords.ts`) all go through the store; no app path touches settings.json.
+- `data/failed_queue.json` is RETIRED. The retry queue is DERIVED from `keyword.lastUpdateError`
+  (refresh.ts already sets it on a failed scrape, clears it to 'false' on success). `failedRetryWhere()`
+  / `getFailedRetryKeywordIds()` in `utils/scraper.ts` are the query; `retryScrape` /
+  `removeFromRetryQueue` are now exported NO-OPS kept for call-site compatibility. The hourly retry
+  is `POST /api/cron?mode=retry` (DB-backed, tenant-scoped, same Bearer auth + spend-brake as the full
+  scrape). `clearfailed` resets lastUpdateError to 'false' instead of writing a file.
+- `cron.js` is now a THIN, FILE-FREE, ENV-CONFIGURED scheduler: it reads NO files. Cadences come from
+  `SCRAPE_INTERVAL` (default weekly) and `NOTIFICATION_INTERVAL` (default never); the server owns all
+  DB state and decides whether to actually scrape/notify. The hourly tick POSTs `/api/cron?mode=retry`.
+
 ### Conventions
 - No em dashes (U+2014) ANYWHERE: prose, copy, code, labels, comments. Self-check: grep for the
   U+2014 character, count must be zero. Use `.` `,` `:` `·` or `/` instead.

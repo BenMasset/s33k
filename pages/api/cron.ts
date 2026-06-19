@@ -9,6 +9,7 @@ import AccountModel from '../../database/models/account';
 import type Account from '../../database/models/account';
 import refreshAndUpdateKeywords from '../../utils/refresh';
 import { isAccountActive } from '../../utils/plans';
+import { failedRetryWhere } from '../../utils/scraper';
 
 type CRONRefreshRes = {
    started: boolean
@@ -22,6 +23,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(401).json({ error });
    }
    if (req.method === 'POST') {
+      // mode=retry is the hourly DB-backed retry job (replaces the old failed_queue.json file): it
+      // re-scrapes ONLY keywords that currently have a real lastUpdateError. Any other POST is the
+      // normal full scrape cron. Both reuse the same Bearer auth and the same spend-brake below.
+      if (req.query.mode === 'retry') {
+         return cronRetryFailedKeywords(req, res, account);
+      }
       return cronRefreshkeywords(req, res, account);
    }
    return res.status(405).json({ error: 'Method Not Allowed.' });
@@ -49,6 +56,22 @@ const activeOwnerMap = async (keywords: Keyword[]): Promise<Map<number, boolean>
    return active;
 };
 
+// SPEND BRAKE (the cost protection): drop keywords belonging to an INACTIVE account (expired trial /
+// canceled / past_due) so a lapsed account cannot keep burning the operator's paid SERP budget. Only
+// applies with MULTI_TENANT on AND when the operator runs cron account-wide (scope {}); with the flag
+// off there is one always-active admin account, so this returns the input unchanged and the
+// single-tenant path is byte-for-byte identical. Shared by the full scrape and the retry job.
+const applySpendBrake = async (keywords: Keyword[], scope: Record<string, unknown>): Promise<Keyword[]> => {
+   if (!isMultiTenantEnabled() || Object.keys(scope).length !== 0 || keywords.length === 0) {
+      return keywords;
+   }
+   const activeById = await activeOwnerMap(keywords);
+   return keywords.filter((kw) => {
+      const ownerId = (kw.get('owner_id') as number | null) ?? ADMIN_ACCOUNT_ID;
+      return activeById.get(ownerId) === true;
+   });
+};
+
 const cronRefreshkeywords = async (req: NextApiRequest, res: NextApiResponse<CRONRefreshRes>, account?: Account | null) => {
    try {
       const settings = await getAppSettings();
@@ -61,19 +84,7 @@ const cronRefreshkeywords = async (req: NextApiRequest, res: NextApiResponse<CRO
       const allDomains: Domain[] = await Domain.findAll({ where: { ...scope } });
       const domainList: DomainType[] = allDomains.map((d) => d.get({ plain: true }));
 
-      // SPEND BRAKE (the cost protection): do NOT scrape keywords belonging to an INACTIVE account
-      // (expired trial / canceled / past_due). Each scrape is a paid SERP call, so a lapsed account
-      // must not keep burning the operator's Serper budget. This only applies with MULTI_TENANT on
-      // AND the operator runs cron account-wide (scope {}); with the flag off there is one always-
-      // active admin account and this filter is a no-op, so the single-tenant path is unchanged. We
-      // resolve each keyword's owner account once and drop keywords whose owner is inactive.
-      if (isMultiTenantEnabled() && Object.keys(scope).length === 0 && keywordQueries.length > 0) {
-         const activeById = await activeOwnerMap(keywordQueries);
-         keywordQueries = keywordQueries.filter((kw) => {
-            const ownerId = (kw.get('owner_id') as number | null) ?? ADMIN_ACCOUNT_ID;
-            return activeById.get(ownerId) === true;
-         });
-      }
+      keywordQueries = await applySpendBrake(keywordQueries, scope);
 
       refreshAndUpdateKeywords(keywordQueries, settings, domainList);
 
@@ -81,5 +92,38 @@ const cronRefreshkeywords = async (req: NextApiRequest, res: NextApiResponse<CRO
    } catch (error) {
       console.log('[ERROR] CRON Refreshing Keywords: ', error);
       return res.status(400).json({ started: false, error: 'CRON Error refreshing keywords!' });
+   }
+};
+
+// The hourly DB-backed retry job (POST /api/cron?mode=retry): re-scrape ONLY keywords that currently
+// have a real lastUpdateError and are not mid-scrape (failedRetryWhere). This replaces the old
+// failed_queue.json file + /api/refresh?id=... path; the queue is now derived from the keyword rows,
+// so it is naturally tenant-scoped (scopeWhere) and never goes stale against a separate file. The
+// same spend-brake applies: a lapsed account's failed keywords are not retry-scraped.
+const cronRetryFailedKeywords = async (req: NextApiRequest, res: NextApiResponse<CRONRefreshRes>, account?: Account | null) => {
+   try {
+      const settings = await getAppSettings();
+      if (!settings || (settings && settings.scraper_type === 'never')) {
+         return res.status(400).json({ started: false, error: 'Scraper has not been set up yet.' });
+      }
+      const scope = scopeWhere(account);
+      let keywordQueries: Keyword[] = await Keyword.findAll({ where: { ...failedRetryWhere(), ...scope } });
+      if (keywordQueries.length === 0) {
+         return res.status(200).json({ started: true });
+      }
+      // Mark exactly the to-retry set updating, so the next retry tick does not double-fire them.
+      const retryIDs = keywordQueries.map((kw) => kw.get('ID') as number);
+      await Keyword.update({ updating: true }, { where: { ID: retryIDs } });
+      const allDomains: Domain[] = await Domain.findAll({ where: { ...scope } });
+      const domainList: DomainType[] = allDomains.map((d) => d.get({ plain: true }));
+
+      keywordQueries = await applySpendBrake(keywordQueries, scope);
+
+      refreshAndUpdateKeywords(keywordQueries, settings, domainList);
+
+      return res.status(200).json({ started: true });
+   } catch (error) {
+      console.log('[ERROR] CRON Retrying Failed Keywords: ', error);
+      return res.status(400).json({ started: false, error: 'CRON Error retrying keywords!' });
    }
 };

@@ -8,6 +8,7 @@ import TTLCache from '@isaacs/ttlcache';
 // See SECURITY.md.
 import { setTimeout as sleep } from 'timers/promises';
 import Keyword from '../database/models/keyword';
+import { getStoredSettings } from './settingsStore';
 import parseKeywords from './parseKeywords';
 import countries from './countries';
 import { readLocalSCData } from './searchConsole';
@@ -59,8 +60,9 @@ export type KeywordIdeasDatabase = {
  */
 export const getAdwordsCredentials = async (): Promise<false | AdwordsCredentials> => {
    try {
-      const settingsRaw = await readFile(`${process.cwd()}/data/settings.json`, { encoding: 'utf-8' });
-      const settings: SettingsType = settingsRaw ? JSON.parse(settingsRaw) : {};
+      // Settings now come from the global Postgres `setting` row (was data/settings.json); the stored
+      // adwords_* fields are still cryptr-encrypted and are decrypted below.
+      const settings = await getStoredSettings();
       let decryptedSettings: false | AdwordsCredentials = false;
 
       try {

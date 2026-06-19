@@ -1,15 +1,19 @@
-import { writeFile, readFile, rename, stat } from 'fs/promises';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import Cryptr from 'cryptr';
 import getConfig from 'next/config';
 import verifyUser from '../../utils/verifyUser';
 import allScrapers from '../../scrapers/index';
+import { getStoredSettings, writeStoredSettings } from '../../utils/settingsStore';
+import { getFailedRetryKeywordIds } from '../../utils/scraper';
 
-// LEGACY FILE-BACKED SETTINGS. SerpBear stores global integration settings in
-// data/settings.json, encrypted with SECRET for sensitive fields. That is still the compatibility
-// path for scraper, SMTP, service-account Search Console, and Google Ads credentials. Multi-tenant
-// tenant-owned data must not be added here without a fresh design, because this file is global to
-// the instance and guarded by legacy verifyUser rather than account-scoped authorize().
+// GLOBAL INSTANCE SETTINGS, now POSTGRES-BACKED (not data/settings.json).
+//
+// WHY a single global row and not per-tenant: in the hosted model the OPERATOR runs the shared SERP
+// scraper account, the SMTP sender, and the service-account / Google Ads integrations. These are
+// INSTANCE config, changed only by the admin, never by a tenant, so they are stored as one global
+// `setting` row (see database/models/setting.ts) and this route stays admin-only via verifyUser.
+// Per-tenant notification settings would be a SEPARATE future design (a tenant-scoped table), not
+// this row. The encrypted blob shape is byte-for-byte what settings.json held; only storage moved.
 
 type SettingsGetResponse = {
    settings?: object | null,
@@ -42,7 +46,6 @@ const getSettings = async (req: NextApiRequest, res: NextApiResponse<SettingsGet
 
 const updateSettings = async (req: NextApiRequest, res: NextApiResponse<SettingsGetResponse>) => {
    const { settings } = req.body || {};
-   // console.log('### settings: ', settings);
    if (!settings) {
       // A13: missing request body is a client error, not a success.
       return res.status(400).json({ error: 'Settings Data not Provided!' });
@@ -70,32 +73,14 @@ const updateSettings = async (req: NextApiRequest, res: NextApiResponse<Settings
          adwords_account_id,
       };
 
-      await writeFile(`${process.cwd()}/data/settings.json`, JSON.stringify(securedSettings), { encoding: 'utf-8' });
+      // Persist the encrypted blob to the single global `setting` row (was data/settings.json). The
+      // identical cryptr encryption above is preserved; only the storage target changed.
+      await writeStoredSettings(securedSettings);
       return res.status(200).json({ settings });
    } catch (error) {
       console.log('[ERROR] Updating App Settings. ', error);
-      // A13: encrypt or file write threw, so settings were NOT saved. Server error, not 200.
+      // A13: encrypt or DB write threw, so settings were NOT saved. Server error, not 200.
       return res.status(500).json({ error: 'Error Updating Settings!' });
-   }
-};
-
-// Read a small JSON state file, repairing the local dev / self-host experience when the file is
-// missing or corrupt. Corrupt files are preserved with a timestamp suffix before the fallback is
-// written, so a bad settings edit does not silently destroy the only copy of the user's credentials.
-const safeReadJSON = async (filePath: string, fallback: any): Promise<any> => {
-   try {
-      const raw = await readFile(filePath, { encoding: 'utf-8' });
-      return raw ? JSON.parse(raw) : fallback;
-   } catch (error: any) {
-      const fileExists = await stat(filePath).then(() => true).catch(() => false);
-      if (fileExists) {
-         // File exists but is corrupt: back it up instead of silently overwriting
-         const backupPath = `${filePath}.${Date.now()}.corrupt`;
-         console.log(`[WARN] Corrupt JSON detected in ${filePath}. Backing up to ${backupPath}`);
-         await rename(filePath, backupPath).catch(() => {});
-      }
-      await writeFile(filePath, JSON.stringify(fallback), { encoding: 'utf-8' }).catch(() => {});
-      return fallback;
    }
 };
 
@@ -122,8 +107,13 @@ export const getAppSettings = async () : Promise<SettingsType> => {
       scrape_smart_full_fallback: false,
    };
 
-   const settings: SettingsType = await safeReadJSON(`${process.cwd()}/data/settings.json`, defaultSettings);
-   const failedQueue: string[] = await safeReadJSON(`${process.cwd()}/data/failed_queue.json`, []);
+   // Settings now come from the single global `setting` Postgres row (was data/settings.json). The
+   // store seeds the row from an existing settings.json once on first read, then is authoritative.
+   const stored = await getStoredSettings();
+   const settings: SettingsType = { ...defaultSettings, ...stored };
+   // The failed-retry queue is DB-derived now (keywords with a real lastUpdateError), not a file.
+   // Computed instance-wide here so the settings UI sees the same list it always did.
+   const failedQueue: number[] = await getFailedRetryKeywordIds().catch(() => []);
 
    let decryptedSettings = settings;
    try {
@@ -157,7 +147,8 @@ export const getAppSettings = async () : Promise<SettingsType> => {
          search_console_integrated: !!(process.env.SEARCH_CONSOLE_PRIVATE_KEY && process.env.SEARCH_CONSOLE_CLIENT_EMAIL)
          || !!(search_console_client_email && search_console_private_key),
          available_scrapers: allScrapers.map((scraper) => ({ label: scraper.name, value: scraper.id, allowsCity: !!scraper.allowsCity })),
-         failed_queue: failedQueue,
+         // The UI consumes failed_queue as string ids; keep that shape.
+         failed_queue: failedQueue.map((id) => String(id)),
          screenshot_key: screenshotAPIKey,
          adwords_client_id,
          adwords_client_secret,

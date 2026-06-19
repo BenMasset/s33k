@@ -21,6 +21,8 @@ jest.mock('../../database/models/account', () => ({ __esModule: true, default: {
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('../../pages/api/settings', () => ({ __esModule: true, getAppSettings: jest.fn(async () => ({ scraper_type: 'serper' })) }));
 jest.mock('../../utils/refresh', () => ({ __esModule: true, default: jest.fn(async () => []) }));
+// utils/scraper imports cheerio (ESM jest cannot parse); mock the only symbol cron.ts pulls from it.
+jest.mock('../../utils/scraper', () => ({ __esModule: true, failedRetryWhere: jest.fn(() => ({})) }));
 
 // eslint-disable-next-line import/first
 import cronHandler from '../../pages/api/cron';
