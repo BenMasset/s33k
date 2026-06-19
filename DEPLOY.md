@@ -1,6 +1,15 @@
+> **CURRENT STATE (read this first). Parts of this doc below are HISTORICAL and superseded.** The authoritative current reference is **CLAUDE.md section A**. The current truth:
+>
+> - **Production runs on Postgres via `DATABASE_URL`. NOT SQLite on a mounted Railway volume.** The SQLite-on-volume path threw `SQLITE_CANTOPEN` and is abandoned. SQLite is the local-only fallback when `DATABASE_URL` is unset.
+> - **`railway up` is the deterministic deploy.** It uploads the working tree. Git-push / `railway add --repo` style deploys can ship a STALE pinned commit, which burned hours. New code is not live until you run `railway up`.
+> - **s33k runs in its OWN Railway project ("s33k") with a dedicated Postgres. Umami is a SEPARATE project ("s33k-analytics").**
+> - The SQLite + volume + su-exec sections below are kept for HISTORICAL context. Do not follow them for the database or project layout. See CLAUDE.md section A.
+
 # Deploying s33k to Railway
 
 This is the copy-pasteable recipe for hosting s33k (the open, MCP-controllable SEO + AEO + analytics control plane) on Railway. It takes about 10 minutes.
+
+> HISTORICAL (superseded by the banner above): the paragraph that follows describes the SQLite-on-volume model. Production now uses Postgres via `DATABASE_URL`; see CLAUDE.md section A.
 
 s33k is a single container built from this repo's `Dockerfile`. It keeps its own SQLite database in `/app/data`, so the one thing you must not skip is mounting a persistent volume there. Without the volume, every redeploy or restart wipes your domains, keywords, and settings.
 
@@ -50,6 +59,8 @@ The app refuses to boot in production (`NODE_ENV=production`, which the Dockerfi
 3. In the service Settings, under "Networking", generate a public domain (e.g. `s33k-production-xxxx.up.railway.app`). Note it; you need it for `NEXT_PUBLIC_APP_URL`.
 
 ### Mount the persistent volume (do NOT skip this)
+
+> HISTORICAL (superseded): this volume step belongs to the abandoned SQLite-on-volume path. Under the current Postgres model, provision a Postgres database in the s33k project and set `DATABASE_URL` instead. See CLAUDE.md section A.
 
 1. In the service, open the "Variables" / "Volumes" area, "New Volume".
 2. Set the mount path to exactly:

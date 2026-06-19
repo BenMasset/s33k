@@ -12,15 +12,14 @@ export function useTestAdwordsIntegration(onSuccess?: Function) {
       }
       return res.json();
    }, {
-      onSuccess: async (data) => {
-         console.log('Ideas Added:', data);
+      onSuccess: async () => {
          toast('Google Ads has been integrated successfully!', { icon: '✔️' });
          if (onSuccess) {
             onSuccess(false);
          }
       },
       onError: (error) => {
-         console.log('Error Loading Keyword Ideas!!!', error);
+         console.error('[ERROR] Connecting Google Ads integration: ', error);
          toast('Failed to connect to Google Ads. Please make sure you have provided the correct API info.', { icon: '⚠️' });
       },
    });
@@ -31,7 +30,6 @@ export async function fetchAdwordsKeywordIdeas(router: NextRouter, domainSlug: s
    const res = await fetch(`${window.location.origin}/api/ideas?domain=${domainSlug}`, { method: 'GET' });
    if (res.status >= 400 && res.status < 600) {
       if (res.status === 401) {
-         console.log('Unauthorized!!');
          router.push('/login');
       }
       throw new Error('Bad response from server');
@@ -58,8 +56,7 @@ export function useMutateKeywordIdeas(router:NextRouter, onSuccess?: Function) {
       }
       return res.json();
    }, {
-      onSuccess: async (data) => {
-         console.log('Ideas Added:', data);
+      onSuccess: async () => {
          toast('Keyword Ideas Loaded Successfully!', { icon: '✔️' });
          if (onSuccess) {
             onSuccess(false);
@@ -67,7 +64,7 @@ export function useMutateKeywordIdeas(router:NextRouter, onSuccess?: Function) {
          queryClient.invalidateQueries([`keywordIdeas-${domainSlug}`]);
       },
       onError: (error) => {
-         console.log('Error Loading Keyword Ideas!!!', error);
+         console.error('[ERROR] Loading Keyword Ideas: ', error);
          toast('Error Loading Keyword Ideas', { icon: '⚠️' });
       },
    });
@@ -85,16 +82,14 @@ export function useMutateFavKeywordIdeas(router:NextRouter, onSuccess?: Function
       }
       return res.json();
    }, {
-      onSuccess: async (data) => {
-         console.log('Ideas Added:', data);
-         // toast('Keyword Updated!', { icon: '✔️' });
+      onSuccess: async () => {
          if (onSuccess) {
             onSuccess(false);
          }
          queryClient.invalidateQueries([`keywordIdeas-${domainSlug}`]);
       },
       onError: (error) => {
-         console.log('Error Favorating Keywords', error);
+         console.error('[ERROR] Favorating Keywords: ', error);
          toast('Error Favorating Keywords', { icon: '⚠️' });
       },
    });
@@ -121,7 +116,7 @@ export function useMutateKeywordsVolume(onSuccess?: Function) {
         }, 3000);
       },
       onError: (error) => {
-         console.log('Error Loading Keyword Volume Data!!!', error);
+         console.error('[ERROR] Loading Keyword Volume Data: ', error);
          toast('Error Loading Keyword Volume Data', { icon: '⚠️' });
       },
    });

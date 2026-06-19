@@ -45,7 +45,6 @@ const KeywordIdeasUpdater = ({ onUpdate, settings, domain, searchConsoleConnecte
 
    const reloadKeywordIdeas = () => {
       const keywordPaylod = seedType !== 'auto' && keywords ? keywords.split(',').map((key) => key.trim()) : undefined;
-      console.log('keywordPaylod :', keywords, keywordPaylod);
       updateKeywordIdeas({
          seedType,
          language,

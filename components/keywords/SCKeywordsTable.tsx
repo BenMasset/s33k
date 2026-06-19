@@ -77,7 +77,6 @@ const SCKeywordsTable = ({ domain, keywords = [], isLoading = true, isConsoleInt
    }, [finalKeywords, device]);
 
    const selectKeyword = (keywordID: string) => {
-      console.log('Select Keyword: ', keywordID);
       let updatedSelectd = [...selectedKeywords, keywordID];
       if (selectedKeywords.includes(keywordID)) {
          updatedSelectd = selectedKeywords.filter((keyID) => keyID !== keywordID);

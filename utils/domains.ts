@@ -10,7 +10,6 @@ import { readLocalSCData } from './searchConsole';
  */
 const getdomainStats = async (domains:DomainType[]): Promise<DomainType[]> => {
    const finalDomains: DomainType[] = [];
-   console.log('domains: ', domains.length);
 
    for (const domain of domains) {
       const domainWithStat = domain;

@@ -181,12 +181,12 @@ export const sendInviteEmail = async (args: SendInviteArgs): Promise<SendInviteR
       });
       if (!response.ok) {
          const detail = await response.text().catch(() => '');
-         console.log('[ERROR] Sending invite email: ', response.status, detail);
+         console.error('[ERROR] Sending invite email: ', response.status, detail);
          return { sent: false, error: `Resend responded ${response.status}` };
       }
       return { sent: true };
    } catch (error) {
-      console.log('[ERROR] Sending invite email: ', error);
+      console.error('[ERROR] Sending invite email: ', error);
       return { sent: false, error: 'Invite email send failed.' };
    }
 };

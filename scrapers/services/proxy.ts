@@ -20,7 +20,6 @@ const proxy:ScraperSettings = {
       const hasValidContent = $('body').find('#main');
       if (hasValidContent.length === 0) {
          const msg = '[ERROR] Scraped search results from proxy do not adhere to expected format. Unable to parse results';
-         console.log(msg);
          throw new Error(msg);
       }
 

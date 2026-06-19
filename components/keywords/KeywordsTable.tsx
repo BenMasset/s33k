@@ -60,7 +60,7 @@ const KeywordsTable = (props: KeywordsTableProps) => {
    }, [titleColumnRef]);
 
    const tableColumns = settings?.keywordsColumns || ['Best', 'History', 'Volume', 'Search Console'];
-   const { mutate: updateMutate, isLoading: isUpdatingSettings } = useUpdateSettings(() => console.log(''));
+   const { mutate: updateMutate, isLoading: isUpdatingSettings } = useUpdateSettings(() => {});
 
    const scDataObject:{ [k:string] : string} = {
       threeDays: 'Last Three Days',
@@ -84,7 +84,6 @@ const KeywordsTable = (props: KeywordsTableProps) => {
    }, [keywords]);
 
    const selectKeyword = (keywordID: number) => {
-      console.log('Select Keyword: ', keywordID);
       let updatedSelectd = [...selectedKeywords, keywordID];
       if (selectedKeywords.includes(keywordID)) {
          updatedSelectd = selectedKeywords.filter((keyID) => keyID !== keywordID);

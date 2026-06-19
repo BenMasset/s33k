@@ -8,7 +8,6 @@ export async function fetchAiReferrals(router: NextRouter, domain: string) {
    );
    if (res.status >= 400 && res.status < 600) {
       if (res.status === 401) {
-         console.log('Unauthorized!!');
          router.push('/login');
       }
       throw new Error('Bad response from server');

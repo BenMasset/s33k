@@ -101,7 +101,6 @@ const fetchSearchConsoleData = async (domain:DomainType, days:number, type?:stri
       let finalRows = resData.rows ? resData.rows.map((item:SearchAnalyticsRawItem) => parseSearchConsoleItem(item, domainName)) : [];
 
       if (type === 'stat' && resData.rows && resData.rows.length > 0) {
-         // console.log(resData.rows);
          finalRows = [];
          resData.rows.forEach((row:SearchAnalyticsRawItem) => {
             finalRows.push({
@@ -118,8 +117,7 @@ const fetchSearchConsoleData = async (domain:DomainType, days:number, type?:stri
    } catch (err:any) {
       const qType = type === 'stats' ? '(stats)' : `(${days}days)`;
       const errorMsg = err?.response?.status && `${err?.response?.statusText}. ${err?.response?.data?.error_description}`;
-      console.log(`[ERROR] Search Console API Error for ${domainName} ${qType} : `, errorMsg || err?.code);
-      // console.log('SC ERROR :', err);
+      console.error(`[ERROR] Search Console API Error for ${domainName} ${qType} : `, errorMsg || err?.code);
       return { error: true, errorMsg: errorMsg || err?.code };
    }
 };
@@ -296,7 +294,7 @@ export const storeSearchConsoleOAuthToken = async (where: Record<string, unknown
       await Domain.update({ search_console: JSON.stringify(updatedBlob) }, { where });
       return true;
    } catch (error) {
-      console.log('[ERROR] Storing Search Console OAuth token: ', error);
+      console.error('[ERROR] Storing Search Console OAuth token: ', error);
       return false;
    }
 };
@@ -315,7 +313,7 @@ export const clearSearchConsoleOAuthToken = async (where: Record<string, unknown
       await Domain.update({ search_console: JSON.stringify(existing) }, { where });
       return true;
    } catch (error) {
-      console.log('[ERROR] Clearing Search Console OAuth token: ', error);
+      console.error('[ERROR] Clearing Search Console OAuth token: ', error);
       return false;
    }
 };
@@ -360,7 +358,7 @@ export const updateLocalSCData = async (domain:string, scDomainData?:SCDomainDat
    try {
       const filePath = `${process.cwd()}/data/SC_${domain.replaceAll('/', '-')}.json`;
       const emptyData:SCDomainDataType = { threeDays: [], sevenDays: [], thirtyDays: [], lastFetched: '', lastFetchError: '' };
-      await writeFile(filePath, JSON.stringify(scDomainData || emptyData), { encoding: 'utf-8' }).catch((err) => { console.log(err); });
+      await writeFile(filePath, JSON.stringify(scDomainData || emptyData), { encoding: 'utf-8' }).catch((err) => { console.error(err); });
       return scDomainData || emptyData;
    } catch (error) {
       return false;

@@ -5,7 +5,6 @@ export async function fetchScoreboard(router: NextRouter, domain: string) {
    const res = await fetch(`${window.location.origin}/api/scoreboard?domain=${encodeURIComponent(domain)}&period=30d`, { method: 'GET' });
    if (res.status >= 400 && res.status < 600) {
       if (res.status === 401) {
-         console.log('Unauthorized!!');
          router.push('/login');
       }
       throw new Error('Bad response from server');

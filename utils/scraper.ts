@@ -126,7 +126,7 @@ const scrapeSinglePage = async (
       return { results: [], error: `Empty response from ${scraperType || 'scraper'}` };
    } catch (error:any) {
       const msg = error?.message || 'Unknown scraping error';
-      console.log('[ERROR] Scraping page', pagination.page, 'for keyword:', keyword.keyword, msg);
+      console.error('[ERROR] Scraping page', pagination.page, 'for keyword:', keyword.keyword, msg);
       return { results: [], error: msg };
    }
 };
@@ -274,9 +274,7 @@ export const scrapeKeywordWithStrategy = async (
    }
 
    const fullResults = buildFullResults(allScrapedResults);
-   const skippedCount = fullResults.filter((r) => r.skipped).length;
 
-   console.log('[SERP]:', keyword.keyword, finalSerp.position, finalSerp.url, `(strategy: ${strategy}), Skipped ${skippedCount}`);
    return {
       ID: keyword.ID,
       keyword: keyword.keyword,
@@ -322,11 +320,10 @@ export const scrapeKeywordFromGoogle = async (keyword:KeywordType, settings:Sett
          // production scrape is needless disk churn and could leak scraped content (security
          // review #10). Set SCRAPE_DEBUG=true to re-enable when diagnosing a parser issue.
          if (process.env.SCRAPE_DEBUG === 'true') {
-            await writeFile('result.txt', JSON.stringify(scrapeResult), { encoding: 'utf-8' }).catch((err) => { console.log(err); });
+            await writeFile('result.txt', JSON.stringify(scrapeResult), { encoding: 'utf-8' }).catch((err) => { console.error(err); });
          }
          const serp = getSerp(keyword.domain, extracted, subdomainMatching);
          refreshedResults = { ID: keyword.ID, keyword: keyword.keyword, position: serp.position, url: serp.url, result: extracted, error: false };
-         console.log('[SERP]: ', keyword.keyword, serp.position, serp.url);
       } else {
          scraperError = res.detail || res.error || 'Unknown Error';
          throw new Error(res);
@@ -339,11 +336,11 @@ export const scrapeKeywordFromGoogle = async (keyword:KeywordType, settings:Sett
          refreshedResults.error = error;
       }
 
-      console.log('[ERROR] Scraping Keyword : ', keyword.keyword);
+      console.error('[ERROR] Scraping Keyword : ', keyword.keyword);
       if (!(error && error.response && error.response.statusText)) {
-         console.log('[ERROR_MESSAGE]: ', JSON.stringify(error));
+         console.error('[ERROR_MESSAGE]: ', JSON.stringify(error));
       } else {
-         console.log('[ERROR_MESSAGE]: ', error && error.response && error.response.statusText);
+         console.error('[ERROR_MESSAGE]: ', error && error.response && error.response.statusText);
       }
    }
 
@@ -363,7 +360,6 @@ export const extractScrapedResult = (content: string, device: string): SearchRes
    const hasValidContent = [...$('body').find('#search'), ...$('body').find('#rso')];
    if (hasValidContent.length === 0) {
       const msg = '[ERROR] Scraped search results do not adhere to expected format. Unable to parse results';
-      console.log(msg);
       throw new Error(msg);
    }
 
@@ -400,7 +396,6 @@ export const extractScrapedResult = (content: string, device: string): SearchRes
    // Mobile Scraper
    if (extractedResult.length === 0 && device === 'mobile') {
       const items = $('body').find('#rso > div');
-      console.log('Scraped search results contain ', items.length, ' mobile results.');
       for (let i = 0; i < items.length; i += 1) {
          const item = $(items[i]);
          const linkDom = item.find('a[role="presentation"]');
@@ -415,7 +410,6 @@ export const extractScrapedResult = (content: string, device: string): SearchRes
          }
       }
    }
-   // console.log('Scraped search results count: ', extractedResult.length);
 
    return extractedResult;
 };
@@ -473,7 +467,7 @@ export const retryScrape = async (keywordID: number) : Promise<void> => {
    let currentQueue: number[] = [];
 
    const filePath = `${process.cwd()}/data/failed_queue.json`;
-   const currentQueueRaw = await readFile(filePath, { encoding: 'utf-8' }).catch((err) => { console.log(err); return '[]'; });
+   const currentQueueRaw = await readFile(filePath, { encoding: 'utf-8' }).catch((err) => { console.error(err); return '[]'; });
    try {
       currentQueue = currentQueueRaw ? JSON.parse(currentQueueRaw) : [];
    } catch (e) {
@@ -485,7 +479,7 @@ export const retryScrape = async (keywordID: number) : Promise<void> => {
       currentQueue.push(Math.abs(keywordID));
    }
 
-   await writeFile(filePath, JSON.stringify(currentQueue), { encoding: 'utf-8' }).catch((err) => { console.log(err); return '[]'; });
+   await writeFile(filePath, JSON.stringify(currentQueue), { encoding: 'utf-8' }).catch((err) => { console.error(err); return '[]'; });
 };
 
 /**
@@ -498,7 +492,7 @@ export const removeFromRetryQueue = async (keywordID: number) : Promise<void> =>
    let currentQueue: number[] = [];
 
    const filePath = `${process.cwd()}/data/failed_queue.json`;
-   const currentQueueRaw = await readFile(filePath, { encoding: 'utf-8' }).catch((err) => { console.log(err); return '[]'; });
+   const currentQueueRaw = await readFile(filePath, { encoding: 'utf-8' }).catch((err) => { console.error(err); return '[]'; });
    try {
       currentQueue = currentQueueRaw ? JSON.parse(currentQueueRaw) : [];
    } catch (e) {
@@ -507,5 +501,5 @@ export const removeFromRetryQueue = async (keywordID: number) : Promise<void> =>
    }
    currentQueue = currentQueue.filter((item) => item !== Math.abs(keywordID));
 
-   await writeFile(filePath, JSON.stringify(currentQueue), { encoding: 'utf-8' }).catch((err) => { console.log(err); return '[]'; });
+   await writeFile(filePath, JSON.stringify(currentQueue), { encoding: 'utf-8' }).catch((err) => { console.error(err); return '[]'; });
 };

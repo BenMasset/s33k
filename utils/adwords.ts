@@ -79,12 +79,12 @@ export const getAdwordsCredentials = async (): Promise<false | AdwordsCredential
             refresh_token,
          };
       } catch (error) {
-         console.log('Error Decrypting Settings API Keys!');
+         console.error('[ERROR] Decrypting Settings API Keys!', error);
       }
 
       return decryptedSettings;
    } catch (error) {
-      console.log('[ERROR] Getting App Settings. ', error);
+      console.error('[ERROR] Getting App Settings. ', error);
    }
 
    return false;
@@ -105,7 +105,7 @@ export const getAdwordsAccessToken = async (credentials:AdwordsCredentials) => {
        const tokens = await resp.json();
        return tokens?.access_token || '';
    } catch (error) {
-      console.log('[Error] Getting Google Account Access Token:', error);
+      console.error('[ERROR] Getting Google Account Access Token:', error);
       return '';
    }
 };
@@ -195,8 +195,7 @@ export const getAdwordsKeywordIdeas = async (credentials:AdwordsCredentials, adw
          const ideaData = await resp.json();
 
          if (resp.status !== 200) {
-            console.log('[ERROR] Google Ads Response :', ideaData?.error?.details[0]?.errors[0]?.message);
-            // console.log('Response from Ads :', JSON.stringify(ideaData, null, 2));
+            console.error('[ERROR] Google Ads Response :', ideaData?.error?.details[0]?.errors[0]?.message);
          }
 
          if (ideaData?.results) {
@@ -207,7 +206,7 @@ export const getAdwordsKeywordIdeas = async (credentials:AdwordsCredentials, adw
             await updateLocalKeywordIdeas(domain, { keywords: fetchedKeywords, settings: adwordsDomainOptions });
          }
       } catch (error) {
-         console.log('[ERROR] Fetching Keyword Ideas from Google Ads :', error);
+         console.error('[ERROR] Fetching Keyword Ideas from Google Ads :', error);
       }
    }
 
@@ -323,8 +322,7 @@ export const getKeywordsVolume = async (keywords: KeywordType[]): Promise<{error
                const ideaData = await resp.json();
 
                if (resp.status !== 200) {
-                  console.log('[ERROR] Google Ads Volume Request Response :', ideaData?.error?.details[0]?.errors[0]?.message);
-                  // console.log('Response from Google Ads :', JSON.stringify(ideaData, null, 2));
+                  console.error('[ERROR] Google Ads Volume Request Response :', ideaData?.error?.details[0]?.errors[0]?.message);
                }
 
                if (ideaData?.results) {
@@ -344,11 +342,10 @@ export const getKeywordsVolume = async (keywords: KeywordType[]): Promise<{error
                            }
                         }
                      });
-                     // console.log('fetchedKeywords :', fetchedKeywords);
                   }
                }
             } catch (error) {
-               console.log('[ERROR] Fetching Keyword Volume from Google Ads :', error);
+               console.error('[ERROR] Fetching Keyword Volume from Google Ads :', error);
             }
             if (Object.keys(keywordRequests).length > 1) {
                await sleep(7000);
@@ -375,7 +372,7 @@ export const updateKeywordsVolumeData = async (volumesData: false | Record<numbe
       try {
          await Keyword.update({ volume: volumeData }, { where: { ID: keyID } });
       } catch (error) {
-         console.log('');
+         console.error('[ERROR] Updating keyword volume for ID', keyID, error);
       }
    });
    return true;
@@ -398,7 +395,6 @@ export const getLocalKeywordIdeas = async (domain:string): Promise<false | Keywo
       }
       return false;
    } catch (error) {
-      // console.log('[ERROR] Getting Local Ideas. ', error);
       return false;
    }
 };
@@ -427,7 +423,6 @@ export const updateLocalKeywordIdeas = async (domain:string, data:IdeaDatabaseUp
       }
 
       await writeFile(`${process.cwd()}/data/${filename}`, JSON.stringify(fileContent, null, 2), 'utf-8');
-      console.log(`Data saved to ${filename} successfully!`);
       return true;
    } catch (error) {
       console.error(`[Error] Saving data to IDEAS_${domain}.json: ${error}`);

@@ -53,12 +53,21 @@ const resolveAccount = async (
    return null;
 };
 
+// Defense-in-depth max on the site quantity the webhook will trust. The value is already
+// signature-protected (it rides inside a Stripe-verified subscription) and the checkout side
+// clamps the REQUESTED quantity to 1..100, but we re-clamp here so a misconfigured Stripe price or
+// a runaway quantity can never inflate paid_sites (and therefore the keyword cap / SERP COGS).
+const MAX_SITES = 100;
+
 // Pull the QUANTITY off a subscription's first line item: the number of sites purchased in the
 // per-unit model. Stored as account.paid_sites. Null when absent/invalid (leave the prior value).
 const quantityOfSubscription = (sub: Stripe.Subscription): number | null => {
    const item = sub.items && sub.items.data && sub.items.data[0];
    const qty = item && (item as unknown as { quantity?: number }).quantity;
-   return typeof qty === 'number' && Number.isFinite(qty) && qty > 0 ? Math.floor(qty) : null;
+   if (typeof qty === 'number' && Number.isFinite(qty) && qty > 0) {
+      return Math.min(Math.floor(qty), MAX_SITES);
+   }
+   return null;
 };
 
 // Apply a subscription's state to the account: stamp customer id, paid_sites (the subscription

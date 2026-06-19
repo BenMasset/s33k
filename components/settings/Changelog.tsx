@@ -26,7 +26,6 @@ const ChangeLog = ({ closeChangeLog }: ChangeLogProps) => {
       document.body.style.overflow = 'hidden';
       // eslint-disable-next-line no-unused-expressions
       () => {
-         console.log('run CleanUp !');
          document.body.style.overflow = 'auto';
        };
    }, []);

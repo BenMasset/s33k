@@ -12,12 +12,32 @@ type adwordsValidateResp = {
    error?: string|null,
 }
 
+// LEGACY PUBLIC OAUTH CALLBACK, kept admin-only on purpose (audit A12).
+//
+// Google redirects back here with ?code and no cookie/API key, so the callback cannot go through
+// verifyUser. The newer Search Console flow solves this with a SIGNED state that binds the callback
+// to a specific { domain, owner_id } (see utils/searchConsoleOAuth.ts). We deliberately do NOT apply
+// that pattern to Google Ads, because the Google Ads flow has nothing tenant-sensitive to bind:
+//
+//   1. NO server-issued consent URL to stamp. The Google consent link is built CLIENT-SIDE in the
+//      browser (components/settings/AdWordsSettings.tsx), not by a server /connect route. There is no
+//      server point that issues the consent URL where a signed state could be generated, so adding one
+//      would mean restructuring the React component, which is out of scope for this route-only fix.
+//   2. NO per-domain / per-owner target. Google Ads is a SINGLE GLOBAL ADMIN integration: one app-wide
+//      client_id / client_secret / refresh_token stored in the global data/settings.json file, not on
+//      any owned Domain row. The GSC signed state exists precisely to stop a forged callback attaching
+//      a token to a domain you do not own; Google Ads has no per-domain target, so a signed state would
+//      protect nothing here.
+//   3. It is already admin-only and lower-risk: the settings reads/writes around it go through
+//      verifyUser (cookie/admin), the route is NOT in utils/allowedApiRoutes.ts (neither the Bearer-key
+//      allowlist nor the scoped-share allowlist), and it only ever touches GLOBAL admin credentials.
+//      __tests__/utils/adwords-admin-only.test.ts guards that it stays out of both allowlists.
+//
+// If Google Ads ever becomes a per-domain/per-owner integration (credentials stored on an owned row),
+// move the consent-URL generation to a server /connect route, adopt the searchConsoleOAuth signed-state
+// helpers, and migrate this route to authorize() with owner-scoped storage first.
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
    await ensureSynced();
-   // LEGACY PUBLIC OAUTH CALLBACK. Google redirects back with ?code and no cookie/API key, so this
-   // callback cannot go through verifyUser. Unlike the newer Search Console OAuth flow, this older
-   // Google Ads flow has no signed state binding the callback to an account/domain. Keep it treated
-   // as an admin/global integration until it is upgraded to the Search Console signed-state pattern.
    if (req.method === 'GET' && req.query.code) {
       return getAdwordsRefreshToken(req, res);
    }

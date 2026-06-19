@@ -1,4 +1,3 @@
-import { performance } from 'perf_hooks';
 import { setTimeout as sleep } from 'timers/promises';
 import { RefreshResult, removeFromRetryQueue, retryScrape, scrapeKeywordWithStrategy } from './scraper';
 import parseKeywords from './parseKeywords';
@@ -15,7 +14,6 @@ import Keyword from '../database/models/keyword';
 const refreshAndUpdateKeywords = async (rawKeyword:Keyword[], settings:SettingsType, domains?: DomainType[]): Promise<KeywordType[]> => {
    const keywords:KeywordType[] = rawKeyword.map((el) => el.get({ plain: true }));
    if (!rawKeyword || rawKeyword.length === 0) { return []; }
-   const start = performance.now();
    const updatedKeywords: KeywordType[] = [];
 
    if (['scrapingant', 'serpapi', 'searchapi'].includes(settings.scraper_type)) {
@@ -31,7 +29,6 @@ const refreshAndUpdateKeywords = async (rawKeyword:Keyword[], settings:SettingsT
       }
    } else {
       for (const keyword of rawKeyword) {
-         console.log('START SCRAPE: ', keyword.keyword);
          const keywordPlain = keyword.get({ plain: true }) as KeywordType;
          const domainSettings = domains?.find((d) => d.domain === keywordPlain.domain);
          const updatedKeyword = await refreshAndUpdateKeyword(keyword, settings, domainSettings);
@@ -42,8 +39,6 @@ const refreshAndUpdateKeywords = async (rawKeyword:Keyword[], settings:SettingsT
       }
    }
 
-   const end = performance.now();
-   console.log(`time taken: ${end - start}ms`);
    return updatedKeywords;
 };
 
@@ -112,10 +107,9 @@ export const updateKeywordPosition = async (keywordRaw:Keyword, updatedKeyword: 
                lastResult: Array.isArray(updatedKeyword.result) ? JSON.stringify(updatedKeyword.result) : updatedKeyword.result,
                history: JSON.stringify(history),
             });
-            console.log('[SUCCESS] Updating the Keyword: ', keyword.keyword);
             updated = { ...keyword, ...updatedVal, lastUpdateError: JSON.parse(updatedVal.lastUpdateError) };
          } catch (error) {
-            console.log('[ERROR] Updating SERP for Keyword', keyword.keyword, error);
+            console.error('[ERROR] Updating SERP for Keyword', keyword.keyword, error);
          }
       }
 

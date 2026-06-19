@@ -67,12 +67,12 @@ export const notifyFeatureRequest = async (args: NotifyArgs): Promise<NotifyResu
       });
       if (!response.ok) {
          const detail = await response.text().catch(() => '');
-         console.log('[ERROR] Sending feature-request email: ', response.status, detail);
+         console.error('[ERROR] Sending feature-request email: ', response.status, detail);
          return { sent: false, error: `Resend responded ${response.status}` };
       }
       return { sent: true };
    } catch (error) {
-      console.log('[ERROR] Sending feature-request email: ', error);
+      console.error('[ERROR] Sending feature-request email: ', error);
       return { sent: false, error: 'Feature-request email send failed.' };
    }
 };

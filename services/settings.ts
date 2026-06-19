@@ -14,8 +14,6 @@ export const useUpdateSettings = (onSuccess:Function|undefined) => {
    const queryClient = useQueryClient();
 
    return useMutation(async (settings: SettingsType) => {
-      // console.log('settings: ', JSON.stringify(settings));
-
       const headers = new Headers({ 'Content-Type': 'application/json', Accept: 'application/json' });
       const fetchOpts = { method: 'PUT', headers, body: JSON.stringify({ settings }) };
       const res = await fetch(`${window.location.origin}/api/settings`, fetchOpts);
@@ -32,7 +30,6 @@ export const useUpdateSettings = (onSuccess:Function|undefined) => {
          queryClient.invalidateQueries(['settings']);
       },
       onError: () => {
-         console.log('Error Updating App Settings!!!');
          toast('Error Updating App Settings.', { icon: '⚠️' });
       },
    });
@@ -55,7 +52,6 @@ export function useClearFailedQueue(onSuccess:Function) {
          queryClient.invalidateQueries(['settings']);
       },
       onError: () => {
-         console.log('Error Clearing Failed Queue!!!');
          toast('Error Clearing Failed Queue.', { icon: '⚠️' });
       },
    });
@@ -74,7 +70,6 @@ export const useMigrateDatabase = (onSuccess:Function|undefined) => {
    const queryClient = useQueryClient();
 
    return useMutation(async () => {
-      // console.log('settings: ', JSON.stringify(settings));
       const res = await fetch(`${window.location.origin}/api/dbmigrate`, { method: 'POST' });
       if (res.status >= 400 && res.status < 600) {
          throw new Error('Bad response from server');
@@ -89,7 +84,6 @@ export const useMigrateDatabase = (onSuccess:Function|undefined) => {
          queryClient.invalidateQueries(['settings']);
       },
       onError: () => {
-         console.log('Error Updating Database!!!');
          toast('Error Updating Database.', { icon: '⚠️' });
       },
    });

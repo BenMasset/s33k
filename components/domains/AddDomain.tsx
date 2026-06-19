@@ -38,8 +38,7 @@ const AddDomain = ({ closeModal, domains = [] }: AddDomainProps) => {
       if (invalidDomains.length > 0) {
          setNewDomainError(`Please Insert Valid Website URL. ${invalidDomains.length > 1 ? `Invalid URLs: ${invalidDomains.join(', ')}` : ''}`);
       } else if (domainsTobeAdded.length > 0) {
-            console.log('domainsTobeAdded :', domainsTobeAdded);
-         addMutate(domainsTobeAdded);
+            addMutate(domainsTobeAdded);
       }
    };
 

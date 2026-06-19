@@ -39,7 +39,7 @@ const Settings = ({ closeSettings }:SettingsProps) => {
    const [currentTab, setCurrentTab] = useState<string>('scraper');
    const [settings, setSettings] = useState<SettingsType>(defaultSettings);
    const [settingsError, setSettingsError] = useState<SettingsError|null>(null);
-   const { mutate: updateMutate, isLoading: isUpdating } = useUpdateSettings(() => console.log(''));
+   const { mutate: updateMutate, isLoading: isUpdating } = useUpdateSettings(() => {});
    const { data: appSettings, isLoading } = useFetchSettings();
    useOnKey('Escape', closeSettings);
 

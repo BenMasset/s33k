@@ -11,7 +11,6 @@ export async function fetchDomains(router: NextRouter, withStats:boolean): Promi
    const res = await fetch(`${window.location.origin}/api/domains${withStats ? '?withstats=true' : ''}`, { method: 'GET' });
    if (res.status >= 400 && res.status < 600) {
       if (res.status === 401) {
-         console.log('Unauthorized!!');
          router.push('/login');
       }
       throw new Error('Bad response from server');
@@ -24,7 +23,6 @@ export async function fetchDomain(router: NextRouter, domainName: string): Promi
    const res = await fetch(`${window.location.origin}/api/domain?domain=${domainName}`, { method: 'GET' });
    if (res.status >= 400 && res.status < 600) {
       if (res.status === 401) {
-         console.log('Unauthorized!!');
          router.push('/login');
       }
       throw new Error('Bad response from server');
@@ -69,7 +67,6 @@ export function useFetchDomains(router: NextRouter, withStats:boolean = false) {
 export function useFetchDomain(router: NextRouter, domainName:string, onSuccess: Function) {
    return useQuery('domain', () => fetchDomain(router, domainName), {
       onSuccess: async (data) => {
-         console.log('Domain Loaded!!!', data.domain);
          onSuccess(data.domain);
       } });
 }
@@ -87,7 +84,6 @@ export function useAddDomain(onSuccess:Function) {
       return res.json();
    }, {
       onSuccess: async (data) => {
-         console.log('Domain Added!!!', data);
          const newDomain:DomainType[] = data.domains;
          const singleDomain = newDomain.length === 1;
          toast(`${singleDomain ? newDomain[0].domain : `${newDomain.length} domains`} Added Successfully!`, { icon: '✔️' });
@@ -98,7 +94,6 @@ export function useAddDomain(onSuccess:Function) {
          queryClient.invalidateQueries(['domains']);
       },
       onError: () => {
-         console.log('Error Adding New Domain!!!');
          toast('Error Adding New Domain');
       },
    });
@@ -117,13 +112,12 @@ export function useUpdateDomain(onSuccess:Function) {
       return responseObj;
    }, {
       onSuccess: async () => {
-         console.log('Settings Updated!!!');
          toast('Settings Updated!', { icon: '✔️' });
          onSuccess();
          queryClient.invalidateQueries(['domains']);
       },
       onError: (error) => {
-         console.log('Error Updating Domain Settings!!!', error);
+         console.error('[ERROR] Updating Domain Settings: ', error);
          toast('Error Updating Domain Settings', { icon: '⚠️' });
       },
    });
@@ -144,7 +138,6 @@ export function useDeleteDomain(onSuccess:Function) {
          queryClient.invalidateQueries(['domains']);
       },
       onError: () => {
-         console.log('Error Removing Domain!!!');
          toast('Error Removing Domain', { icon: '⚠️' });
       },
    });

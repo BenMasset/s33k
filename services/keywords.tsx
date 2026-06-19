@@ -51,13 +51,11 @@ export function useAddKeywords(onSuccess:Function) {
       return res.json();
    }, {
       onSuccess: async () => {
-         console.log('Keywords Added!!!');
          toast('Keywords Added Successfully!', { icon: '✔️' });
          onSuccess();
          queryClient.invalidateQueries(['keywords']);
       },
       onError: () => {
-         console.log('Error Adding New Keywords!!!');
          toast('Error Adding New Keywords', { icon: '⚠️' });
       },
    });
@@ -74,13 +72,11 @@ export function useDeleteKeywords(onSuccess:Function) {
       return res.json();
    }, {
       onSuccess: async () => {
-         console.log('Removed Keyword!!!');
          onSuccess();
          toast('Keywords Removed Successfully!', { icon: '✔️' });
          queryClient.invalidateQueries(['keywords']);
       },
       onError: () => {
-         console.log('Error Removing Keyword!!!');
          toast('Error Removing the Keywords', { icon: '⚠️' });
       },
    });
@@ -104,7 +100,6 @@ export function useFavKeywords(onSuccess:Function) {
          queryClient.invalidateQueries(['keywords']);
       },
       onError: () => {
-         console.log('Error Changing Favorite Status!!!');
          toast('Error Changing Favorite Status.', { icon: '⚠️' });
       },
    });
@@ -128,7 +123,6 @@ export function useUpdateKeywordTags(onSuccess:Function) {
          queryClient.invalidateQueries(['keywords']);
       },
       onError: () => {
-         console.log('Error Updating Keyword Tags!!!');
          toast('Error Updating Keyword Tags.', { icon: '⚠️' });
       },
    });
@@ -138,7 +132,6 @@ export function useRefreshKeywords(onSuccess:Function) {
    const queryClient = useQueryClient();
    return useMutation(async ({ ids = [], domain = '' } : {ids?: number[], domain?: string}) => {
       const keywordIds = ids.join(',');
-      console.log(keywordIds);
       const query = ids.length === 0 && domain ? `?id=all&domain=${domain}` : `?id=${keywordIds}`;
       const res = await fetch(`${window.location.origin}/api/refresh${query}`, { method: 'POST' });
       if (res.status >= 400 && res.status < 600) {
@@ -147,13 +140,11 @@ export function useRefreshKeywords(onSuccess:Function) {
       return res.json();
    }, {
       onSuccess: async () => {
-         console.log('Keywords Added to Refresh Queue!!!');
          onSuccess();
          toast('Keywords Added to Refresh Queue', { icon: '🔄' });
          queryClient.invalidateQueries(['keywords']);
       },
       onError: () => {
-         console.log('Error Refreshing Keywords!!!');
          toast('Error Refreshing Keywords.', { icon: '⚠️' });
       },
    });
@@ -173,7 +164,6 @@ export function useFetchSingleKeyword(keywordID:number) {
       }
    }, {
       onError: () => {
-         console.log('Error Loading Keyword Data!!!');
          toast('Error Loading Keyword Details.', { icon: '⚠️' });
       },
    });
@@ -184,7 +174,6 @@ export async function fetchSearchResults(router:NextRouter, keywordData: Record<
    const res = await fetch(`${window.location.origin}/api/refresh?keyword=${keyword}&country=${country}&device=${device}`, { method: 'GET' });
    if (res.status >= 400 && res.status < 600) {
       if (res.status === 401) {
-         console.log('Unauthorized!!');
          router.push('/login');
       }
       throw new Error('Bad response from server');

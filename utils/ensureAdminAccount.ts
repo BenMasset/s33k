@@ -29,7 +29,7 @@ const ensureAdminAccount = async (): Promise<void> => {
    } catch (error) {
       // Never block a request on this best-effort backfill. A genuinely missing table is
       // surfaced by the route's own query; here we just log and let the caller proceed.
-      console.log('[ERROR] ensureAdminAccount: ', error);
+      console.error('[ERROR] ensureAdminAccount: ', error);
    }
 };
 
