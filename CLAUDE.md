@@ -309,7 +309,7 @@ data-loss migration. The adversarial review is what has repeatedly caught exactl
 - `utils/authorize.ts`, `utils/scope.ts` · the multi-tenant auth + scoping seam.
 - `utils/allowedApiRoutes.ts` · API-route whitelist (keep dependency-free).
 - `utils/knowledge.ts` · single source of truth for tool docs; the coverage test gates it.
-- `mcp/src/tools.ts` · the SHARED MCP tool + resource registration (81 + 5). `mcp/src/index.ts` is
+- `mcp/src/tools.ts` · the SHARED MCP tool + resource registration (82 + 5). `mcp/src/index.ts` is
   the stdio entry; `pages/api/mcp/[[...slug]].ts` is the hosted HTTP endpoint. Both call into tools.ts.
 - `SECURITY.md` · the verifiable trust facts (no-training, isolation, export/delete, cookieless).
 - `BUILD_PLAN.md` · the phased plan + decision log. `NIGHT_REPORT.md` · the build-session log.

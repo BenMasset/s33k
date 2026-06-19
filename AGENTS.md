@@ -147,7 +147,7 @@ hard-won lesson, so the next session never relearns it.
 - `utils/authorize.ts`, `utils/scope.ts` · the multi-tenant auth + scoping seam.
 - `utils/allowedApiRoutes.ts` · API-route whitelist (keep dependency-free).
 - `utils/knowledge.ts` · single source of truth for tool docs; the coverage test gates it.
-- `mcp/src/tools.ts` · shared MCP tool + resource registration (81 + 5). `mcp/src/index.ts` is the
+- `mcp/src/tools.ts` · shared MCP tool + resource registration (82 + 5). `mcp/src/index.ts` is the
   stdio entry; `pages/api/mcp/[[...slug]].ts` is the hosted HTTP endpoint.
 - `S33K_IMPROVEMENT_AUDIT.md` · shared Codex/Claude improvement backlog and progress log.
 - `SECURITY.md` · the verifiable trust facts (no-training, isolation, export/delete, cookieless).
