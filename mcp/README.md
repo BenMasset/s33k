@@ -214,6 +214,22 @@ claude mcp add --transport http s33k https://s33k-production.up.railway.app/api/
 
 **Claude.ai connectors / Cursor:** add a custom MCP (HTTP) connector with the URL `https://s33k-production.up.railway.app/api/mcp` and an `Authorization: Bearer YOUR_S33K_API_KEY` header. Any MCP client that speaks Streamable HTTP works the same way.
 
+**Claude Desktop:** Claude Desktop cannot point at a remote HTTP MCP URL directly, so bridge it with `mcp-remote`. Edit the Desktop config file (macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`, Windows: `%APPDATA%\Claude\claude_desktop_config.json`) and add:
+
+```json
+{
+  "mcpServers": {
+    "s33k": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://s33k-production.up.railway.app/api/mcp", "--header", "Authorization:${AUTH}"],
+      "env": { "AUTH": "Bearer YOUR_S33K_API_KEY" }
+    }
+  }
+}
+```
+
+Put the key in the `AUTH` env var exactly as shown (`Bearer YOUR_S33K_API_KEY`), not inline in the `--header` argument. `mcp-remote` splits a header argument on its first space, which would break `Bearer <key>`; routing the value through `${AUTH}` keeps it intact. After saving, fully quit and reopen Claude Desktop (a window reload is not enough), then look for s33k under the connectors / tools menu. To run s33k locally instead of the hosted endpoint, drop the stdio `node .../mcp/dist/index.js` block from "Register it in Claude Code" above into this same Desktop config file.
+
 The endpoint runs stateless: a fresh MCP server, transport, and key-bound fetch are built per request and torn down when the response finishes, so no key or session state is ever shared across connections.
 
 ## Run it directly (manual check)
