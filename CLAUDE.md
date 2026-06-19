@@ -241,16 +241,22 @@ hard-won lesson, so the next session never relearns it.
 
 ---
 
-## E. The Tyler review gate (run this on risky changes before deploy)
+## E. The Tyler review gate (a mandatory checkpoint before EVERY deploy)
 
-A change to the security/architecture surface gets a CTO-grade adversarial review BEFORE it deploys,
-not just a green gate. This is a standing rule for every session (Claude or Codex): apply it
-automatically, do not wait to be asked.
+EVERY `railway up` passes through this gate. It is unconditional as a CHECKPOINT and triaging in
+what it does. This is a standing rule for every session (Claude or Codex): apply it automatically,
+do not wait to be asked. The mechanical gate (green tests) is necessary but not sufficient.
 
-**When it fires:** after a change is built and passes the mechanical gate (lint + jest + build), and
-BEFORE `railway up`. Run `git diff --name-only <base>..HEAD` (or check the working tree) and if any
-changed path matches the TRIGGER SURFACE below, launch the review. Then GATE the deploy on the
-verdict: a clean verdict ships; a must-fix gets fixed and RE-reviewed before shipping.
+**When it fires:** before EVERY `railway up`, after the mechanical gate (lint + jest + build) is
+green. Triage the change first (`git diff --name-only <base>..HEAD` or the working tree):
+- Any path in the TRIGGER SURFACE below, OR any non-trivial change -> run the FULL CTO-grade
+  adversarial review, and GATE the deploy on the verdict (clean ships; a must-fix gets fixed and
+  RE-reviewed before shipping).
+- Clearly trivial (doc / copy / test-only / dependency bump) -> log a one-line "review skipped:
+  trivial" and proceed. When unsure, review. Never skip silently.
+
+(If a full review on literally every deploy is wanted regardless of cost, drop the trivial-skip
+branch. The triage exists only so a typo fix does not burn a 2-to-3-minute CTO pass.)
 
 **Trigger surface (any of these = review required):**
 - Auth + multi-tenant isolation: `utils/authorize.ts`, `utils/resolveAccount.ts`, `utils/scope.ts`,
