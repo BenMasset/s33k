@@ -6,6 +6,9 @@ import NotificationSettings from './NotificationSettings';
 import ScraperSettings from './ScraperSettings';
 import useOnKey from '../../hooks/useOnKey';
 import IntegrationSettings from './IntegrationSettings';
+import InviteSettings from './InviteSettings';
+import WaitlistSettings from './WaitlistSettings';
+import { useBillingStatus } from '../../services/billing';
 
 type SettingsProps = {
    closeSettings: Function,
@@ -41,6 +44,11 @@ const Settings = ({ closeSettings }:SettingsProps) => {
    const [settingsError, setSettingsError] = useState<SettingsError|null>(null);
    const { mutate: updateMutate, isLoading: isUpdating } = useUpdateSettings(() => {});
    const { data: appSettings, isLoading } = useFetchSettings();
+   // Admin detection: the billing-status route returns plan: 'admin' for the single-tenant admin
+   // sentinel. Only the admin sees the Waitlist tab. The /api/waitlist route also 401/403s any
+   // non-admin, so this is a UX gate on top of a hard server gate.
+   const { data: billing } = useBillingStatus();
+   const isAdmin = billing?.plan === 'admin';
    useOnKey('Escape', closeSettings);
 
    useEffect(() => {
@@ -124,6 +132,20 @@ const Settings = ({ closeSettings }:SettingsProps) => {
                      onClick={() => setCurrentTab('integrations')}>
                        <Icon type='integration' size={14} /> Integrations
                      </li>
+                     <li
+                     data-testid='invite_tab'
+                     className={`${tabStyle} ${currentTab === 'invite' ? tabStyleActive : 'border-transparent'}`}
+                     onClick={() => setCurrentTab('invite')}>
+                       <Icon type='email' size={14} /> Invite
+                     </li>
+                     {isAdmin && (
+                        <li
+                        data-testid='waitlist_tab'
+                        className={`${tabStyle} ${currentTab === 'waitlist' ? tabStyleActive : 'border-transparent'}`}
+                        onClick={() => setCurrentTab('waitlist')}>
+                          <Icon type='research' size={14} /> Waitlist
+                        </li>
+                     )}
                   </ul>
                </div>
                {currentTab === 'scraper' && settings && (
@@ -142,13 +164,19 @@ const Settings = ({ closeSettings }:SettingsProps) => {
                   closeSettings={closeSettings}
                    />
                )}
-               <div className=' border-t-[1px] border-gray-200 p-2 px-3'>
-                  <button
-                  onClick={() => performUpdate()}
-                  className=' py-3 px-5 w-full rounded cursor-pointer bg-blue-700 text-white font-semibold text-sm'>
-                  {isUpdating && <Icon type="loading" size={14} />} Update Settings
-                  </button>
-               </div>
+               {currentTab === 'invite' && <InviteSettings />}
+               {currentTab === 'waitlist' && isAdmin && <WaitlistSettings enabled={isAdmin} />}
+               {/* The Invite and Waitlist tabs drive their own actions, so they hide the shared
+                   "Update Settings" footer (which only persists scraper/notification/integration). */}
+               {currentTab !== 'invite' && currentTab !== 'waitlist' && (
+                  <div className=' border-t-[1px] border-gray-200 p-2 px-3'>
+                     <button
+                     onClick={() => performUpdate()}
+                     className=' py-3 px-5 w-full rounded cursor-pointer bg-blue-700 text-white font-semibold text-sm'>
+                     {isUpdating && <Icon type="loading" size={14} />} Update Settings
+                     </button>
+                  </div>
+               )}
             </div>
             <Toaster position='bottom-center' containerClassName="react_toaster" />
        </div>

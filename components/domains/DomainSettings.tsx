@@ -6,6 +6,7 @@ import { useDeleteDomain, useFetchDomain, useUpdateDomain } from '../../services
 import InputField from '../common/InputField';
 import SelectField, { SelectionOption } from '../common/SelectField';
 import ToggleField from '../common/ToggleField';
+import ShareSettings from './ShareSettings';
 
 type DomainSettingsProps = {
    domain:DomainType|false,
@@ -19,7 +20,7 @@ type DomainSettingsError = {
 
 const DomainSettings = ({ domain, closeModal }: DomainSettingsProps) => {
    const router = useRouter();
-   const [currentTab, setCurrentTab] = useState<'notification'|'searchconsole'|'scraping'>('scraping');
+   const [currentTab, setCurrentTab] = useState<'notification'|'searchconsole'|'scraping'|'share'>('scraping');
    const [showRemoveDomain, setShowRemoveDomain] = useState<boolean>(false);
    const [settingsError, setSettingsError] = useState<DomainSettingsError>({ type: '', msg: '' });
    const [domainSettings, setDomainSettings] = useState<DomainSettings>(() => ({
@@ -94,6 +95,12 @@ const DomainSettings = ({ domain, closeModal }: DomainSettingsProps) => {
                      className={`${tabStyle} ${currentTab === 'searchconsole' ? ' bg-white text-blue-600 border-slate-200' : 'border-transparent'}`}
                      onClick={() => setCurrentTab('searchconsole')}>
                         <Icon type='google' /> Search Console
+                     </li>
+                     <li
+                     data-testid='domain_share_tab'
+                     className={`${tabStyle} ${currentTab === 'share' ? ' bg-white text-blue-600 border-slate-200' : 'border-transparent'}`}
+                     onClick={() => setCurrentTab('share')}>
+                        <Icon type='link' /> Share
                      </li>
                   </ul>
                </div>
@@ -221,6 +228,9 @@ const DomainSettings = ({ domain, closeModal }: DomainSettingsProps) => {
                         )}
                      </div>
                   )}
+                  {currentTab === 'share' && domain && (
+                     <ShareSettings domain={domain.domain} />
+                  )}
                </div>
                {!isUpdating && (domainUpdateError as Error)?.message && (
                   <div className='w-full mt-4 p-3 text-sm bg-red-50 text-red-700'>{(domainUpdateError as Error).message}</div>
@@ -230,18 +240,23 @@ const DomainSettings = ({ domain, closeModal }: DomainSettingsProps) => {
                )}
             </div>
 
-            <div className="flex justify-between border-t-[1px] border-gray-100 mt-8 pt-4 pb-0">
-               <button
-               className="text-sm font-semibold text-red-500"
-               onClick={() => setShowRemoveDomain(true)}>
-                  <Icon type="trash" /> Remove Domain
-               </button>
-               <button
-               className={`text-sm font-semibold py-2 px-5 rounded cursor-pointer bg-blue-700 text-white ${isUpdating ? 'cursor-not-allowed' : ''}`}
-               onClick={() => !isUpdating && updateDomain()}>
-                  {isUpdating && <Icon type='loading' />} Update Settings
-               </button>
-            </div>
+            {/* The Share tab drives its own actions (share / revoke), so it hides the shared
+                Remove Domain + Update Settings footer, which only persists domain settings. */}
+            {currentTab !== 'share' && (
+               <div className="flex justify-between border-t-[1px] border-gray-100 mt-8 pt-4 pb-0">
+                  <button
+                  className="text-sm font-semibold text-red-500"
+                  onClick={() => setShowRemoveDomain(true)}>
+                     <Icon type="trash" /> Remove Domain
+                  </button>
+                  <button
+                  className={`text-sm font-semibold py-2 px-5 rounded cursor-pointer bg-blue-700 text-white
+                  ${isUpdating ? 'cursor-not-allowed' : ''}`}
+                  onClick={() => !isUpdating && updateDomain()}>
+                     {isUpdating && <Icon type='loading' />} Update Settings
+                  </button>
+               </div>
+            )}
          </Modal>
          {showRemoveDomain && domain && (
             <Modal closeModal={() => setShowRemoveDomain(false) } title={`Remove Domain ${domain.domain}`}>
