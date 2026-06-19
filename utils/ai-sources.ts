@@ -163,6 +163,10 @@ export const safeUpstreamDetail = (detail: unknown): string => {
    const scrubbed = raw
       // Remove any absolute URL (this is where the collector host would leak).
       .replace(/https?:\/\/[^\s"'<>)]+/gi, '[host]')
+      // Remove any bare IPv4 literal (optionally with a port), e.g. a Node socket error pointing at
+      // an internal/ephemeral address like 10.1.2.3:3000. The hostname rule below does not catch these
+      // (a numeric final octet has no TLD letters), so redact them explicitly to keep the scrub structural.
+      .replace(/\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b/g, '[host]')
       // Remove any bare host:port token (e.g. internal-host:3000) not part of a URL.
       .replace(/\b[a-z0-9.-]+\.[a-z]{2,}(?::\d+)?\b/gi, '[host]')
       // Never echo a tracking website id back in an error.

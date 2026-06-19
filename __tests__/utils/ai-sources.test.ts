@@ -1,4 +1,4 @@
-import { classifyReferrer } from '../../utils/ai-sources';
+import { classifyReferrer, safeUpstreamDetail } from '../../utils/ai-sources';
 
 describe('classifyReferrer', () => {
    it('maps known AI hosts to the right engine', () => {
@@ -39,5 +39,37 @@ describe('classifyReferrer', () => {
       expect(classifyReferrer('   ')).toEqual({ isAI: false, engine: null });
       expect(classifyReferrer(null as unknown as string)).toEqual({ isAI: false, engine: null });
       expect(classifyReferrer(undefined as unknown as string)).toEqual({ isAI: false, engine: null });
+   });
+});
+
+describe('safeUpstreamDetail', () => {
+   it('strips an absolute backend URL (the collector-host leak vector)', () => {
+      const out = safeUpstreamDetail('connect ECONNREFUSED https://umami-production-a400b.up.railway.app/api/auth/login');
+      expect(out).not.toMatch(/umami-production-a400b\.up\.railway\.app/);
+      expect(out).not.toMatch(/https?:\/\//);
+      expect(out).toContain('[host]');
+   });
+
+   it('strips a bare hostname:port token', () => {
+      const out = safeUpstreamDetail('getaddrinfo ENOTFOUND umami-production-a400b.up.railway.app:443');
+      expect(out).not.toMatch(/umami-production/);
+      expect(out).toContain('[host]');
+   });
+
+   it('strips a bare IPv4 literal, with or without a port (the structural gap the Tyler gate flagged)', () => {
+      expect(safeUpstreamDetail('connect ECONNREFUSED 10.1.2.3:3000')).not.toMatch(/10\.1\.2\.3/);
+      expect(safeUpstreamDetail('socket hang up at 172.17.0.2')).not.toMatch(/172\.17\.0\.2/);
+      expect(safeUpstreamDetail('connect ECONNREFUSED 10.1.2.3:3000')).toContain('[host]');
+   });
+
+   it('never echoes a tracking website id', () => {
+      const out = safeUpstreamDetail('bad request for data-website-id="04075da4-ea3b-4c25-be70-85ed1650a7d4"');
+      expect(out).not.toMatch(/04075da4/);
+   });
+
+   it('caps length and never returns empty', () => {
+      expect(safeUpstreamDetail('x'.repeat(500)).length).toBeLessThanOrEqual(163);
+      expect(safeUpstreamDetail('')).toBe('upstream analytics request failed');
+      expect(safeUpstreamDetail(null)).toBe('upstream analytics request failed');
    });
 });
