@@ -4,9 +4,11 @@ import Keyword from '../../database/models/keyword';
 import Domain from '../../database/models/domain';
 import { getAppSettings } from './settings';
 import authorize from '../../utils/authorize';
-import { scopeWhere } from '../../utils/scope';
+import { scopeWhere, isMultiTenantEnabled, ADMIN_ACCOUNT_ID } from '../../utils/scope';
+import AccountModel from '../../database/models/account';
 import type Account from '../../database/models/account';
 import refreshAndUpdateKeywords from '../../utils/refresh';
+import { isAccountActive } from '../../utils/plans';
 
 type CRONRefreshRes = {
    started: boolean
@@ -25,6 +27,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
    return res.status(502).json({ error: 'Unrecognized Route.' });
 }
 
+// Build a map of owner_id -> isActive for the owners of the given keywords, so the cron spend-brake
+// can drop keywords owned by an inactive (expired-trial / canceled / past_due) account. A keyword
+// with a null owner_id is legacy/admin data and is always active (mapped under ADMIN_ACCOUNT_ID).
+// One batched account read; never throws (a lookup failure leaves an owner absent, treated inactive
+// by the caller's `=== true` check, which fails CLOSED, the safe direction for a spend brake).
+const activeOwnerMap = async (keywords: Keyword[]): Promise<Map<number, boolean>> => {
+   const active = new Map<number, boolean>();
+   // The admin/legacy owner (null owner_id) is always active.
+   active.set(ADMIN_ACCOUNT_ID, true);
+   const ownerIds = Array.from(new Set(
+      keywords
+         .map((kw) => (kw.get('owner_id') as number | null))
+         .filter((id): id is number => typeof id === 'number' && id !== ADMIN_ACCOUNT_ID),
+   ));
+   if (ownerIds.length === 0) { return active; }
+   const accounts = await AccountModel.findAll({ where: { ID: ownerIds } });
+   for (const acc of accounts) {
+      active.set(acc.ID, isAccountActive(acc));
+   }
+   return active;
+};
+
 const cronRefreshkeywords = async (req: NextApiRequest, res: NextApiResponse<CRONRefreshRes>, account?: Account | null) => {
    try {
       const settings = await getAppSettings();
@@ -33,9 +57,23 @@ const cronRefreshkeywords = async (req: NextApiRequest, res: NextApiResponse<CRO
       }
       const scope = scopeWhere(account);
       await Keyword.update({ updating: true }, { where: { ...scope } });
-      const keywordQueries: Keyword[] = await Keyword.findAll({ where: { ...scope } });
+      let keywordQueries: Keyword[] = await Keyword.findAll({ where: { ...scope } });
       const allDomains: Domain[] = await Domain.findAll({ where: { ...scope } });
       const domainList: DomainType[] = allDomains.map((d) => d.get({ plain: true }));
+
+      // SPEND BRAKE (the cost protection): do NOT scrape keywords belonging to an INACTIVE account
+      // (expired trial / canceled / past_due). Each scrape is a paid SERP call, so a lapsed account
+      // must not keep burning the operator's Serper budget. This only applies with MULTI_TENANT on
+      // AND the operator runs cron account-wide (scope {}); with the flag off there is one always-
+      // active admin account and this filter is a no-op, so the single-tenant path is unchanged. We
+      // resolve each keyword's owner account once and drop keywords whose owner is inactive.
+      if (isMultiTenantEnabled() && Object.keys(scope).length === 0 && keywordQueries.length > 0) {
+         const activeById = await activeOwnerMap(keywordQueries);
+         keywordQueries = keywordQueries.filter((kw) => {
+            const ownerId = (kw.get('owner_id') as number | null) ?? ADMIN_ACCOUNT_ID;
+            return activeById.get(ownerId) === true;
+         });
+      }
 
       refreshAndUpdateKeywords(keywordQueries, settings, domainList);
 

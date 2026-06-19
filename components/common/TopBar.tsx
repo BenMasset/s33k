@@ -3,6 +3,7 @@ import { useRouter } from 'next/router';
 import React, { useState } from 'react';
 import toast from 'react-hot-toast';
 import Icon from './Icon';
+import { BillingStatus, useBillingStatus, useStartCheckout } from '../../services/billing';
 
 type TopbarProps = {
    showSettings: Function,
@@ -13,6 +14,10 @@ const TopBar = ({ showSettings, showAddModal }:TopbarProps) => {
    const [showMobileMenu, setShowMobileMenu] = useState<boolean>(false);
    const router = useRouter();
    const isDomainsPage = router.pathname === '/domains';
+   const { data: billing } = useBillingStatus();
+   const checkout = useStartCheckout();
+
+   const billingNotice = getBillingNotice(billing);
 
    const logoutUser = async () => {
       try {
@@ -45,7 +50,20 @@ const TopBar = ({ showSettings, showAddModal }:TopbarProps) => {
                </a>
             </Link>
          )}
-         <div className="topbar__right">
+         <div className="topbar__right flex items-start gap-2">
+            {billingNotice && (
+               <div className={`hidden md:flex items-center gap-2 mt-2 px-3 py-1.5 text-xs font-semibold border ${billingNotice.className}`}>
+                  <span>{billingNotice.text}</span>
+                  {billingNotice.action && (
+                     <button
+                     className="px-2 py-1 bg-white border border-current hover:bg-gray-50"
+                     onClick={() => checkout.mutate('pro')}
+                     disabled={checkout.isLoading}>
+                        {checkout.isLoading ? 'Opening' : billingNotice.action}
+                     </button>
+                  )}
+               </div>
+            )}
             <button className={' lg:hidden p-3'} onClick={() => setShowMobileMenu(!showMobileMenu)}>
                <Icon type="hamburger" size={24} />
             </button>
@@ -86,5 +104,31 @@ const TopBar = ({ showSettings, showAddModal }:TopbarProps) => {
        </div>
    );
  };
+
+const daysUntil = (iso: string): number => {
+   const ms = new Date(iso).getTime() - Date.now();
+   if (!Number.isFinite(ms)) { return 0; }
+   return Math.max(0, Math.ceil(ms / (24 * 60 * 60 * 1000)));
+};
+
+const getBillingNotice = (billing?: BillingStatus): null | { text: string, action?: string, className: string } => {
+   if (!billing || billing.plan === 'admin') { return null; }
+   if (billing.isActive === false) {
+      return {
+         text: 'Subscription inactive. Rank tracking is paused.',
+         action: 'Subscribe',
+         className: 'text-red-700 bg-red-50 border-red-200',
+      };
+   }
+   if (billing.subscription_status === 'trialing' && billing.trial_ends_at) {
+      const days = daysUntil(billing.trial_ends_at);
+      return {
+         text: `Trial: ${days} day${days === 1 ? '' : 's'} left`,
+         action: 'Subscribe',
+         className: 'text-blue-700 bg-blue-50 border-blue-200',
+      };
+   }
+   return null;
+};
 
  export default TopBar;

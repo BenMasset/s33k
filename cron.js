@@ -96,8 +96,11 @@ const generateCronTime = (interval) => {
 
 const runAppCronJobs = () => {
    getAppSettings().then((settings) => {
-      // RUN SERP Scraping CRON (EveryDay at Midnight) 0 0 0 * *
-      const scrape_interval = settings.scrape_interval || 'daily';
+      // RUN SERP Scraping CRON. Default is WEEKLY (Monday 00:00, cron '0 0 * * 1'): rankings are
+      // checked once a week. This is the s33k default and the basis of the pricing margin (50
+      // keywords x ~4.3 weekly checks is about 217 SERP calls per site per month). A self-hoster can
+      // still override scrape_interval in settings (hourly/daily/other_day/weekly/monthly).
+      const scrape_interval = settings.scrape_interval || 'weekly';
       if (scrape_interval !== 'never') {
          const scrapeCronTime = generateCronTime(scrape_interval);
          new Cron(scrapeCronTime, () => {

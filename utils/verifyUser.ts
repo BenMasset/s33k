@@ -4,6 +4,15 @@ import Cookies from 'cookies';
 import jwt from 'jsonwebtoken';
 import { allowedApiRoutes } from './allowedApiRoutes';
 
+// LEGACY AUTH HELPER. New multi-tenant routes should use utils/authorize.ts instead, because
+// authorize resolves the caller to an Account, applies member/share-key restrictions, and returns
+// the account object routes need for scopeWhere(owner). This helper remains for older settings /
+// migration / Google Ads paths that are effectively single-admin surfaces. If a route reads or
+// writes tenant-owned rows, migrate it to authorize() rather than extending this function.
+//
+// Keep this file dependency-free except for allowedApiRoutes. Pulling Sequelize models into this
+// helper would make every legacy route import the DB layer at module load and has broken Jest before.
+
 // Constant-time string equality. Returns false on a length mismatch (length is not secret for a
 // high-entropy key) and otherwise compares in constant time so the API-key check leaks no timing.
 const timingSafeEqualStr = (a: string, b: string): boolean => {

@@ -6,6 +6,11 @@ jest.mock('next/router', () => ({
       pathname: '/',
    }),
 }));
+jest.mock('../../services/billing', () => ({
+   __esModule: true,
+   useBillingStatus: () => ({ data: null }),
+   useStartCheckout: () => ({ mutate: jest.fn(), isLoading: false }),
+}));
 
 describe('TopBar Component', () => {
    it('renders without crashing', async () => {

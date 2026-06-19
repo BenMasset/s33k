@@ -2,6 +2,11 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import Cookies from 'cookies';
 import verifyUser from '../../utils/verifyUser';
 
+// Logout is a legacy cookie/UI-only surface: it clears the browser session cookie and touches no
+// tenant data. It intentionally stays out of allowedApiRoutes, so Bearer keys and scoped share keys
+// cannot call it. If the app grows per-account web sessions, this route can move to authorize(),
+// but today verifyUser is enough because the only side effect is deleting this caller's cookie.
+
 type logoutResponse = {
    success?: boolean
    error?: string|null,

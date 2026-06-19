@@ -5,6 +5,11 @@ import {
    KeywordIdeasDatabase, getAdwordsCredentials, getAdwordsKeywordIdeas, getLocalKeywordIdeas, updateLocalKeywordIdeas,
 } from '../../utils/adwords';
 
+// LEGACY GOOGLE ADS KEYWORD IDEAS. The ideas database is file-backed and keyed by domain inside
+// utils/adwords.ts, not by account owner_id. Keep this behind legacy verifyUser until the storage
+// model is tenant-scoped, otherwise one tenant could potentially read or favorite another tenant's
+// idea cache for the same global domain string.
+
 type keywordsIdeasUpdateResp = {
    keywords: IdeaKeyword[],
    error?: string|null,

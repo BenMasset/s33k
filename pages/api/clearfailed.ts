@@ -2,6 +2,11 @@ import { writeFile } from 'fs/promises';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import verifyUser from '../../utils/verifyUser';
 
+// Clears the global scraper retry queue. This is a legacy instance-level maintenance route, so it
+// remains on verifyUser rather than authorize() until the retry queue is made tenant-aware. If the
+// failed queue ever stores owner_id/domain ownership, revisit this route before exposing it to
+// tenant API keys.
+
 type SettingsGetResponse = {
    cleared?: boolean,
    error?: string,

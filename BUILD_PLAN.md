@@ -11,6 +11,17 @@ The product is the **unified MCP control plane** that joins all three. Forked fr
 
 ---
 
+## Current State Note
+
+This file is a historical build log with older milestone counts preserved in place. The current MCP
+state is: 82 tools and 5 knowledge resources. The authoritative tool registry is
+`mcp/src/tools.ts` (`registerS33kTools`), shared by the stdio entry `mcp/src/index.ts` and the hosted
+HTTP endpoint `pages/api/mcp/[[...slug]].ts`. Current AI handoff and improvement status lives in
+`AGENTS.md`, `CLAUDE.md`, and `S33K_IMPROVEMENT_AUDIT.md`; read those before treating an older
+milestone below as current.
+
+---
+
 ## Guiding principle: 5 minutes to value
 
 A friend should get from install to seeing real data in about five minutes. This is the bar every onboarding decision is measured against. Implication for data sources:

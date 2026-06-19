@@ -95,7 +95,11 @@ const mockAuthorize = authorizeFn as unknown as jest.Mock;
 const ORIGINAL_ENV = { ...process.env };
 
 const ADMIN = { ID: ADMIN_ACCOUNT_ID, name: 'Admin', plan: 'admin', status: 'active' };
-const TENANT = { ID: 2, name: 'Tenant A', plan: 'free', status: 'active' };
+// Trialing-with-a-future-trial so the billing keyword cap (resolveCaps) treats the tenant as active
+// here; this suite is about owner-stamping / scoping, not the billing gate (that has its own test).
+const TENANT = {
+   ID: 2, name: 'Tenant A', plan: 'free', status: 'active', subscription_status: 'trialing', trial_ends_at: new Date(Date.now() + 9e8),
+};
 
 const asCaller = (account: unknown) => { mockAuthorize.mockResolvedValue({ authorized: true, account, error: undefined }); };
 

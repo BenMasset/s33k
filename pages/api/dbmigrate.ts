@@ -5,6 +5,11 @@ import pg from 'pg';
 import { ensureSynced } from '../../database/database';
 import verifyUser from '../../utils/verifyUser';
 
+// LEGACY ADMIN MIGRATION ENDPOINT. This is intentionally still behind verifyUser and the route
+// whitelist rather than authorize(): it is an instance-level maintenance action, not tenant data.
+// It should stay narrow, never accept arbitrary migration names or paths, and never become reachable
+// from read-only member/share keys.
+
 // Build a Sequelize instance for migrations: Postgres when DATABASE_URL is set, else SQLite.
 const makeSequelize = () => (process.env.DATABASE_URL
    ? new Sequelize(process.env.DATABASE_URL, { dialect: 'postgres', dialectModule: pg, logging: false })

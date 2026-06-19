@@ -55,13 +55,17 @@ const recordCrawlerHit = async (req: NextApiRequest, res: NextApiResponse<Crawle
       if (!owned) {
          return res.status(403).json({ error: 'Domain not found for this account' });
       }
+      // Store the canonical owned row's domain, not the raw request string. resolveDomainAccess()
+      // accepts variants like "www.Example.com" by canonicalizing internally; persisting owned.domain
+      // keeps CrawlerHit rows joinable to every read/export/delete path that keys on Domain.domain.
+      const storedDomain = owned.domain;
 
       const classification = classifyCrawler(userAgent);
       // Only persist a row when the user-agent is a recognized crawler. Normal
       // browser traffic is classified and reported back, but never stored.
       if (classification.isCrawler) {
          await CrawlerHit.create({
-            domain,
+            domain: storedDomain,
             bot: classification.bot ?? '',
             owner: classification.owner ?? '',
             isAiEngine: classification.isAiEngine,

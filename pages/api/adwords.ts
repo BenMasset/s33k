@@ -14,9 +14,10 @@ type adwordsValidateResp = {
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
    await ensureSynced();
-   // Skip auth check for OAuth callback from Google (GET with code param).
-   // The code exchange is secured server-side via client_secret.
-   // This prevents 401 errors when cookies aren't sent on cross-origin redirects.
+   // LEGACY PUBLIC OAUTH CALLBACK. Google redirects back with ?code and no cookie/API key, so this
+   // callback cannot go through verifyUser. Unlike the newer Search Console OAuth flow, this older
+   // Google Ads flow has no signed state binding the callback to an account/domain. Keep it treated
+   // as an admin/global integration until it is upgraded to the Search Console signed-state pattern.
    if (req.method === 'GET' && req.query.code) {
       return getAdwordsRefreshToken(req, res);
    }

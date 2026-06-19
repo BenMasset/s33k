@@ -28,6 +28,7 @@ import Keyword from '../../database/models/keyword';
 import authorize from '../../utils/authorize';
 import { scopeWhere, ownerIdFor } from '../../utils/scope';
 import { canonicalizeDomain } from '../../utils/canonical-domain';
+import resolveDomainAccess from '../../utils/domain-access';
 import type Account from '../../database/models/account';
 import parseKeywords from '../../utils/parseKeywords';
 import refreshAndUpdateKeywords from '../../utils/refresh';
@@ -85,7 +86,10 @@ const onboardDomain = async (req: NextApiRequest, res: NextApiResponse<OnboardRe
    try {
       // 1. Create the domain if the caller does not already own it (scoped + owner-stamped).
       const owner_id = ownerIdFor(account);
-      let domainRow: Domain | null = await Domain.findOne({ where: { domain, ...scopeWhere(account) } });
+      // Reuse the caller's existing domain through the same WRITE gate every other domain-mutating
+      // route uses. M1 is owner-only; M2 can later widen read access without accidentally letting a
+      // shared viewer onboard/provision/mutate the owner's domain.
+      let domainRow: Domain | null = await resolveDomainAccess(account, domain, { write: true });
       if (!domainRow) {
          // Before creating, reject a canonical name already owned by ANY account (the column is
          // globally @Unique). Without this, a tenant onboarding a canonical-equal variant of an

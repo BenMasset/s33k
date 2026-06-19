@@ -28,6 +28,8 @@ hard-won lesson, so the next session never relearns it.
   `mcp/src/index.ts` is the thin stdio entry; `pages/api/mcp/[[...slug]].ts` is the hosted Streamable
   HTTP endpoint at `/api/mcp` (connect with a URL + Bearer key, no install). Both register the SAME
   tools, each binding its own per-connection key. See section D below.
+- **AI improvement backlog:** read `S33K_IMPROVEMENT_AUDIT.md` after this file. It is the shared
+  Codex/Claude progress log for repo-wide improvements, open risks, and durable code comments.
 - **Do not touch a running dev server or `.env`.** `.env` is gitignored and must stay untracked.
 
 ---
@@ -145,6 +147,21 @@ hard-won lesson, so the next session never relearns it.
   model-training pipeline and calls no model provider. This is documented in `SECURITY.md` and
   answerable live via the `security_facts` tool. Keep this structurally true: no LLM client, no
   model-provider SDK, no train/embed/fine-tune path.
+
+### Billing is per-unit ($7/site), not tiered
+- The model is PER-UNIT, NOT named tiers. $7 per SITE per month, each site includes 50 keywords
+  (`KEYWORDS_PER_SITE`), rank checks are WEEKLY for everyone (`WEEKLY_CADENCE_DAYS = 7`, the COGS
+  lever). ONE recurring Stripe price (`STRIPE_PRICE_PER_SITE`); the subscription QUANTITY is the
+  number of sites, stored on `account.paid_sites`. Adding a site is just quantity + 1.
+- `utils/plans.ts` is the single source of truth: `capsForSites(sites)` derives caps, `resolveCaps`
+  returns `capsForSites(TRIAL_SITES)` (1 site / 50 kw) while trialing, `capsForSites(paid_sites||1)`
+  when active, very-high unlimited caps when MULTI_TENANT is off / admin, and `LOCKED_CAPS` otherwise.
+  `isAccountActive` is unchanged (trialing-not-expired or active; flag-off + admin always active).
+- A 14-day NO-credit-card trial = 1 site + 50 keywords, started ONLY in `invite/accept.ts`
+  (acceptExternal). No card until the user runs Checkout. The webhook reads
+  `subscription.items.data[0].quantity` into `paid_sites`; there is no price->tier reverse map.
+- The legacy `account.plan` column is UNUSED by billing (left in place, harmless). Status still
+  returns `plan: 'admin'` for the single-tenant sentinel so the UI hides its billing notice.
 
 ### Conventions
 - No em dashes (U+2014) ANYWHERE: prose, copy, code, labels, comments. Self-check: grep for the

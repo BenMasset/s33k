@@ -5,6 +5,12 @@ import getConfig from 'next/config';
 import verifyUser from '../../utils/verifyUser';
 import allScrapers from '../../scrapers/index';
 
+// LEGACY FILE-BACKED SETTINGS. SerpBear stores global integration settings in
+// data/settings.json, encrypted with SECRET for sensitive fields. That is still the compatibility
+// path for scraper, SMTP, service-account Search Console, and Google Ads credentials. Multi-tenant
+// tenant-owned data must not be added here without a fresh design, because this file is global to
+// the instance and guarded by legacy verifyUser rather than account-scoped authorize().
+
 type SettingsGetResponse = {
    settings?: object | null,
    error?: string,
@@ -71,6 +77,9 @@ const updateSettings = async (req: NextApiRequest, res: NextApiResponse<Settings
    }
 };
 
+// Read a small JSON state file, repairing the local dev / self-host experience when the file is
+// missing or corrupt. Corrupt files are preserved with a timestamp suffix before the fallback is
+// written, so a bad settings edit does not silently destroy the only copy of the user's credentials.
 const safeReadJSON = async (filePath: string, fallback: any): Promise<any> => {
    try {
       const raw = await readFile(filePath, { encoding: 'utf-8' });

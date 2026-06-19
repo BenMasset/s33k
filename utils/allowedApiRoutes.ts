@@ -103,6 +103,13 @@ export const allowedApiRoutes = [
    'POST:/api/share',
    'GET:/api/share',
    'DELETE:/api/share',
+   // Billing (Stripe subscription + 14-day no-CC trial). These three are AUTHED via authorize().
+   // The webhook (/api/billing/webhook) is deliberately ABSENT: it is PUBLIC + Stripe-signature
+   // gated (same pattern as the GSC OAuth callback), and these are NOT added to
+   // scopedKeyAllowedRoutes, so a read-only share key can never reach billing.
+   'POST:/api/billing/checkout',
+   'POST:/api/billing/portal',
+   'GET:/api/billing/status',
 ];
 
 export const isAllowedApiRoute = (req: NextApiRequest): boolean => Boolean(

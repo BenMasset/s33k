@@ -39,6 +39,11 @@ import { clientIp } from '../../../utils/collect-guards';
 // expiry from the timestamps-managed createdAt.
 const INVITE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
+// The 14-day no-credit-card trial length, applied when acceptExternal creates a NEW account. This
+// is the ONE place a trial starts (only external invites create accounts). See utils/plans.ts for
+// the cap level granted during the trial and the gating that kicks in once it expires.
+const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
+
 // The single generic rejection. Used for invalid, missing, used, expired, and revoked codes so
 // the response is indistinguishable across all of them: no existence is ever leaked.
 const GENERIC_REJECT = 'Invalid or expired invite code.';
@@ -187,11 +192,19 @@ const acceptExternal = async (req: NextApiRequest, res: NextApiResponse<AcceptRe
    if (!(await claimInvite(invite.ID))) {
       return res.status(400).json({ error: GENERIC_REJECT });
    }
-   // A new external admin gets a brand-new account and an admin key on it.
+   // A new external admin gets a brand-new account and an admin key on it. acceptExternal is the
+   // ONLY path that creates a NEW account, so it is the ONLY place a 14-day NO-credit-card trial
+   // starts. Internal/share invites mint keys on an EXISTING account and never trial. We set
+   // subscription_status 'trialing' + trial_ends_at = now + 14d; plan stays at its legacy default
+   // and NO Stripe customer is created yet (no card is collected until the user runs Checkout).
+   // These fields only matter with MULTI_TENANT on; with the flag off the admin is always active.
    const account = await Account.create({
       name: name || invite.email || 'New Account',
       plan: 'free',
       status: 'active',
+      subscription_status: 'trialing',
+      trial_ends_at: new Date(Date.now() + TRIAL_DURATION_MS),
+      stripe_customer_id: null,
    });
    const fullKey = generateApiKey();
    await ApiKey.create({

@@ -8,6 +8,7 @@ import authorize from '../../utils/authorize';
 import { scopeWhere, ownerIdFor } from '../../utils/scope';
 import { canonicalizeDomain } from '../../utils/canonical-domain';
 import { MAX_KEYWORDS_PER_REQUEST, MAX_KEYWORDS_PER_DOMAIN } from '../../utils/limits';
+import { resolveCaps, isAccountActive } from '../../utils/plans';
 import type Account from '../../database/models/account';
 import parseKeywords from '../../utils/parseKeywords';
 import { integrateKeywordSCData, readLocalSCData } from '../../utils/searchConsole';
@@ -130,6 +131,25 @@ const addKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGet
                error: `Keyword cap reached for ${domain} (max ${MAX_KEYWORDS_PER_DOMAIN}; ${existing} already tracked).`,
             });
          }
+      }
+
+      // BILLING CAP (the COGS protection, on top of the per-domain cap above). resolveCaps returns
+      // the account's effective keyword ceiling: the TRIAL caps while trialing, the subscribed
+      // plan's caps when active, and a LOCKED 0 once the trial expires / the sub is canceled or
+      // past_due. With MULTI_TENANT off (or for the admin sentinel) the account is always active and
+      // gets the most generous caps, so this is a no-op in single-tenant. We count this account's
+      // EXISTING tracked keywords (scopeWhere) plus the number being added; if it would exceed the
+      // cap we 403 naming the limit and that they can upgrade. An inactive (locked) account has a 0
+      // cap, so any add is rejected here; reads are unaffected (GET does not reach this path).
+      const caps = resolveCaps(account);
+      const requestedCount = keywords.length;
+      const existingTotal = await Keyword.count({ where: { ...scopeWhere(account) } });
+      if (existingTotal + requestedCount > caps.keywords) {
+         const locked = !isAccountActive(account);
+         const message = locked
+            ? 'Your trial has ended or your subscription is inactive. Subscribe to add keywords and resume rank tracking.'
+            : `Keyword limit reached for your plan (max ${caps.keywords}; ${existingTotal} already tracked). Upgrade to add more.`;
+         return res.status(403).json({ error: message });
       }
 
       const keywordsToAdd: any = []; // QuickFIX for bug: https://github.com/sequelize/sequelize-typescript/issues/936

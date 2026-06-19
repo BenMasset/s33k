@@ -10,6 +10,10 @@ class CrawlerHit extends Model {
    @Column({ type: DataType.INTEGER, allowNull: false, primaryKey: true, autoIncrement: true, field: 'id' })
    ID!: number;
 
+   // CrawlerHit intentionally has no owner_id today. Tenant isolation is enforced by:
+   //   1. route-level resolveDomainAccess() before every read/write, and
+   //   2. the globally unique canonical Domain.domain value stored here.
+   // Do not spread scopeWhere() onto this model unless an owner_id column is added.
    @Column({ type: DataType.STRING, allowNull: false })
    domain!: string;
 

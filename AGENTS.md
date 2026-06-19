@@ -20,9 +20,12 @@ hard-won lesson, so the next session never relearns it.
   line: `export NVM_DIR="$HOME/.nvm"; source "$NVM_DIR/nvm.sh"; nvm use 20 >/dev/null 2>&1;`
 - **Tests:** `npx jest --ci` (one-shot). `npm run test` is WATCH mode, do not use it for verification.
 - **Lint:** `npm run lint` must be clean. **Build:** `npm run build` must print "Compiled successfully".
-- **MCP server:** `cd mcp && npm run build`, then probe over a real stdio handshake. 40 tools + 5
-  resources today. Banner reads "40 tools and 5 resources registered." Smoke harness: `npm run smoke`
-  from `mcp/`.
+- **MCP server:** `cd mcp && npm run build`, then probe over a real stdio handshake. 82 tools + 5
+  resources today. Banner reads "82 tools and 5 resources registered." Smoke harness: `npm run smoke`
+  from `mcp/`. The smoke test's EXPECTED_TOOLS and the registered set are kept in lockstep by a jest
+  guard (`__tests__/utils/knowledge-coverage.test.ts`), so this count cannot silently rot.
+- **AI improvement backlog:** read `S33K_IMPROVEMENT_AUDIT.md` after this file. It is the shared
+  Codex/Claude progress log for repo-wide improvements, open risks, and durable code comments.
 - **Do not touch a running dev server or `.env`.** `.env` is gitignored and must stay untracked.
 
 ---
@@ -85,7 +88,9 @@ hard-won lesson, so the next session never relearns it.
 - Add a `CapabilityEntry` to `utils/knowledge.ts` for any new tool, or the knowledge-coverage jest
   test FAILS the build. This is the self-support durability guarantee: a user's own LLM must be able
   to answer any question about the tool, so the answers can never silently rot.
-- Tools are registered in `mcp/src/index.ts` (40 tools + 5 resources today).
+- Tools are registered in `mcp/src/tools.ts` (`registerS33kTools`, 82 tools + 5 resources today),
+  shared by the stdio entry (`mcp/src/index.ts`) and the hosted HTTP route (`pages/api/mcp`). The
+  knowledge-coverage jest guard parses `tools.ts`, so any new tool there still needs a knowledge entry.
 - Whitelist any new authed API route in `utils/allowedApiRoutes.ts`. Keep that file
   DEPENDENCY-FREE: no DB-model imports. Importing a model drags sequelize/uuid ESM into jest and
   breaks suites. That exact regression happened and was fixed. Do not reintroduce it.
@@ -140,6 +145,8 @@ hard-won lesson, so the next session never relearns it.
 - `utils/authorize.ts`, `utils/scope.ts` · the multi-tenant auth + scoping seam.
 - `utils/allowedApiRoutes.ts` · API-route whitelist (keep dependency-free).
 - `utils/knowledge.ts` · single source of truth for tool docs; the coverage test gates it.
-- `mcp/src/index.ts` · MCP tool + resource registration (40 + 5).
+- `mcp/src/tools.ts` · shared MCP tool + resource registration (82 + 5). `mcp/src/index.ts` is the
+  stdio entry; `pages/api/mcp/[[...slug]].ts` is the hosted HTTP endpoint.
+- `S33K_IMPROVEMENT_AUDIT.md` · shared Codex/Claude improvement backlog and progress log.
 - `SECURITY.md` · the verifiable trust facts (no-training, isolation, export/delete, cookieless).
 - `BUILD_PLAN.md` · the phased plan + decision log. `NIGHT_REPORT.md` · the build-session log.
