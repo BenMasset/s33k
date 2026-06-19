@@ -4,6 +4,7 @@ import { ensureSynced } from '../../database/database';
 import authorize from '../../utils/authorize';
 import { scopeWhere } from '../../utils/scope';
 import resolveDomainAccess from '../../utils/domain-access';
+import { computeSetupState } from '../../utils/start-here';
 import Domain from '../../database/models/domain';
 import Keyword from '../../database/models/keyword';
 import S33kEvent from '../../database/models/s33kEvent';
@@ -56,50 +57,12 @@ const getStatus = async (req: NextApiRequest, res: NextApiResponse<Resp>, accoun
          owned ? Goal.count({ where: { domain, ...scope } }) : Promise.resolve(0),
       ]);
 
-      const steps: Step[] = [
-         {
-            key: 'add_domain',
-            title: 'Add your site',
-            done: Boolean(owned),
-            detail: owned ? `${domain} is being tracked.` : `Add ${domain} so s33k can track it.`,
-            nextTool: 'onboard (or create_domain)',
-         },
-         {
-            key: 'track_keywords',
-            title: 'Track keywords',
-            done: keywordCount > 0,
-            detail: keywordCount > 0 ? `${keywordCount} keyword(s) tracked.`
-               : 'Track the terms you want to rank for so s33k can watch your Google position.',
-            nextTool: 'add_keyword (or onboard auto-discovers up to 20)',
-         },
-         {
-            key: 'install_tracking',
-            title: 'Install the tracking script',
-            done: recentEvents > 0,
-            detail: recentEvents > 0 ? 'The s33k.js script is live and sending data.'
-               : 'Add the one-line s33k.js script to your site so traffic, human-vs-bot, and conversions can flow in.',
-            nextTool: 'install_instructions',
-         },
-         {
-            key: 'define_goals',
-            title: 'Define your conversions',
-            done: goalCount > 0,
-            detail: goalCount > 0 ? `${goalCount} conversion goal(s) defined.`
-               : 'Define what counts as a conversion (a thank-you page, a form submit) so s33k can report conversion rates.',
-            nextTool: 'suggest_goals (auto-propose), then create_goal',
-         },
-         {
-            key: 'first_report',
-            title: 'See your first report',
-            done: Boolean(owned) && keywordCount > 0 && recentEvents > 0,
-            detail: 'Get the proactive cross-pillar standup: what is happening and what to do next.',
-            nextTool: 'briefing (and conversion_attribution once conversions accrue)',
-         },
-      ];
-
-      const doneCount = steps.filter((s) => s.done).length;
-      const percentComplete = Math.round((100 * doneCount) / steps.length);
-      const nextStep = steps.find((s) => !s.done) || null;
+      // The five setup steps + percentComplete + nextStep are computed by the SHARED
+      // computeSetupState (utils/start-here.ts), the single source of truth, so setup_status and
+      // start_here can never disagree about where a user is in setup.
+      const { steps, percentComplete, nextStep } = computeSetupState({
+         owned: Boolean(owned), keywordCount, recentEvents, goalCount, domain,
+      });
 
       // Always point at the dashboard as the place to start. When setup is complete this is the
       // headline next move; when it is not, it is the closing hint so a brand-new user always

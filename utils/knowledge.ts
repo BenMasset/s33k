@@ -123,6 +123,24 @@ const capabilities: CapabilityEntry[] = [
       whenToUse: 'Use to review what users are asking for. Admin only; a non-admin or read-only member key is rejected.',
       examplePrompt: 'What feature requests have come in?',
    },
+   // --- Getting started ---
+   {
+      id: 'start_here',
+      toolName: 'start_here',
+      category: 'onboarding',
+      title: 'Start here: the guided entry point (call this first)',
+      description: 'The FIRST call to make when you connect your LLM to s33k and do not know what to ask. Give it a domain, or no '
+         + 'domain to pick one, and it answers in priority order: which domain (one tracked uses it, many returns a pick-domain list, '
+         + 'none returns no-domain), your setup state (if incomplete it returns mode "setup" with the single next step and the exact '
+         + 'tool to call, and stops rather than dumping analytics on a half-set-up site), the single most important thing to do now, '
+         + 'and a short curated nextSteps list that always surfaces entry_pages (which pages AI search lands on), striking_distance '
+         + '(the quickest SEO wins), and dashboard (the full overview), plus a ready-to-show rendered text block. Composes existing '
+         + 'data; never queries an LLM; never fails.',
+      whenToUse: 'Use as the very first call when someone does not know where to start, or asks "what should I do?", "where do I '
+         + 'begin?", or "give me the most important thing". Prefer it over dashboard for a cold start: it checks setup first and hands '
+         + 'back one clear next move instead of a full overview.',
+      examplePrompt: 'I just connected s33k. Where do I start?',
+   },
    // --- SEO (rank tracking + Search Console) ---
    {
       id: 'list_domains',

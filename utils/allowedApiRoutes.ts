@@ -39,6 +39,7 @@ export const allowedApiRoutes = [
    'GET:/api/causal-links',
    'GET:/api/suggest-goals',
    'GET:/api/onboarding-status',
+   'GET:/api/start-here',
    'GET:/api/striking-distance',
    'GET:/api/channel-report',
    'GET:/api/live-view',
@@ -133,6 +134,10 @@ export const isAllowedApiRoute = (req: NextApiRequest): boolean => Boolean(
 // DERIVATION (each entry verified by opening the route): every route below is GET-only, reads its
 // domain from req.query.domain, calls resolveDomainAccess(account, domain) (returning 403 when the
 // caller does not own it) BEFORE any pillar read, and keys its data query on that single domain.
+// start-here.ts has a no-domain branch (it can LIST the caller's domains when ?domain= is omitted), but
+// that branch is UNREACHABLE for a scoped share key: authorize() requires a scoped key's canonical
+// ?domain= to equal its scoped_domain BEFORE the route runs, so a scoped key always arrives with its one
+// domain and only ever hits the owned-domain path (resolveDomainAccess gate, then per-domain reads).
 // keyword.ts is deliberately EXCLUDED: its GET looks a keyword up by ID with only scopeWhere(account)
 // and never gates by domain, so an admin-scoped share key would read any keyword across all domains.
 // The cross-domain / account / instance routes (export, portfolio, domains, domain, account,
@@ -142,6 +147,7 @@ export const isAllowedApiRoute = (req: NextApiRequest): boolean => Boolean(
 // weekly-digest, and onboarding-status DO gate per-domain but are intentionally NOT included here:
 // they are outside the curated share-key surface, fail-closed until explicitly added.
 export const scopedKeyAllowedRoutes: string[] = [
+   'GET:/api/start-here',
    'GET:/api/dashboard',
    'GET:/api/human-analytics',
    'GET:/api/summary',

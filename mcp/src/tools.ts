@@ -1,7 +1,7 @@
 /**
  * s33k MCP tool + resource registrations (SHARED).
  *
- * This module is the single source of truth for the 81 tools and the knowledge resources the
+ * This module is the single source of truth for the 82 tools and the knowledge resources the
  * s33k MCP server exposes. It is consumed by TWO transports:
  *   1. mcp/src/index.ts        the stdio entry, bound to process.env.S33K_API_KEY (local install).
  *   2. pages/api/mcp/[[...slug]].ts   the hosted Streamable HTTP endpoint, bound PER REQUEST to the
@@ -15,7 +15,7 @@
  * The handler bodies below are byte-for-byte the originals from the stdio server; they reference a
  * local `s33kFetch` (aliased to fetchImpl), `jsonResult`, `errorResult`, and `z`, so the extraction
  * required no per-tool edits. The knowledge-coverage jest guard parses the tool-registration calls
- * out of THIS module (it now reads tools.ts), keeping the 81-tool count and the smoke EXPECTED_TOOLS
+ * out of THIS module (it now reads tools.ts), keeping the 82-tool count and the smoke EXPECTED_TOOLS
  * list in lockstep with what is registered here.
  */
 
@@ -87,7 +87,7 @@ export const KNOWLEDGE_RESOURCES: { uri: string; topic: string; name: string; de
 ];
 
 /**
- * Register all 81 s33k tools and the knowledge resources on the given MCP server, routing every
+ * Register all 82 s33k tools and the knowledge resources on the given MCP server, routing every
  * underlying API call through `fetchImpl`. Returns the number of tools registered (for banners).
  */
 export function registerS33kTools(server: McpServer, fetchImpl: FetchImpl): { tools: number; resources: number } {
@@ -120,6 +120,40 @@ export function registerS33kTools(server: McpServer, fetchImpl: FetchImpl): { to
       return realRegister(...args);
    }) as unknown as McpServer['registerTool'];
    const registerAdminTool: McpServer['registerTool'] = MCP_ADMIN ? countingRegister : noopRegister;
+
+// ---------------------------------------------------------------------------
+// start_here  (the guided entry point: call this FIRST)
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'start_here',
+   {
+      title: 'Start here: the guided entry point (call this FIRST)',
+      description:
+         'Call this FIRST. The guided entry point for s33k: give it a domain (or no domain to pick one) and it tells you, '
+         + 'in priority order, your setup state, the single most important thing to do now, and where to look next, including '
+         + 'which pages AI search lands on. If you do not know where to start, start here. With no domain it resolves which '
+         + 'site to use (one tracked -> uses it; many -> returns mode "pick-domain" with the list; none -> mode "no-domain"). '
+         + 'If setup is incomplete it returns mode "setup" with the single next step and the exact tool to call, and stops '
+         + 'there rather than dumping analytics on a half-set-up site. When the site is set up it returns mode "ready" with a '
+         + 'one-line headline (human and AI-referred visitors), the top action to take now, a short curated nextSteps list '
+         + '(entry_pages for which pages AI search lands on, striking_distance for the quickest SEO wins, dashboard for the '
+         + 'full overview), and a ready-to-show rendered text block. Composes existing data (dashboard + setup); never queries '
+         + 'an LLM; never fails, every mode is a usable next move.',
+      inputSchema: {
+         domain: z.string().optional().describe('The domain to start on, e.g. "getmasset.com". Omit to pick from your tracked domains.'),
+      },
+   },
+   async ({ domain }) => {
+      try {
+         const query: Record<string, string> = {};
+         if (domain) { query.domain = domain; }
+         const data = await s33kFetch('/api/start-here', { query });
+         return jsonResult(data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
 
 server.registerTool(
    'list_domains',
@@ -350,9 +384,10 @@ server.registerTool(
 server.registerTool(
    'entry_pages',
    {
-      title: 'Entry page analysis',
+      title: 'Entry page analysis: which pages AI search (and every source) lands on',
       description:
-         'Analyze a domain\'s ENTRY (landing) pages, where sessions START and acquisition actually happens, and behave differently from deeper '
+         'Answers "which pages did AI search land on" and, more broadly, which landing pages each traffic source first hits. Analyze a domain\'s '
+         + 'ENTRY (landing) pages, where sessions START and acquisition actually happens, and behave differently from deeper '
          + 'pages. This is the cross-pillar join nobody else offers: for each entry page it connects "we rank for X" to "X actually LANDS people". '
          + 'Per entry page it returns the first-touch SOURCE split (direct / referral / search / ai), the page\'s tracked keywords with current '
          + 'Google rank, its aiReferrals (AI-engine-referred entries), and a STATUS: "working" (ranks AND is a real landing page from search), '
@@ -1198,9 +1233,11 @@ server.registerTool(
    {
       title: 'The entry-page acquisition lens (which landing pages bring people in, from where)',
       description:
-         'Segments first-party traffic by the LANDING (entry) page where each session STARTS, not by raw '
+         'Answers "which landing pages did AI search (or any source) land on": segments first-party traffic by the LANDING '
+         + '(entry) page where each session STARTS, not by raw '
          + 'pageviews, because entry pages are the acquisition surface. For each entry page it returns: entries '
-         + '(first-touch sessions), a source breakdown (direct / referral / organic-search / ai counts), optional '
+         + '(first-touch sessions), a source breakdown (direct / referral / organic-search / ai counts, so you see which pages '
+         + 'AI-referred visitors first hit), optional '
          + 'goal conversions+rate when a goal is given, and trackedKeywords (the keywords/rank whose target page is '
          + 'that entry page). This connects "we rank for X" to "X actually lands people", the missing attribution '
          + 'link most analytics tools never make. Two gaps fall out of the data: a ranking page with zero entries '
@@ -3087,7 +3124,7 @@ for (const resource of KNOWLEDGE_RESOURCES) {
    );
 }
 
-   // 69 customer tools are always registered; the 12 admin tools add on only under S33K_MCP_ADMIN.
-   // Report the count actually registered for this mode (69 customer-only, or the full 81 with admin).
-   return { tools: 69 + adminToolsRegistered, resources: KNOWLEDGE_RESOURCES.length };
+   // 70 customer tools are always registered; the 12 admin tools add on only under S33K_MCP_ADMIN.
+   // Report the count actually registered for this mode (70 customer-only, or the full 82 with admin).
+   return { tools: 70 + adminToolsRegistered, resources: KNOWLEDGE_RESOURCES.length };
 }

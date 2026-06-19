@@ -11,9 +11,15 @@ There are two ways to connect, and they expose the EXACT same tools (the registr
 
 ## Tools
 
-The server registers up to 81 tools and 5 knowledge resources, grouped by pillar. The authoritative source is `src/tools.ts` (the shared `registerS33kTools`, used by both transports); the per-tool descriptions live in `utils/knowledge.ts` in the root repo. Most read tools take `domain` and an optional `period` (e.g. `30d`); the per-tool specifics are below.
+The server registers up to 82 tools and 5 knowledge resources, grouped by pillar. The authoritative source is `src/tools.ts` (the shared `registerS33kTools`, used by both transports); the per-tool descriptions live in `utils/knowledge.ts` in the root repo. Most read tools take `domain` and an optional `period` (e.g. `30d`); the per-tool specifics are below.
 
-**Customer vs admin surface.** The DEFAULT surface is customer-only: **69 tools** for a marketer reading their own SEO / analytics / AEO and managing their own tracking. Twelve app-management tools (marked **admin only** below) register ONLY when the operator sets `S33K_MCP_ADMIN=true`, which exposes the full 81-tool surface. With the flag off they are truly absent from `tools/list`, not present-but-erroring, so a customer key never even sees them. Hand customers a default-surface connection; reserve `S33K_MCP_ADMIN=true` for the operator.
+**Customer vs admin surface.** The DEFAULT surface is customer-only: **70 tools** for a marketer reading their own SEO / analytics / AEO and managing their own tracking. Twelve app-management tools (marked **admin only** below) register ONLY when the operator sets `S33K_MCP_ADMIN=true`, which exposes the full 82-tool surface. With the flag off they are truly absent from `tools/list`, not present-but-erroring, so a customer key never even sees them. Hand customers a default-surface connection; reserve `S33K_MCP_ADMIN=true` for the operator.
+
+### Getting started
+
+| Tool | What it does |
+|---|---|
+| `start_here` | **Call this first.** The guided entry point: give it a domain (or no domain to pick one) and it returns your setup state, the single most important thing to do now, and where to look next, including which pages AI search lands on (`entry_pages`). If you do not know where to start, start here. |
 
 ### Cross-pillar
 
@@ -25,7 +31,7 @@ The server registers up to 81 tools and 5 knowledge resources, grouped by pillar
 | `executive_summary` | The leadership one-glance report: headline numbers, top and top-converting channel, an SEO snapshot, AI visibility, a health line, and the single next action. |
 | `weekly_digest` | A week-in-review bundle: traffic, top entry pages, sessions per channel, AI-search sessions, and the keywords that moved most in rank. |
 | `page_scoreboard` | Joins per-page traffic with tracked keywords and rank. Flags content-gap pages and keywords whose target page got no traffic. |
-| `entry_pages` | Analyzes the ENTRY (landing) pages where sessions start, joining first-touch source split to tracked rank. |
+| `entry_pages` | Answers "which pages did AI search land on": analyzes the ENTRY (landing) pages where sessions start, joining each page's first-touch source split (including AI) to its tracked rank. |
 | `entry_page_report` | The entry-page acquisition lens: first-touch sessions per landing page by source channel, joined to the keywords/rank each page holds. |
 | `content_performance_report` | Ranks pages by pageviews, joining entries, optional goal conversions, and tracked keywords/rank per page. |
 | `conversion_attribution` | Attributes a goal's conversions and revenue by source (AI vs organic vs direct) and by tracked keyword, and names the money moves. |
@@ -140,7 +146,7 @@ s33k makes no server-side LLM calls. The AI features (`briefing`, `insights`, `a
 |---|---|---|---|
 | `S33K_API_KEY` | yes | none | The value of `APIKEY` in the s33k root `.env` file. |
 | `S33K_BASE_URL` | no | `http://localhost:3000` | The base URL of the running s33k instance. Trailing slashes are trimmed. |
-| `S33K_MCP_ADMIN` | no | `false` | When `true`, registers the full 81-tool admin surface (adds the 12 app-management tools). Unset / not `true` registers the 69-tool customer surface. Set this only for an operator connection, never a customer's. |
+| `S33K_MCP_ADMIN` | no | `false` | When `true`, registers the full 82-tool admin surface (adds the 12 app-management tools). Unset / not `true` registers the 70-tool customer surface. Set this only for an operator connection, never a customer's. |
 
 The Bearer API key path is whitelisted in s33k's `utils/allowedApiRoutes.ts` for the routes these tools use. Any new authed route a tool calls must be added to that whitelist, or the call is rejected with "This Route cannot be accessed with API."
 
@@ -242,7 +248,7 @@ The stdio server waits for a client, so running it by hand will print a startup 
 S33K_API_KEY=... S33K_BASE_URL=http://localhost:3000 node dist/index.js
 ```
 
-A clean boot prints `s33k-mcp connected (base URL: ...). 69 customer tools (set S33K_MCP_ADMIN=true for the full 81-tool admin surface) and 5 resources registered.` to stderr (or, with `S33K_MCP_ADMIN=true`, `81 tools (full admin surface) and 5 resources registered.`). Press Ctrl-C to stop.
+A clean boot prints `s33k-mcp connected (base URL: ...). 70 customer tools (set S33K_MCP_ADMIN=true for the full 82-tool admin surface) and 5 resources registered.` to stderr (or, with `S33K_MCP_ADMIN=true`, `82 tools (full admin surface) and 5 resources registered.`). Press Ctrl-C to stop.
 
 ## End-to-end smoke test
 

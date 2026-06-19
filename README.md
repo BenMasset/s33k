@@ -32,19 +32,20 @@ Beyond rank tracking and traffic, s33k now has the higher-level capabilities a m
 
 ## MCP tools
 
-s33k is fully controllable from an LLM over MCP. The server exposes 81 tools and 5 knowledge resources. The authoritative registry is `mcp/src/tools.ts`, shared by the stdio entry and hosted HTTP endpoint. The table below groups the main tools by pillar; `mcp/README.md` and `utils/knowledge.ts` carry the full per-tool descriptions. The example prompts are what you would type into Claude or Cursor; the LLM picks the tool.
+s33k is fully controllable from an LLM over MCP. The server exposes 82 tools and 5 knowledge resources. The authoritative registry is `mcp/src/tools.ts`, shared by the stdio entry and hosted HTTP endpoint. The table below groups the main tools by pillar; `mcp/README.md` and `utils/knowledge.ts` carry the full per-tool descriptions. The example prompts are what you would type into Claude or Cursor; the LLM picks the tool.
 
 ### Cross-pillar (start here)
 
 | Tool | What it does | Example prompt |
 |---|---|---|
+| `start_here` | **Call this first.** The guided entry point: give it a domain (or no domain to pick one) and it returns your setup state, the single most important thing to do now, and where to look next, including which pages AI search lands on (`entry_pages`). If you do not know where to start, start here. | "I just connected s33k. Where do I start?" |
 | `briefing` | One proactive daily standup for a domain: a headline, sections, and the top three things to do, across every pillar. The best first call of the day. | "Give me the s33k briefing for getmasset.com." |
 | `insights` | The cross-pillar analyst. Joins SEO rank, traffic, AI referrals, and engagement into rules-based findings and prioritized recommendations. | "What does s33k recommend I work on for getmasset.com?" |
 | `alerts` | The "what changed and what to do" standup. Compares this period to the prior one and surfaces notable rank moves, traffic swings, and new AI engines as a prioritized list, plus the single top priority. | "What changed on getmasset.com this week and what should I do?" |
 | `executive_summary` | The leadership one-glance report: headline numbers, top and top-converting channel, an SEO snapshot, AI visibility, a plain-English health line, and the single most important next action. | "Give me the executive summary for getmasset.com." |
 | `weekly_digest` | A week-in-review bundle: traffic, top entry pages, sessions per channel, AI-search sessions, and the keywords that moved most in rank. | "Give me the weekly digest for getmasset.com." |
 | `page_scoreboard` | Joins per-page traffic with tracked keywords and rank. Surfaces content-gap pages and keywords whose target page got no traffic. | "Show me the per-page scoreboard for getmasset.com." |
-| `entry_pages` | Analyzes the ENTRY (landing) pages where sessions start, joining first-touch source split to tracked rank, and flags pages that rank but do not land traffic. | "Analyze the entry pages for getmasset.com." |
+| `entry_pages` | Answers "which pages did AI search land on": analyzes the ENTRY (landing) pages where sessions start, joining each page's first-touch source split (including AI) to its tracked rank, and flags pages that rank but do not land traffic. | "Which pages does AI search land on for getmasset.com?" |
 | `entry_page_report` | The entry-page acquisition lens: first-touch sessions per landing page broken down by source channel, with the keywords/rank each page holds, exposing ranking-without-landing and landing-without-ranking gaps. | "Show getmasset.com entry pages with their first-touch source and the keywords each ranks for." |
 | `content_performance_report` | Ranks pages by pageviews, joining entries, optional goal conversions, and tracked keywords/rank per page. The cross-pillar content scorecard. | "Which content actually performs on getmasset.com?" |
 | `conversion_attribution` | The merged-pillar view only s33k can produce: attributes a goal's conversions and revenue by source (AI vs organic vs direct) and by tracked keyword, and names the money moves. | "What actually drives demo bookings and revenue on getmasset.com, SEO, direct, or AI?" |
