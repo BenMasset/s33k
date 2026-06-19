@@ -21,7 +21,9 @@ hard-won lesson, so the next session never relearns it.
 - **Tests:** `npx jest --ci` (one-shot). `npm run test` is WATCH mode, do not use it for verification.
 - **Lint:** `npm run lint` must be clean. **Build:** `npm run build` must print "Compiled successfully".
 - **MCP server:** `cd mcp && npm run build`, then probe over a real stdio handshake. 81 tools + 5
-  resources today. Banner reads "81 tools and 5 resources registered." Smoke harness: `npm run smoke`
+  resources today, but 12 are admin-gated behind `S33K_MCP_ADMIN`: the DEFAULT banner reads "69
+  customer tools (set S33K_MCP_ADMIN=true for the full 81-tool admin surface) and 5 resources
+  registered." Smoke harness: `npm run smoke`
   from `mcp/`. The smoke test's EXPECTED_TOOLS and the registered set are kept in lockstep by a jest
   guard (`__tests__/utils/knowledge-coverage.test.ts`), so this count cannot silently rot.
 - **AI improvement backlog:** read `S33K_IMPROVEMENT_AUDIT.md` after this file. It is the shared

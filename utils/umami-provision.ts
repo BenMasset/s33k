@@ -27,6 +27,7 @@
  */
 
 import { normalizeBaseUrl, getToken } from './umami';
+import { safeUpstreamDetail } from './ai-sources';
 
 /**
  * Create a Umami website for a domain and return its website id.
@@ -71,7 +72,7 @@ export const createUmamiWebsite = async (
       });
       if (!res.ok) {
          const text = await res.text().catch(() => '');
-         return { websiteId: null, error: `Umami website create failed (${res.status}): ${text || res.statusText}` };
+         return { websiteId: null, error: `Umami website create failed (${res.status}): ${safeUpstreamDetail(text || res.statusText)}` };
       }
       const json: any = await res.json();
       // Umami returns the created website object; the id may sit at the top level
@@ -82,7 +83,7 @@ export const createUmamiWebsite = async (
       return { websiteId, error: null };
    } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return { websiteId: null, error: `Umami website create error: ${message}` };
+      return { websiteId: null, error: `Umami website create error: ${safeUpstreamDetail(message)}` };
    }
 };
 
@@ -123,12 +124,12 @@ export const deleteUmamiWebsite = async (
       });
       if (!res.ok) {
          const text = await res.text().catch(() => '');
-         return { deleted: false, error: `Umami website delete failed (${res.status}): ${text || res.statusText}` };
+         return { deleted: false, error: `Umami website delete failed (${res.status}): ${safeUpstreamDetail(text || res.statusText)}` };
       }
       return { deleted: true, error: null };
    } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return { deleted: false, error: `Umami website delete error: ${message}` };
+      return { deleted: false, error: `Umami website delete error: ${safeUpstreamDetail(message)}` };
    }
 };
 

@@ -141,4 +141,36 @@ export const classifySourceClass = (source: string, selfHost?: string): SourceCl
    return 'referral';
 };
 
+/**
+ * Sanitize a raw upstream-failure detail (an HTTP error body, a statusText, or a thrown
+ * fetch/Error message) before it is placed in a USER-FACING `error` string.
+ *
+ * WHY this lives here (a leaf module both analytics providers import): the Umami and Lodd providers
+ * build `error` strings from raw upstream responses, and those strings flow up into MCP tool
+ * responses (e.g. scoreboard.analyticsError and the analytics tools' `error` / `note` fields). A raw
+ * fetch failure can embed the internal collector host (the `umami-production-*.up.railway.app` URL)
+ * and a Node connection error can echo the full URL, which an LLM then repeats back to the customer
+ * as "you can query the backend directly." The customer must never see the backend host or its
+ * internal id; they only ever see the s33k product. This strips any http(s) URL, any bare host:port,
+ * and any data-website-id, then caps the length. Full detail is still available server-side at the
+ * call site (where the raw value was thrown / logged); only the customer-facing copy is scrubbed.
+ * @param {unknown} detail - The raw upstream body / statusText / error message.
+ * @returns {string} A short, host-free, customer-safe summary (never empty).
+ */
+export const safeUpstreamDetail = (detail: unknown): string => {
+   const raw = (detail instanceof Error ? detail.message : String(detail ?? '')).trim();
+   if (!raw) { return 'upstream analytics request failed'; }
+   const scrubbed = raw
+      // Remove any absolute URL (this is where the collector host would leak).
+      .replace(/https?:\/\/[^\s"'<>)]+/gi, '[host]')
+      // Remove any bare host:port token (e.g. internal-host:3000) not part of a URL.
+      .replace(/\b[a-z0-9.-]+\.[a-z]{2,}(?::\d+)?\b/gi, '[host]')
+      // Never echo a tracking website id back in an error.
+      .replace(/data-website-id="[^"]*"/gi, 'data-website-id="[id]"')
+      .replace(/\s+/g, ' ')
+      .trim();
+   // Cap so a giant HTML error page cannot flood the response.
+   return scrubbed.length > 160 ? `${scrubbed.slice(0, 160)}...` : (scrubbed || 'upstream analytics request failed');
+};
+
 export default classifyReferrer;

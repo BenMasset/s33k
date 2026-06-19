@@ -361,6 +361,12 @@ async function main() {
          ...getDefaultEnvironment(),
          S33K_API_KEY: API_KEY,
          S33K_BASE_URL: BASE_URL,
+         // Drive the FULL 81-tool admin surface: this harness exercises app-management tools
+         // (create_domain, onboard, invite_*, delete_account_data, request_feature, ...) that are
+         // absent from the default customer surface. EXPECTED_TOOLS lists all 81, so the smoke must
+         // run in admin mode or the exact-set assertion would (correctly) flag the 12 gated tools as
+         // missing. The customer-only default surface is verified by the jest knowledge-coverage guard.
+         S33K_MCP_ADMIN: 'true',
       },
       stderr: 'inherit', // surface the server's "connected" / fatal lines
    });

@@ -43,7 +43,7 @@ import type {
    EntryPagesResult, EntryPage, EntryPageSources,
 } from './analytics';
 import { cleanPath } from './lodd';
-import { classifyReferrer, classifySourceClass, SourceClass } from './ai-sources';
+import { classifyReferrer, classifySourceClass, SourceClass, safeUpstreamDetail } from './ai-sources';
 import Domain from '../database/models/domain';
 import { canonicalizeDomain } from './canonical-domain';
 
@@ -104,7 +104,7 @@ export const getToken = async (base: string): Promise<{ token: string | null, er
       });
       if (!res.ok) {
          const text = await res.text().catch(() => '');
-         return { token: null, error: `Umami login failed (${res.status}): ${text || res.statusText}` };
+         return { token: null, error: `Umami login failed (${res.status}): ${safeUpstreamDetail(text || res.statusText)}` };
       }
       const json: any = await res.json();
       const token = json?.token ? String(json.token) : '';
@@ -112,7 +112,7 @@ export const getToken = async (base: string): Promise<{ token: string | null, er
       return { token, error: null };
    } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return { token: null, error: `Umami login error: ${message}` };
+      return { token: null, error: `Umami login error: ${safeUpstreamDetail(message)}` };
    }
 };
 
@@ -148,7 +148,7 @@ export const resolveWebsiteId = async (
       });
       if (!res.ok) {
          const text = await res.text().catch(() => '');
-         return { websiteId: null, error: `Umami websites lookup failed (${res.status}): ${text || res.statusText}` };
+         return { websiteId: null, error: `Umami websites lookup failed (${res.status}): ${safeUpstreamDetail(text || res.statusText)}` };
       }
       const json: any = await res.json();
       const rows: any[] = Array.isArray(json?.data) ? json.data : (Array.isArray(json) ? json : []);
@@ -162,7 +162,7 @@ export const resolveWebsiteId = async (
       return { websiteId: String(match.id), error: null };
    } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return { websiteId: null, error: `Umami websites lookup error: ${message}` };
+      return { websiteId: null, error: `Umami websites lookup error: ${safeUpstreamDetail(message)}` };
    }
 };
 
@@ -346,7 +346,7 @@ export class UmamiProvider implements AnalyticsProvider {
          const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
          if (!res.ok) {
             const text = await res.text().catch(() => '');
-            return { pages: [], error: `Umami metrics request failed (${res.status}): ${text || res.statusText}` };
+            return { pages: [], error: `Umami metrics request failed (${res.status}): ${safeUpstreamDetail(text || res.statusText)}` };
          }
          const json: any = await res.json();
          const rows: any[] = Array.isArray(json) ? json : (Array.isArray(json?.data) ? json.data : []);
@@ -372,7 +372,7 @@ export class UmamiProvider implements AnalyticsProvider {
          return { pages, error: null };
       } catch (error) {
          const message = error instanceof Error ? error.message : String(error);
-         return { pages: [], error: `Umami metrics request error: ${message}` };
+         return { pages: [], error: `Umami metrics request error: ${safeUpstreamDetail(message)}` };
       }
    }
 
@@ -407,7 +407,7 @@ export class UmamiProvider implements AnalyticsProvider {
          const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
          if (!res.ok) {
             const text = await res.text().catch(() => '');
-            return { sources: [], error: `Umami referrer metrics request failed (${res.status}): ${text || res.statusText}` };
+            return { sources: [], error: `Umami referrer metrics request failed (${res.status}): ${safeUpstreamDetail(text || res.statusText)}` };
          }
          const json: any = await res.json();
          const rows: any[] = Array.isArray(json) ? json : (Array.isArray(json?.data) ? json.data : []);
@@ -425,7 +425,7 @@ export class UmamiProvider implements AnalyticsProvider {
          return { sources, error: null };
       } catch (error) {
          const message = error instanceof Error ? error.message : String(error);
-         return { sources: [], error: `Umami referrer metrics request error: ${message}` };
+         return { sources: [], error: `Umami referrer metrics request error: ${safeUpstreamDetail(message)}` };
       }
    }
 
@@ -444,7 +444,7 @@ export class UmamiProvider implements AnalyticsProvider {
          const res = await fetch(url, { headers: { Authorization: `Bearer ${r.token}` } });
          if (!res.ok) {
             const text = await res.text().catch(() => '');
-            return { ...empty, error: `Umami stats request failed (${res.status}): ${text || res.statusText}` };
+            return { ...empty, error: `Umami stats request failed (${res.status}): ${safeUpstreamDetail(text || res.statusText)}` };
          }
          const json: any = await res.json();
          const pageviews = statNum(json?.pageviews);
@@ -461,7 +461,7 @@ export class UmamiProvider implements AnalyticsProvider {
          return { pageviews, visitors, visits, bounceRate, avgDuration, pagesPerVisit, error: null };
       } catch (error) {
          const message = error instanceof Error ? error.message : String(error);
-         return { ...empty, error: `Umami stats request error: ${message}` };
+         return { ...empty, error: `Umami stats request error: ${safeUpstreamDetail(message)}` };
       }
    }
 
@@ -486,7 +486,7 @@ export class UmamiProvider implements AnalyticsProvider {
          const res = await fetch(url, { headers: { Authorization: `Bearer ${r.token}` } });
          if (!res.ok) {
             const text = await res.text().catch(() => '');
-            return { rows: [], error: `Umami ${dimension} metrics request failed (${res.status}): ${text || res.statusText}` };
+            return { rows: [], error: `Umami ${dimension} metrics request failed (${res.status}): ${safeUpstreamDetail(text || res.statusText)}` };
          }
          const json: any = await res.json();
          const data: any[] = Array.isArray(json) ? json : (Array.isArray(json?.data) ? json.data : []);
@@ -497,7 +497,7 @@ export class UmamiProvider implements AnalyticsProvider {
          return { rows, error: null };
       } catch (error) {
          const message = error instanceof Error ? error.message : String(error);
-         return { rows: [], error: `Umami ${dimension} metrics request error: ${message}` };
+         return { rows: [], error: `Umami ${dimension} metrics request error: ${safeUpstreamDetail(message)}` };
       }
    }
 
@@ -521,7 +521,7 @@ export class UmamiProvider implements AnalyticsProvider {
          const res = await fetch(url, { headers: { Authorization: `Bearer ${r.token}` } });
          if (!res.ok) {
             const text = await res.text().catch(() => '');
-            return { series: [], error: `Umami pageviews request failed (${res.status}): ${text || res.statusText}` };
+            return { series: [], error: `Umami pageviews request failed (${res.status}): ${safeUpstreamDetail(text || res.statusText)}` };
          }
          const json: any = await res.json();
          const pv: any[] = Array.isArray(json?.pageviews) ? json.pageviews : [];
@@ -539,7 +539,7 @@ export class UmamiProvider implements AnalyticsProvider {
          return { series, error: null };
       } catch (error) {
          const message = error instanceof Error ? error.message : String(error);
-         return { series: [], error: `Umami pageviews request error: ${message}` };
+         return { series: [], error: `Umami pageviews request error: ${safeUpstreamDetail(message)}` };
       }
    }
 
@@ -561,7 +561,7 @@ export class UmamiProvider implements AnalyticsProvider {
          const res = await fetch(url, { headers: { Authorization: `Bearer ${r.token}` } });
          if (!res.ok) {
             const text = await res.text().catch(() => '');
-            return { events: [], error: `Umami event metrics request failed (${res.status}): ${text || res.statusText}` };
+            return { events: [], error: `Umami event metrics request failed (${res.status}): ${safeUpstreamDetail(text || res.statusText)}` };
          }
          const json: any = await res.json();
          const data: any[] = Array.isArray(json) ? json : (Array.isArray(json?.data) ? json.data : []);
@@ -572,7 +572,7 @@ export class UmamiProvider implements AnalyticsProvider {
          return { events, error: null };
       } catch (error) {
          const message = error instanceof Error ? error.message : String(error);
-         return { events: [], error: `Umami event metrics request error: ${message}` };
+         return { events: [], error: `Umami event metrics request error: ${safeUpstreamDetail(message)}` };
       }
    }
 
@@ -671,13 +671,13 @@ export class UmamiProvider implements AnalyticsProvider {
          const res = await fetch(metricsUrl('entry'), { headers });
          if (!res.ok) {
             const text = await res.text().catch(() => '');
-            return { ...empty, error: `Umami entry metrics request failed (${res.status}): ${text || res.statusText}` };
+            return { ...empty, error: `Umami entry metrics request failed (${res.status}): ${safeUpstreamDetail(text || res.statusText)}` };
          }
          const json: any = await res.json();
          entryRows = Array.isArray(json) ? json : (Array.isArray(json?.data) ? json.data : []);
       } catch (error) {
          const message = error instanceof Error ? error.message : String(error);
-         return { ...empty, error: `Umami entry metrics request error: ${message}` };
+         return { ...empty, error: `Umami entry metrics request error: ${safeUpstreamDetail(message)}` };
       }
 
       // 2. Site-wide referrers -> the four source classes. A failure here is NON-fatal:
@@ -690,14 +690,14 @@ export class UmamiProvider implements AnalyticsProvider {
          const res = await fetch(metricsUrl('referrer'), { headers });
          if (!res.ok) {
             const text = await res.text().catch(() => '');
-            referrerError = `Umami referrer metrics request failed (${res.status}): ${text || res.statusText}`;
+            referrerError = `Umami referrer metrics request failed (${res.status}): ${safeUpstreamDetail(text || res.statusText)}`;
          } else {
             const json: any = await res.json();
             const rows: any[] = Array.isArray(json) ? json : (Array.isArray(json?.data) ? json.data : []);
             siteSources = bucketReferrerRows(rows, selfHost);
          }
       } catch (error) {
-         referrerError = `Umami referrer metrics request error: ${error instanceof Error ? error.message : String(error)}`;
+         referrerError = `Umami referrer metrics request error: ${safeUpstreamDetail(error)}`;
       }
 
       const pages: EntryPage[] = entryRows.map((row) => {

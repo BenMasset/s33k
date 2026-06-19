@@ -80,8 +80,14 @@ const { tools } = registerS33kTools(server, s33kFetch);
 async function main() {
    const transport = new StdioServerTransport();
    await server.connect(transport);
+   // Mode-aware banner: the default surface is customer-only; the 12 app-management tools register
+   // only when S33K_MCP_ADMIN=true. Tell the operator which surface is live and how to widen it.
+   const adminOn = process.env.S33K_MCP_ADMIN === 'true';
+   const surfaceNote = adminOn
+      ? `${tools} tools (full admin surface)`
+      : `${tools} customer tools (set S33K_MCP_ADMIN=true for the full ${tools + 12}-tool admin surface)`;
    process.stderr.write(
-      `s33k-mcp connected (base URL: ${BASE_URL}). ${tools} tools and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
+      `s33k-mcp connected (base URL: ${BASE_URL}). ${surfaceNote} and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
    );
 }
 

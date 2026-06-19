@@ -42,8 +42,11 @@ const MCP_TOOLS_PATH = path.resolve(__dirname, '../../mcp/src/tools.ts');
 const readRegisteredToolNames = (): string[] => {
    const src = fs.readFileSync(MCP_TOOLS_PATH, 'utf8');
    const names: string[] = [];
-   // Matches: server.registerTool(\n   'tool_name', ...  (single or double quotes, any whitespace).
-   const re = /server\.registerTool\(\s*['"]([a-zA-Z0-9_]+)['"]/g;
+   // Matches both registration call sites: the customer-surface `server.registerTool('name', ...)`
+   // AND the admin-gated `registerAdminTool('name', ...)` (the 12 app-management tools that register
+   // only under S33K_MCP_ADMIN). Both still need a knowledge entry and both belong in EXPECTED_TOOLS,
+   // since the smoke test drives the full admin surface. (Single or double quotes, any whitespace.)
+   const re = /(?:server\.registerTool|registerAdminTool)\(\s*['"]([a-zA-Z0-9_]+)['"]/g;
    let m: RegExpExecArray | null = re.exec(src);
    while (m !== null) {
       names.push(m[1]);

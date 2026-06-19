@@ -94,6 +94,33 @@ export function registerS33kTools(server: McpServer, fetchImpl: FetchImpl): { to
    // Alias so the extracted handler bodies (which call s33kFetch) use the injected impl unchanged.
    const s33kFetch = fetchImpl;
 
+   // Customer-vs-admin surface split. The DEFAULT surface (S33K_MCP_ADMIN unset / not 'true') is
+   // customer-only: a marketer connecting their LLM to read their own SEO / analytics / AEO and
+   // manage their own tracking. The 12 app-management tools (invites, waitlist, domain sharing,
+   // create_domain, onboard, account-data deletion, feature requests) are registered ONLY when the
+   // operator opts in with S33K_MCP_ADMIN=true. When off, those tools are truly ABSENT from
+   // tools/list, not present-but-erroring, so a customer never even sees them.
+   //
+   // Counting: `registerAdminTool` returns 1 when it actually registered, 0 when it no-opped, so the
+   // banner reports the real registered count for the active mode without a hardcoded number.
+   const MCP_ADMIN = process.env.S33K_MCP_ADMIN === 'true';
+   let adminToolsRegistered = 0;
+   // `registerAdminTool` is the SAME callable as server.registerTool (so every admin call site keeps
+   // its full overload typing and zod-driven handler-arg inference), with one wrapper: in admin mode
+   // it bumps the counter and delegates to the real registerTool; otherwise it is a no-op of the same
+   // type, so the tool is never registered. Typed as McpServer['registerTool'] so the heavily
+   // overloaded signature flows through unchanged (a plain variadic forwarder cannot satisfy it).
+   // Note: McpServer['registerTool'] is an overload set, so `Parameters<...>` collapses to `never`.
+   // The wrapper therefore takes `...args: any[]` internally, but the CONST is typed as the full
+   // overloaded signature, so every call site keeps its real typing and zod-driven handler inference.
+   const realRegister = server.registerTool.bind(server) as (...a: unknown[]) => unknown;
+   const noopRegister = (() => undefined) as unknown as McpServer['registerTool'];
+   const countingRegister = ((...args: unknown[]) => {
+      adminToolsRegistered += 1;
+      return realRegister(...args);
+   }) as unknown as McpServer['registerTool'];
+   const registerAdminTool: McpServer['registerTool'] = MCP_ADMIN ? countingRegister : noopRegister;
+
 server.registerTool(
    'list_domains',
    {
@@ -2116,7 +2143,7 @@ server.registerTool(
 // ---------------------------------------------------------------------------
 // create_domain
 // ---------------------------------------------------------------------------
-server.registerTool(
+registerAdminTool(
    'create_domain',
    {
       title: 'Create domain',
@@ -2241,7 +2268,7 @@ server.registerTool(
 // ---------------------------------------------------------------------------
 // onboard
 // ---------------------------------------------------------------------------
-server.registerTool(
+registerAdminTool(
    'onboard',
    {
       title: 'Onboard a domain',
@@ -2287,7 +2314,7 @@ server.registerTool(
 // ---------------------------------------------------------------------------
 // invite_external
 // ---------------------------------------------------------------------------
-server.registerTool(
+registerAdminTool(
    'invite_external',
    {
       title: 'Invite an external user (new account)',
@@ -2316,7 +2343,7 @@ server.registerTool(
 // ---------------------------------------------------------------------------
 // invite_internal
 // ---------------------------------------------------------------------------
-server.registerTool(
+registerAdminTool(
    'invite_internal',
    {
       title: 'Invite an internal teammate (read-only seat)',
@@ -2350,7 +2377,7 @@ server.registerTool(
 // ---------------------------------------------------------------------------
 // list_invites
 // ---------------------------------------------------------------------------
-server.registerTool(
+registerAdminTool(
    'list_invites',
    {
       title: 'List invites you have sent',
@@ -2375,7 +2402,7 @@ server.registerTool(
 // ---------------------------------------------------------------------------
 // list_waitlist
 // ---------------------------------------------------------------------------
-server.registerTool(
+registerAdminTool(
    'list_waitlist',
    {
       title: 'List waitlist signups (admin only)',
@@ -2399,7 +2426,7 @@ server.registerTool(
 // ---------------------------------------------------------------------------
 // share_domain
 // ---------------------------------------------------------------------------
-server.registerTool(
+registerAdminTool(
    'share_domain',
    {
       title: 'Share ONE site read-only with a collaborator',
@@ -2436,7 +2463,7 @@ server.registerTool(
 // ---------------------------------------------------------------------------
 // list_domain_shares
 // ---------------------------------------------------------------------------
-server.registerTool(
+registerAdminTool(
    'list_domain_shares',
    {
       title: 'List who a site is shared with',
@@ -2463,7 +2490,7 @@ server.registerTool(
 // ---------------------------------------------------------------------------
 // revoke_domain_share
 // ---------------------------------------------------------------------------
-server.registerTool(
+registerAdminTool(
    'revoke_domain_share',
    {
       title: 'Revoke a read-only share',
@@ -2518,7 +2545,7 @@ server.registerTool(
 // ---------------------------------------------------------------------------
 // delete_account_data
 // ---------------------------------------------------------------------------
-server.registerTool(
+registerAdminTool(
    'delete_account_data',
    {
       title: 'Permanently delete all your account data (IRREVERSIBLE)',
@@ -2627,7 +2654,7 @@ server.registerTool(
 // ---------------------------------------------------------------------------
 // request_feature
 // ---------------------------------------------------------------------------
-server.registerTool(
+registerAdminTool(
    'request_feature',
    {
       title: 'Request a feature s33k does not have',
@@ -2666,7 +2693,7 @@ server.registerTool(
 // ---------------------------------------------------------------------------
 // list_feature_requests
 // ---------------------------------------------------------------------------
-server.registerTool(
+registerAdminTool(
    'list_feature_requests',
    {
       title: 'List submitted feature requests (admin only)',
@@ -3060,5 +3087,7 @@ for (const resource of KNOWLEDGE_RESOURCES) {
    );
 }
 
-   return { tools: 81, resources: KNOWLEDGE_RESOURCES.length };
+   // 69 customer tools are always registered; the 12 admin tools add on only under S33K_MCP_ADMIN.
+   // Report the count actually registered for this mode (69 customer-only, or the full 81 with admin).
+   return { tools: 69 + adminToolsRegistered, resources: KNOWLEDGE_RESOURCES.length };
 }

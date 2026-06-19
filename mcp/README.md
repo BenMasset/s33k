@@ -11,7 +11,9 @@ There are two ways to connect, and they expose the EXACT same tools (the registr
 
 ## Tools
 
-The server registers 81 tools and 5 knowledge resources, grouped by pillar. The authoritative source is `src/tools.ts` (the shared `registerS33kTools`, used by both transports); the per-tool descriptions live in `utils/knowledge.ts` in the root repo. Most read tools take `domain` and an optional `period` (e.g. `30d`); the per-tool specifics are below.
+The server registers up to 81 tools and 5 knowledge resources, grouped by pillar. The authoritative source is `src/tools.ts` (the shared `registerS33kTools`, used by both transports); the per-tool descriptions live in `utils/knowledge.ts` in the root repo. Most read tools take `domain` and an optional `period` (e.g. `30d`); the per-tool specifics are below.
+
+**Customer vs admin surface.** The DEFAULT surface is customer-only: **69 tools** for a marketer reading their own SEO / analytics / AEO and managing their own tracking. Twelve app-management tools (marked **admin only** below) register ONLY when the operator sets `S33K_MCP_ADMIN=true`, which exposes the full 81-tool surface. With the flag off they are truly absent from `tools/list`, not present-but-erroring, so a customer key never even sees them. Hand customers a default-surface connection; reserve `S33K_MCP_ADMIN=true` for the operator.
 
 ### Cross-pillar
 
@@ -97,8 +99,8 @@ The server registers 81 tools and 5 knowledge resources, grouped by pillar. The 
 | Tool | What it does | Arguments |
 |---|---|---|
 | `list_domains` | Lists all domains tracked in s33k. | none |
-| `create_domain` | Adds one or more domains to track (bare hostnames, no protocol). | `domains` |
-| `onboard` | The one-call cold start: creates the domain, discovers and adds keywords with scrapes queued, provisions analytics, and returns the snippet plus guides. | `domain` |
+| `create_domain` | **Admin only.** Adds one or more domains to track (bare hostnames, no protocol). | `domains` |
+| `onboard` | **Admin only.** The one-call cold start: creates the domain, discovers and adds keywords with scrapes queued, provisions analytics, and returns the snippet plus guides. | `domain` |
 | `setup_status` | Reports a domain's setup progress as a checklist with the single next step and the exact tool to call. | `domain` |
 | `install_instructions` | Returns the tracking snippet and per-platform install steps (WordPress, Webflow, Shopify, GTM, Next.js, raw HTML, and more). | `domain`, `platform` (optional) |
 
@@ -106,18 +108,18 @@ The server registers 81 tools and 5 knowledge resources, grouped by pillar. The 
 
 | Tool | What it does | Arguments |
 |---|---|---|
-| `invite_external` | Sends an external invite that brings a new admin and their own account into s33k (quota-limited). Admin key. | `email` |
-| `invite_internal` | Adds a read-only member seat to your own account for a teammate (unlimited). Admin key. | `email` |
-| `list_invites` | Lists every invite you have sent, with status. Admin key. | none |
-| `list_waitlist` | Lists waitlist signups (root admin only). | none |
+| `invite_external` | **Admin only.** Sends an external invite that brings a new admin and their own account into s33k (quota-limited). | `email` |
+| `invite_internal` | **Admin only.** Adds a read-only member seat to your own account for a teammate (unlimited). | `email` |
+| `list_invites` | **Admin only.** Lists every invite you have sent, with status. | none |
+| `list_waitlist` | **Admin only.** Lists waitlist signups (root admin only). | none |
 | `security_facts` | Returns s33k's complete, source-cited trust facts: no model training, tenant isolation, encryption at rest, cookieless/no-PII. | none |
 | `export_data` | Downloads everything s33k holds about your account as one JSON bundle. Never includes a secret. | none |
-| `delete_account_data` | Permanently and irreversibly deletes your entire account and all its data. Requires the confirmation string `DELETE`. | `confirm` |
+| `delete_account_data` | **Admin only.** Permanently and irreversibly deletes your entire account and all its data. Requires the confirmation string `DELETE`. | `confirm` |
 | `help` | Answers any question about s33k from its single authoritative product-knowledge layer. Reads no account data and never queries an LLM. | `question`, `topic` (optional) |
-| `request_feature` | Submits a request for a capability s33k does not have (after `help` confirms it is genuinely missing). | `request` |
-| `list_feature_requests` | Lists submitted feature requests (root admin only). | `status` (optional) |
+| `request_feature` | **Admin only.** Submits a request for a capability s33k does not have (after `help` confirms it is genuinely missing). | `request` |
+| `list_feature_requests` | **Admin only.** Lists submitted feature requests (root admin only). | `status` (optional) |
 
-The multi-tenant tools (`invite_*`, `list_invites`, `list_waitlist`) are active when `MULTI_TENANT` is on. Write tools require an admin key; read-only member keys are rejected.
+The twelve **admin only** tools above (`create_domain`, `onboard`, `invite_external`, `invite_internal`, `list_invites`, `list_waitlist`, `share_domain`, `list_domain_shares`, `revoke_domain_share`, `delete_account_data`, `request_feature`, `list_feature_requests`) register ONLY when `S33K_MCP_ADMIN=true`. On the default customer surface they are absent. Separately, the multi-tenant access tiers (`invite_*`, the share tools, member keys) take effect when `MULTI_TENANT` is on; write tools require an admin key and read-only member keys are rejected at the API.
 
 ### Knowledge resources
 
@@ -138,6 +140,7 @@ s33k makes no server-side LLM calls. The AI features (`briefing`, `insights`, `a
 |---|---|---|---|
 | `S33K_API_KEY` | yes | none | The value of `APIKEY` in the s33k root `.env` file. |
 | `S33K_BASE_URL` | no | `http://localhost:3000` | The base URL of the running s33k instance. Trailing slashes are trimmed. |
+| `S33K_MCP_ADMIN` | no | `false` | When `true`, registers the full 81-tool admin surface (adds the 12 app-management tools). Unset / not `true` registers the 69-tool customer surface. Set this only for an operator connection, never a customer's. |
 
 The Bearer API key path is whitelisted in s33k's `utils/allowedApiRoutes.ts` for the routes these tools use. Any new authed route a tool calls must be added to that whitelist, or the call is rejected with "This Route cannot be accessed with API."
 
@@ -223,7 +226,7 @@ The stdio server waits for a client, so running it by hand will print a startup 
 S33K_API_KEY=... S33K_BASE_URL=http://localhost:3000 node dist/index.js
 ```
 
-A clean boot prints `s33k-mcp connected (base URL: ...). 81 tools and 5 resources registered.` to stderr. Press Ctrl-C to stop.
+A clean boot prints `s33k-mcp connected (base URL: ...). 69 customer tools (set S33K_MCP_ADMIN=true for the full 81-tool admin surface) and 5 resources registered.` to stderr (or, with `S33K_MCP_ADMIN=true`, `81 tools (full admin surface) and 5 resources registered.`). Press Ctrl-C to stop.
 
 ## End-to-end smoke test
 
