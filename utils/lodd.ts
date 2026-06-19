@@ -33,7 +33,7 @@ import type {
    EngagementResult, EngagementTier,
    EntryPagesResult,
 } from './analytics';
-import { classifyReferrer } from './ai-sources';
+import { classifyReferrer, safeUpstreamDetail } from './ai-sources';
 
 export type LoddPage = {
    url: string,
@@ -103,7 +103,7 @@ const getLoddPages = async (period = '30d', limit = 200): Promise<LoddResult> =>
       const res = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } });
       if (!res.ok) {
          const text = await res.text().catch(() => '');
-         return { pages: [], error: `Lodd API request failed (${res.status}): ${text || res.statusText}` };
+         return { pages: [], error: `Lodd API request failed (${res.status}): ${safeUpstreamDetail(text || res.statusText)}` };
       }
       const json: any = await res.json();
       const rows: any[] = Array.isArray(json?.data) ? json.data : [];
@@ -122,7 +122,7 @@ const getLoddPages = async (period = '30d', limit = 200): Promise<LoddResult> =>
       return { pages, error: null };
    } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return { pages: [], error: `Lodd API request error: ${message}` };
+      return { pages: [], error: `Lodd API request error: ${safeUpstreamDetail(message)}` };
    }
 };
 
@@ -152,7 +152,7 @@ const getLoddReferrals = async (period = '90d', limit = 200): Promise<ReferralRe
       const res = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } });
       if (!res.ok) {
          const text = await res.text().catch(() => '');
-         return { sources: [], error: `Lodd API request failed (${res.status}): ${text || res.statusText}` };
+         return { sources: [], error: `Lodd API request failed (${res.status}): ${safeUpstreamDetail(text || res.statusText)}` };
       }
       const json: any = await res.json();
       const rows: any[] = Array.isArray(json?.data) ? json.data : [];
@@ -178,7 +178,7 @@ const getLoddReferrals = async (period = '90d', limit = 200): Promise<ReferralRe
       return { sources, error: null };
    } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return { sources: [], error: `Lodd API request error: ${message}` };
+      return { sources: [], error: `Lodd API request error: ${safeUpstreamDetail(message)}` };
    }
 };
 
@@ -238,7 +238,7 @@ const resolveLoddSiteDomain = async (): Promise<{ domain: string | null, error: 
       const res = await fetch(`${baseUrl}/sites`, { headers: { Authorization: `Bearer ${apiKey}` } });
       if (!res.ok) {
          const text = await res.text().catch(() => '');
-         return { domain: null, error: `Lodd sites lookup failed (${res.status}): ${text || res.statusText}` };
+         return { domain: null, error: `Lodd sites lookup failed (${res.status}): ${safeUpstreamDetail(text || res.statusText)}` };
       }
       const json: any = await res.json();
       const rows: any[] = Array.isArray(json?.data) ? json.data : (Array.isArray(json) ? json : []);
@@ -252,7 +252,7 @@ const resolveLoddSiteDomain = async (): Promise<{ domain: string | null, error: 
       return { domain, error: null };
    } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return { domain: null, error: `Lodd sites lookup error: ${message}` };
+      return { domain: null, error: `Lodd sites lookup error: ${safeUpstreamDetail(message)}` };
    }
 };
 
@@ -314,13 +314,13 @@ const loddGet = async (
       const res = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } });
       if (!res.ok) {
          const text = await res.text().catch(() => '');
-         return { data: null, error: `Lodd API request failed (${res.status}): ${text || res.statusText}` };
+         return { data: null, error: `Lodd API request failed (${res.status}): ${safeUpstreamDetail(text || res.statusText)}` };
       }
       const json: any = await res.json();
       return { data: json?.data ?? null, error: null };
    } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return { data: null, error: `Lodd API request error: ${message}` };
+      return { data: null, error: `Lodd API request error: ${safeUpstreamDetail(message)}` };
    }
 };
 

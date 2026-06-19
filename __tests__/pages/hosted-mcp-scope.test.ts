@@ -89,13 +89,25 @@ const connectScopedClient = async (scopedDomain: string) => {
 const callText = (result: any): string => (result?.content?.[0]?.text ?? '');
 
 describe('hosted MCP handshake: a connected client can list the tools', () => {
-   it('initialize + tools/list exposes the full tool set (82 tools)', async () => {
+   it('initialize + tools/list exposes the DEFAULT customer surface (70 tools, no admin tools)', async () => {
+      // This connection has no S33K_MCP_ADMIN, so it gets the customer surface: the 70 tools a
+      // marketer reads/manages for their own site. The 12 app-management tools are absent here, which
+      // is exactly right for a scoped share key (a customer key must never even SEE invites, waitlist,
+      // domain sharing, account deletion, or onboarding). The full 82-tool admin surface is opt-in via
+      // S33K_MCP_ADMIN=true and is verified by the gate runtime check and the mcp smoke test.
       const { client } = await connectScopedClient('getmasset.com');
       const listed = await client.listTools();
       const names = listed.tools.map((t) => t.name);
-      // The handshake worked and the SAME tools the stdio server exposes are present.
-      expect(names.length).toBe(82);
+      // The handshake worked and the customer tools the stdio server exposes by default are present.
+      expect(names.length).toBe(70);
       expect(names).toEqual(expect.arrayContaining(['traffic_summary', 'add_keyword', 'list_domains', 'seo_report']));
+      // The admin-gated tools are NOT present on the default surface.
+      const adminTools = [
+         'invite_external', 'invite_internal', 'list_invites', 'list_waitlist',
+         'share_domain', 'revoke_domain_share', 'list_domain_shares',
+         'delete_account_data', 'create_domain', 'onboard', 'request_feature', 'list_feature_requests',
+      ];
+      expect(adminTools.filter((t) => names.includes(t))).toEqual([]);
    });
 
    it('resources/list exposes the knowledge resources', async () => {
