@@ -154,6 +154,110 @@ const buildText = (type: InviteEmailType, acceptLink: string, inviterName?: stri
    ].join('\n');
 };
 
+// === Magic-link login email ====================================================================
+// The passwordless-login counterpart to the invite email. /api/auth/request-link calls this with a
+// short-lived (15-minute) one-time login link. It reuses the SAME best-effort sender contract,
+// branded HTML/text builders, escapeHtml, and safeLink helpers, so it inherits every defense
+// (never throws, http(s)-only link, no <style>, plain-text part). The login link is itself the
+// credential the verify endpoint trades for a fresh API key; nothing more sensitive rides in the body.
+
+type SendMagicLinkArgs = {
+   to: string,
+   loginLink: string,
+};
+
+const magicLinkSubject = (): string => 'Your s33k login link';
+
+const magicLinkLead = 'Use the button below to log in to s33k and get a fresh API key for the LLM '
+   + 'you already use. This link works once and expires in 15 minutes. If you did not request it, '
+   + 'you can ignore this email.';
+const magicLinkCta = 'Log in to s33k:';
+const magicLinkButton = 'Log in';
+
+// Branded HTML, identical shell to the invite email (white surface, near-black ink, mono, sharp
+// corners, the 8px dot wordmark) so the login mail reads as the same product.
+const buildMagicLinkHtml = (loginLink: string): string => {
+   const link = safeLink(loginLink);
+   const middle: string[] = [
+      `      <p style="font-size:14px;line-height:1.7;color:#0a0a0a;margin:0 0 22px;">${magicLinkCta}</p>`,
+      `      <p style="margin:0 0 22px;"><a href="${link}" style="display:inline-block;background:#0a0a0a;`
+      + `color:#ffffff;text-decoration:none;padding:12px 22px;font-family:${MONO};font-size:14px;font-weight:700;">`
+      + `${magicLinkButton} -&gt;</a></p>`,
+      '      <p style="font-size:12px;line-height:1.6;color:#737373;margin:0;">Or paste this link into your browser:<br />'
+      + `<span style="color:#0a0a0a;word-break:break-all;">${escapeHtml(link)}</span></p>`,
+   ];
+   return [
+      `<div style="background:#fafafa;padding:32px 16px;font-family:${MONO};">`,
+      '  <div style="max-width:520px;margin:0 auto;background:#ffffff;border:1px solid #111111;">',
+      '    <div style="padding:14px 20px;border-bottom:1px solid #ededed;">',
+      '      <span style="display:inline-block;width:8px;height:8px;background:#0a0a0a;margin-right:8px;vertical-align:middle;"></span>',
+      '      <span style="font-size:15px;font-weight:700;letter-spacing:0.5px;color:#0a0a0a;vertical-align:middle;">s33k</span>',
+      '    </div>',
+      '    <div style="padding:28px 24px;">',
+      `      <p style="font-size:14px;line-height:1.7;color:#0a0a0a;margin:0 0 16px;">${magicLinkLead}</p>`,
+      ...middle,
+      '    </div>',
+      '    <div style="padding:14px 20px;border-top:1px solid #ededed;font-size:11px;color:#999999;">',
+      '      s33k · SEO, AI search, and analytics in one place, controlled from your LLM.',
+      '    </div>',
+      '  </div>',
+      '</div>',
+   ].join('\n');
+};
+
+const buildMagicLinkText = (loginLink: string): string => {
+   const link = safeLink(loginLink);
+   return [
+      's33k',
+      '',
+      magicLinkLead,
+      '',
+      magicLinkCta,
+      '',
+      `${magicLinkButton}: ${link}`,
+      '',
+      's33k · SEO, AI search, and analytics in one place, controlled from your LLM.',
+   ].join('\n');
+};
+
+// Sends the magic-link login email. Resolves (never rejects) to a SendInviteResult, same contract as
+// sendInviteEmail: skips when RESEND_API_KEY is unset, logs and returns { sent: false } on failure,
+// never throws and never blocks the login flow.
+export const sendMagicLinkEmail = async (args: SendMagicLinkArgs): Promise<SendInviteResult> => {
+   const apiKey = process.env.RESEND_API_KEY;
+   if (!apiKey || !apiKey.trim()) {
+      return { sent: false };
+   }
+   if (!args.to || !args.to.trim()) {
+      return { sent: false, error: 'No recipient email.' };
+   }
+   try {
+      const response = await fetch(RESEND_ENDPOINT, {
+         method: 'POST',
+         headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+         },
+         body: JSON.stringify({
+            from: fromAddress(),
+            to: args.to.trim(),
+            subject: magicLinkSubject(),
+            html: buildMagicLinkHtml(args.loginLink),
+            text: buildMagicLinkText(args.loginLink),
+         }),
+      });
+      if (!response.ok) {
+         const detail = await response.text().catch(() => '');
+         console.error('[ERROR] Sending magic-link email: ', response.status, detail);
+         return { sent: false, error: `Resend responded ${response.status}` };
+      }
+      return { sent: true };
+   } catch (error) {
+      console.error('[ERROR] Sending magic-link email: ', error);
+      return { sent: false, error: 'Magic-link email send failed.' };
+   }
+};
+
 // Sends the invite email. Resolves (never rejects) to a SendInviteResult.
 export const sendInviteEmail = async (args: SendInviteArgs): Promise<SendInviteResult> => {
    const apiKey = process.env.RESEND_API_KEY;

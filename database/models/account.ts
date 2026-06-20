@@ -22,6 +22,15 @@ class Account extends Model {
    @Column({ type: DataType.STRING, allowNull: true, defaultValue: '' })
    name!: string;
 
+   // The email this account was invited with. The lookup key for PASSWORDLESS magic-link login
+   // (/api/auth/request-link finds the account by this column). Set on signup in invite/accept.ts
+   // (acceptExternal stamps it from invite.email). Nullable so the seeded admin account (no email)
+   // and any pre-migration row are unaffected; a UNIQUE index (see the add-email-to-account
+   // migration) enforces at-most-one account per non-null email while permitting many NULLs. Only
+   // meaningful with MULTI_TENANT on (login routes hard-reject when the flag is off).
+   @Column({ type: DataType.STRING, allowNull: true })
+   email!: string | null;
+
    @Column({ type: DataType.STRING, allowNull: true, defaultValue: 'free' })
    plan!: string;
 

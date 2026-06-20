@@ -185,6 +185,37 @@ const shareHint = (domain: string): string => 'Paste the command above into Clau
    + `for ${domain} only: you can view its rankings, analytics, and AI visibility, but not make changes and not `
    + 'see any other site.';
 
+// The fields every brand-new external account starts with, minus email. Shared by createAccount so
+// the with-email and the email-collision-retry paths produce identical accounts otherwise.
+const newAccountBase = (name: string, fallbackEmail: string | null) => ({
+   name: name || fallbackEmail || 'New Account',
+   plan: 'free',
+   status: 'active',
+   subscription_status: 'trialing',
+   trial_ends_at: new Date(Date.now() + TRIAL_DURATION_MS),
+   stripe_customer_id: null,
+});
+
+// Create the new external account, stamping email from the invite so the account is later findable
+// by magic-link login. If account.email's UNIQUE index rejects the create (some account already
+// holds this email), retry ONCE without the email so the invite (already claimed = single-use) is
+// not wasted: the user still gets a working account + key, just no login-email of its own. Any
+// non-uniqueness error propagates to the caller's catch, which returns the generic 'Error Accepting
+// Invite.' rather than a 500.
+const createAccount = async (name: string, email: string | null): Promise<Account> => {
+   const cleanEmail = email && email.trim() ? email.trim().toLowerCase() : null;
+   try {
+      return await Account.create({ ...newAccountBase(name, cleanEmail), email: cleanEmail });
+   } catch (error) {
+      const errName = (error as { name?: string })?.name || '';
+      if (cleanEmail && errName === 'SequelizeUniqueConstraintError') {
+         // Email already owned by another account: mint the account without an email of its own.
+         return Account.create({ ...newAccountBase(name, cleanEmail), email: null });
+      }
+      throw error;
+   }
+};
+
 const acceptExternal = async (req: NextApiRequest, res: NextApiResponse<AcceptRes>, invite: Invite, name: string) => {
    // Claim the invite FIRST, before minting anything. If a concurrent request already claimed
    // it, the conditional update affects 0 rows and we reject generically with no side effects
@@ -198,14 +229,16 @@ const acceptExternal = async (req: NextApiRequest, res: NextApiResponse<AcceptRe
    // subscription_status 'trialing' + trial_ends_at = now + 14d; plan stays at its legacy default
    // and NO Stripe customer is created yet (no card is collected until the user runs Checkout).
    // These fields only matter with MULTI_TENANT on; with the flag off the admin is always active.
-   const account = await Account.create({
-      name: name || invite.email || 'New Account',
-      plan: 'free',
-      status: 'active',
-      subscription_status: 'trialing',
-      trial_ends_at: new Date(Date.now() + TRIAL_DURATION_MS),
-      stripe_customer_id: null,
-   });
+   //
+   // We stamp account.email from the INVITE (never the request body) so the new account is later
+   // findable by magic-link login. EMAIL-COLLISION EDGE CASE: account.email carries a UNIQUE index,
+   // so if some account already holds invite.email the create would throw a unique-constraint error.
+   // The invite is already claimed (single-use is preserved), so we MUST NOT fail the user here:
+   // createAccount() retries WITHOUT the email on a unique-collision, so the signup still succeeds
+   // and mints a working key. The new account simply has no email of its own, so the pre-existing
+   // account that owns that email keeps the magic-link path (login is keyed to whoever holds the
+   // email first). Better a usable key with no login-email than a 500 on a consumed invite.
+   const account = await createAccount(name, invite.email);
    const fullKey = generateApiKey();
    await ApiKey.create({
       account_id: account.ID,
