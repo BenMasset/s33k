@@ -138,32 +138,40 @@ export type ScrollDistribution = {
 }
 
 export const buildScrollDepth = (rows: EventRow[]): { pages: ScrollDepthRow[], distribution: ScrollDistribution } => {
-   const map = new Map<string, { sum: number, max: number, sessions: Set<string> }>();
-   const distribution: ScrollDistribution = { '0-25': 0, '25-50': 0, '50-75': 0, '75-100': 0 };
+   // Scroll depth is the MAX percent reached per session/page. The tracker fires MANY scroll events
+   // per session as the visitor goes deeper, so we must reduce to ONE value per (page, session) (the
+   // deepest point that session reached) BEFORE averaging. The old code summed every raw scroll event
+   // and divided by session count, which inflated avgScrollDepth far past 100% (a "percent" metric
+   // showing 25510) and over-counted the histogram (one bump per event instead of per session).
+   const map = new Map<string, Map<string, number>>(); // page -> (session -> deepest pct reached)
    rows.forEach((row) => {
       if (row.type !== 'scroll') { return; }
       const page = (row.page || '').trim();
+      const session = (row.session || '').trim();
       const pct = Math.max(0, Math.min(100, num(row.value)));
-      let entry = map.get(page);
-      if (!entry) {
-         entry = { sum: 0, max: 0, sessions: new Set<string>() };
-         map.set(page, entry);
-      }
-      entry.sum += pct;
-      if (pct > entry.max) { entry.max = pct; }
-      entry.sessions.add((row.session || '').trim());
-      if (pct < 25) { distribution['0-25'] += 1; }
-      else if (pct < 50) { distribution['25-50'] += 1; }
-      else if (pct < 75) { distribution['50-75'] += 1; }
-      else { distribution['75-100'] += 1; }
+      let sessions = map.get(page);
+      if (!sessions) { sessions = new Map<string, number>(); map.set(page, sessions); }
+      const prev = sessions.get(session) ?? 0;
+      if (pct > prev) { sessions.set(session, pct); }
    });
-   const pages = Array.from(map.entries()).map(([page, entry]) => {
-      const count = entry.sessions.size || 1;
+   const distribution: ScrollDistribution = { '0-25': 0, '25-50': 0, '50-75': 0, '75-100': 0 };
+   const pages = Array.from(map.entries()).map(([page, sessions]) => {
+      const depths = Array.from(sessions.values());
+      let sum = 0;
+      let max = 0;
+      depths.forEach((d) => {
+         sum += d;
+         if (d > max) { max = d; }
+         if (d < 25) { distribution['0-25'] += 1; }
+         else if (d < 50) { distribution['25-50'] += 1; }
+         else if (d < 75) { distribution['50-75'] += 1; }
+         else { distribution['75-100'] += 1; }
+      });
       return {
          page,
-         avgScrollDepth: round1(entry.sum / Math.max(1, count)),
-         maxScrollDepth: round1(entry.max),
-         sessions: entry.sessions.size,
+         avgScrollDepth: round1(sum / Math.max(1, depths.length)),
+         maxScrollDepth: round1(max),
+         sessions: depths.length,
       };
    });
    pages.sort((a, b) => b.avgScrollDepth - a.avgScrollDepth);

@@ -104,6 +104,25 @@ describe('buildScrollDepth', () => {
       const { pages } = buildScrollDepth([row({ type: 'scroll', value: 250, page: '/a' })]);
       expect(pages[0].maxScrollDepth).toBe(100);
    });
+
+   it('uses the MAX scroll percent per session, not the sum of every scroll event (regression)', () => {
+      const rows = [
+         // One session firing many scroll events as it scrolls deeper; its depth is the MAX (90).
+         row({ type: 'scroll', value: 25, page: '/a', session: 's1' }),
+         row({ type: 'scroll', value: 50, page: '/a', session: 's1' }),
+         row({ type: 'scroll', value: 90, page: '/a', session: 's1' }),
+         // A second session on the same page reaching 30.
+         row({ type: 'scroll', value: 10, page: '/a', session: 's2' }),
+         row({ type: 'scroll', value: 30, page: '/a', session: 's2' }),
+      ];
+      const { pages, distribution } = buildScrollDepth(rows);
+      const a = pages.find((p) => p.page === '/a');
+      // Per-session maxes are 90 and 30 -> avg 60, max 90, 2 sessions. The old bug summed every event
+      // (205 / 2 = 102.5), above 100% for a percent metric.
+      expect(a).toMatchObject({ avgScrollDepth: 60, maxScrollDepth: 90, sessions: 2 });
+      // Histogram buckets per-session maxes (one per session), not per scroll event: 30 -> 25-50, 90 -> 75-100.
+      expect(distribution).toEqual({ '0-25': 0, '25-50': 1, '50-75': 0, '75-100': 1 });
+   });
 });
 
 describe('buildPageEngagement', () => {
