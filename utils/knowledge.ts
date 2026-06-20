@@ -778,7 +778,8 @@ const capabilities: CapabilityEntry[] = [
       title: 'Daily briefing',
       description: 'A single proactive cross-pillar daily standup for a domain: a headline, sections, and the top 3 recommended actions in priority '
          + 'order. Rules-based, never calls an LLM.',
-      whenToUse: 'Use as the FIRST call each day or whenever the user asks "how is my site doing?" or "what should I work on?"',
+      whenToUse: 'Use for a current snapshot of how the site is doing right now, not a change report. For the daily home and '
+         + '"what changed since yesterday" use daily_brief instead; for one change signal in detail use alerts.',
       examplePrompt: 'Give me the daily briefing for getmasset.com.',
    },
    {
@@ -792,22 +793,23 @@ const capabilities: CapabilityEntry[] = [
          + 'Each alert carries a severity, the headline shift, a detail, and a concrete recommendation; the response also returns the single most '
          + 'important thing to act on right now. Rules-based: it never calls an LLM, and it stays silent on a signal it cannot honestly measure '
          + 'rather than inventing a movement.',
-      whenToUse: 'Use as your period-over-period standup to see what moved since the prior window and get a concrete next action. Where briefing '
-         + 'answers "how is my site right now?", this answers "what moved and what should I do about it?"',
+      whenToUse: 'Use to drill into one change signal in full detail. daily_brief gives the prioritized daily summary; this lists every '
+         + 'change since the prior window with the numbers and a concrete next action for each.',
       examplePrompt: 'What moved on my site since the prior period, and what should I do about it?',
    },
    {
       id: 'daily_brief',
       toolName: 'daily_brief',
       category: 'cross-pillar',
-      title: 'Daily brief: the one thing to do today',
-      description: 'The proactive analyst distilled to a single standup: the ONE most important thing to do for a domain right now. It composes a '
-         + 'headline (the most important thing right now), 2-4 what-changed bullets (this period vs the prior equal window across rank, traffic, AI, '
-         + 'and conversions), and the single top action enriched with the top AI-visibility opportunity and the top opportunity page. The same brief '
-         + 'is also delivered by scheduled email when the instance enables it. Rules-based: it never calls an LLM and is honest on a quiet week '
-         + '("nothing material changed") rather than inventing movement.',
-      whenToUse: 'Use as the FIRST thing each day, or whenever the user asks "what should I focus on today?" Where briefing gives the full state and '
-         + 'alerts lists every change, the daily brief gives the single most important thing to do.',
+      title: 'Daily brief: your daily home (call this every day)',
+      description: 'Your daily standup and daily HOME in s33k: the single most important thing to do right now, what changed since the prior period '
+         + 'and why, in one tight digest. It composes a headline (the most important thing right now), 2-4 what-changed bullets (this period vs the '
+         + 'prior equal window across rank, traffic, AI referrals including new AND collapsed engines, and conversion volume and rate), and the single '
+         + 'top action enriched with the top AI-visibility opportunity and the top opportunity page. The same brief is also delivered by scheduled '
+         + 'email when the instance enables it. Rules-based: it never calls an LLM and is honest on a quiet week ("nothing material changed") rather '
+         + 'than inventing movement.',
+      whenToUse: 'Call FIRST every day, or enable scheduled email delivery. This is the daily home. briefing gives a current snapshot; alerts drills '
+         + 'into one change signal; daily_brief is the prioritized summary that sits on top of both.',
       examplePrompt: 'What should I focus on today?',
    },
    // --- Onboarding ---

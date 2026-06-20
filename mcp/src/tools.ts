@@ -2057,7 +2057,7 @@ server.registerTool(
    {
       title: 'Daily briefing',
       description:
-         'Get a single proactive, cross-pillar "daily standup" for a domain: what changed and, more importantly, what to DO about it. Use this as your FIRST call each day or whenever the user asks "how is my site doing?" or "what should I work on?" It composes every s33k pillar (traffic, human-vs-bot reality, SEO rank and opportunity pages, AI visibility from referrals, and engagement) into one ready-to-narrate structure: a headline, sections (each a titled list of plain-English points covering traffic/human-vs-bot, search rank and opportunity pages, AI visibility, and engagement), and the top 3 recommended actions in priority order. The s33k server does NOT call any LLM; it does the joins and the prioritization with transparent rules. YOU (the connected LLM) read this and narrate it as a morning standup, leading with the headline and the recommendations. It never fails on a missing signal: a dead provider or empty data degrades one section instead of the whole briefing.',
+         'A current point-in-time SNAPSHOT of how a domain is doing right now (not a change report). It composes every s33k pillar (traffic, human-vs-bot reality, SEO rank and opportunity pages, AI visibility from referrals, and engagement) into one ready-to-narrate structure: a headline, sections (each a titled list of plain-English points covering traffic/human-vs-bot, search rank and opportunity pages, AI visibility, and engagement), and the top 3 recommended actions in priority order. (For the daily home and "what changed since the prior period", call daily_brief instead; alerts drills into one change signal in full detail.) The s33k server does NOT call any LLM; it does the joins and the prioritization with transparent rules. YOU (the connected LLM) read this and narrate it, leading with the headline and the recommendations. It never fails on a missing signal: a dead provider or empty data degrades one section instead of the whole briefing.',
       inputSchema: {
          domain: z.string().describe('The domain to brief on, e.g. "getmasset.com".'),
          period: z
@@ -2092,13 +2092,15 @@ server.registerTool(
    {
       title: 'Proactive alerts: what changed and what to do',
       description:
-         'Your weekly "what changed and what to do" standup across SEO, AI search, and analytics. Where briefing answers '
-         + '"how is my site right now?", alerts answers the harder, more useful question: "what CHANGED since last period, '
-         + 'and what should I do about it?" It compares the current period to the immediately-prior period of the same '
+         'Drill into ONE change signal in full detail across SEO, AI search, and analytics. Where daily_brief is the '
+         + 'prioritized daily home and briefing is a current snapshot, alerts answers "what CHANGED since last period, '
+         + 'and what should I do about it?" in full. It compares the current period to the immediately-prior period of the same '
          + 'length and surfaces the notable shifts as a PRIORITIZED list of plain-English alerts: keyword rank moves of 5+ '
          + 'positions or crossing page one (the highest-signal SEO move), traffic swings of 25%+ (pageviews and visitors), '
-         + 'any brand-NEW AI referral engine (a leading AEO signal: a new engine sending you visitors), and '
-         + 'form-submission/conversion changes of 30%+. Each alert carries a severity (high/medium/low), the pillar, a '
+         + 'AI referral signals (a brand-NEW engine sending you visitors, or an existing engine that COLLAPSED to near zero, '
+         + 'plus 30%+ moves), and conversion changes by both VOLUME (30%+ change in form submissions) and RATE (conversions '
+         + 'per visitor falling on steady traffic, the leading sign a form or landing page broke). Each alert carries a '
+         + 'severity (high/medium/low), the pillar, a '
          + 'headline stating exactly what changed, a detail with the numbers, and a concrete recommendation. The response '
          + 'also returns topPriority: the single most important thing to do this week, and a per-pillar dataAvailability note '
          + 'so you can tell the user honestly when a signal had no baseline to compare. RULES-BASED: the s33k server does NOT '
@@ -2139,19 +2141,20 @@ server.registerTool(
 server.registerTool(
    'daily_brief',
    {
-      title: 'Daily brief: the one thing to do today',
+      title: 'Daily brief: your daily home (call this every day)',
       description:
-         'The proactive analyst distilled to a single standup: the ONE most important thing to do for a domain right now. '
-         + 'Where briefing answers "how is my site right now?" and alerts answers "what changed?", daily_brief answers the '
-         + 'hardest, most useful question of all in one tight digest: "what is the single most important thing to do today?" '
-         + 'It composes a HEADLINE (the most important thing right now), 2-4 WHAT-CHANGED bullets (this period vs the prior '
-         + 'equal window, across rank movers, traffic delta, AI-referral delta, and conversion delta), and the '
-         + 'SINGLE top ACTION, enriched with the top AI-visibility opportunity and the top opportunity page. Use this as the '
-         + 'user FIRST thing each day, or whenever they ask "what should I focus on today?" The same brief is also delivered '
-         + 'by scheduled email when the instance enables it. RULES-BASED: the s33k server does NOT call any LLM; it joins and '
-         + 'prioritizes the structured data with transparent rules and is HONEST on a quiet week ("nothing material changed") '
-         + 'rather than inventing movement. YOU (the connected LLM) narrate it, leading with the headline and the top action. '
-         + 'It never fails on a missing signal: each upstream surface degrades independently.',
+         'Call this EVERY DAY. Your daily standup and your daily HOME in s33k: the single most important thing to do right '
+         + 'now, what changed since the prior period and why, in one tight digest. This is where you start. It composes a '
+         + 'HEADLINE (the most important thing right now), 2-4 WHAT-CHANGED bullets (this period vs the prior equal window, '
+         + 'across rank movers, traffic delta, AI-referral delta including new AND collapsed engines, and conversion volume '
+         + 'and rate), and the SINGLE top ACTION, enriched with the top AI-visibility opportunity and the top opportunity '
+         + 'page. The same brief is also delivered by scheduled email when the instance enables it. (For the other two '
+         + 'cross-pillar tools: briefing = a current point-in-time snapshot of how the site is doing right now; alerts = '
+         + 'drill into one change signal in full detail. daily_brief is the prioritized daily home that sits on top of both.) '
+         + 'RULES-BASED: the s33k server does NOT call any LLM; it joins and prioritizes the structured data with transparent '
+         + 'rules and is HONEST on a quiet week ("nothing material changed") rather than inventing movement. YOU (the '
+         + 'connected LLM) narrate it, leading with the headline and the top action. It never fails on a missing signal: each '
+         + 'upstream surface degrades independently.',
       inputSchema: {
          domain: z.string().describe('The domain to brief on, e.g. "getmasset.com".'),
          period: z

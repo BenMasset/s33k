@@ -237,19 +237,70 @@ describe('detectChanges: AI pillar', () => {
       expect(out.alerts.filter((a) => a.pillar === 'ai')).toHaveLength(0);
    });
 
+   it('flags HIGH when an engine COLLAPSES from a real baseline to near zero (lost citation)', () => {
+      const { current, prior } = pair(
+         { aiEngines: [ai('Perplexity', 0)] }, // fell to 0 from a meaningful baseline
+         { aiEngines: [ai('Perplexity', 14)] },
+      );
+      const out = detectChanges(current, prior);
+      const aiAlerts = out.alerts.filter((a) => a.pillar === 'ai');
+      expect(aiAlerts).toHaveLength(1);
+      expect(aiAlerts[0].severity).toBe('high');
+      expect(aiAlerts[0].headline).toMatch(/Perplexity referrals collapsed/);
+      expect(aiAlerts[0].headline).toMatch(/14 visitors last period, 0 now/);
+   });
+
+   it('treats a collapse to 1 visitor from a real baseline as a HIGH collapse', () => {
+      const { current, prior } = pair(
+         { aiEngines: [ai('ChatGPT', 1)] }, // 20 -> 1 is a collapse, not just a >= 30% shrink
+         { aiEngines: [ai('ChatGPT', 20)] },
+      );
+      const out = detectChanges(current, prior);
+      const aiAlerts = out.alerts.filter((a) => a.pillar === 'ai');
+      expect(aiAlerts).toHaveLength(1);
+      expect(aiAlerts[0].severity).toBe('high');
+      expect(aiAlerts[0].headline).toMatch(/collapsed/);
+   });
+
+   it('does NOT call a fall from a TINY baseline a collapse (it is the ordinary medium shrink)', () => {
+      // Prior 4 (< the collapse baseline of 5) falling to 0 is a normal >= 30% drop, MEDIUM, not a collapse.
+      const { current, prior } = pair(
+         { aiEngines: [ai('Gemini', 0)] },
+         { aiEngines: [ai('Gemini', 4)] },
+      );
+      const out = detectChanges(current, prior);
+      const aiAlerts = out.alerts.filter((a) => a.pillar === 'ai');
+      expect(aiAlerts).toHaveLength(1);
+      expect(aiAlerts[0].severity).toBe('medium');
+      expect(aiAlerts[0].headline).toMatch(/Gemini referrals fell/);
+      expect(aiAlerts[0].headline).not.toMatch(/collapsed/);
+   });
+
+   it('a >= 30% shrink that stays well above zero is a MEDIUM fall, not a collapse', () => {
+      const { current, prior } = pair(
+         { aiEngines: [ai('ChatGPT', 12)] }, // 20 -> 12 is -40% but 12 is not near zero
+         { aiEngines: [ai('ChatGPT', 20)] },
+      );
+      const out = detectChanges(current, prior);
+      const aiAlerts = out.alerts.filter((a) => a.pillar === 'ai');
+      expect(aiAlerts).toHaveLength(1);
+      expect(aiAlerts[0].severity).toBe('medium');
+      expect(aiAlerts[0].headline).not.toMatch(/collapsed/);
+   });
 });
 
 describe('detectChanges: CONVERSIONS pillar', () => {
    it('flags HIGH for a >= 30% DROP in form submissions (a drop is urgent)', () => {
       const { current, prior } = pair(
-         { formSubmissions: 6 }, // -40%
+         { formSubmissions: 6 }, // -40% volume; rate also falls (6/80 < 10/80 * 0.8), so a rate alert co-fires
          { formSubmissions: 10 },
       );
       const out = detectChanges(current, prior);
       const conv = out.alerts.filter((a) => a.pillar === 'conversions');
-      expect(conv).toHaveLength(1);
-      expect(conv[0].severity).toBe('high');
-      expect(conv[0].headline).toMatch(/Form submissions fell 40%/);
+      // Both the VOLUME drop and the RATE drop fire here (steady 80 visitors, fewer submissions).
+      const volume = conv.find((a) => /Form submissions fell 40%/.test(a.headline));
+      expect(volume).toBeDefined();
+      expect(volume!.severity).toBe('high');
    });
 
    it('flags MEDIUM for a >= 30% RISE in form submissions', () => {
@@ -280,6 +331,57 @@ describe('detectChanges: CONVERSIONS pillar', () => {
       );
       const out = detectChanges(current, prior);
       expect(out.alerts.filter((a) => a.pillar === 'conversions')).toHaveLength(0);
+   });
+});
+
+describe('detectChanges: CONVERSION-RATE pillar', () => {
+   it('flags a RATE drop even when raw volume barely moved (rate per visitor fell on rising traffic)', () => {
+      // Volume 10 -> 9 is only -10% (no volume alert), but visitors doubled, so the RATE halved.
+      const { current, prior } = pair(
+         { formSubmissions: 9, traffic: { pageviews: 400, visitors: 200 } }, // 9/200 = 4.5%
+         { formSubmissions: 10, traffic: { pageviews: 200, visitors: 100 } }, // 10/100 = 10%
+      );
+      const out = detectChanges(current, prior);
+      const conv = out.alerts.filter((a) => a.pillar === 'conversions');
+      const rate = conv.find((a) => /conversion rate fell/i.test(a.headline));
+      expect(rate).toBeDefined();
+      // 4.5% is <= 50% of 10%, so the rate roughly halved -> HIGH.
+      expect(rate!.severity).toBe('high');
+      expect(rate!.headline).toMatch(/10% to 4\.5% of visitors/);
+   });
+
+   it('flags MEDIUM for a >= 20% but < 50% relative rate drop', () => {
+      // 10/100 = 10% prior; 14/200 = 7% current. 7% is 70% of 10%: a 30% relative drop, below the halved threshold.
+      const { current, prior } = pair(
+         { formSubmissions: 14, traffic: { pageviews: 600, visitors: 200 } },
+         { formSubmissions: 10, traffic: { pageviews: 300, visitors: 100 } },
+      );
+      const out = detectChanges(current, prior);
+      const rate = out.alerts.filter((a) => a.pillar === 'conversions').find((a) => /conversion rate fell/i.test(a.headline));
+      expect(rate).toBeDefined();
+      expect(rate!.severity).toBe('medium');
+   });
+
+   it('does NOT flag a rate alert when the prior visitor denominator is too small to trust', () => {
+      // Prior visitors 10 (< the 20-visitor floor): a 1/10 -> 0/40 swing is not a trustworthy rate collapse.
+      const { current, prior } = pair(
+         { formSubmissions: 1, traffic: { pageviews: 80, visitors: 40 } },
+         { formSubmissions: 5, traffic: { pageviews: 20, visitors: 10 } },
+      );
+      const out = detectChanges(current, prior);
+      const rate = out.alerts.filter((a) => a.pillar === 'conversions').find((a) => /conversion rate fell/i.test(a.headline));
+      expect(rate).toBeUndefined();
+   });
+
+   it('does NOT flag a rate alert when the conversion rate held steady or rose', () => {
+      // Volume up, visitors up proportionally: rate steady. No rate drop.
+      const { current, prior } = pair(
+         { formSubmissions: 20, traffic: { pageviews: 400, visitors: 200 } }, // 10%
+         { formSubmissions: 10, traffic: { pageviews: 200, visitors: 100 } }, // 10%
+      );
+      const out = detectChanges(current, prior);
+      const rate = out.alerts.filter((a) => a.pillar === 'conversions').find((a) => /conversion rate fell/i.test(a.headline));
+      expect(rate).toBeUndefined();
    });
 });
 

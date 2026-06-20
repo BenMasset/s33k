@@ -23,12 +23,20 @@
  * HONEST ON MISSING DATA. A signal with no usable data NEVER produces an alert.
  * Rank deltas need a prior position to compare against; traffic and conversion
  * deltas need a non-zero prior baseline; AI "new engine" detection needs the
- * prior set to be known. When a baseline is absent the engine stays silent for
- * that rule rather than inventing a 100%-style swing out of a zero. The one place
- * "from nothing" is itself the signal is a brand-NEW AI engine referring traffic,
- * which is a genuine leading AEO indicator and is surfaced as such. The route reports
+ * prior set to be known; the conversion-RATE drop additionally needs a meaningful
+ * prior visitor denominator. When a baseline is absent the engine stays silent for
+ * that rule rather than inventing a 100%-style swing out of a zero. The two places
+ * "from nothing" or "to nothing" is itself the signal are a brand-NEW AI engine
+ * referring traffic (a leading AEO indicator) and an existing engine that COLLAPSED
+ * from a real baseline to near zero (a lost-citation signal). The route reports
  * per-pillar data availability separately; this engine simply does not fire on
  * what it cannot honestly measure.
+ *
+ * NOT YET MEASURABLE HERE. A bot-traffic-share SURGE would be a valuable signal,
+ * but the route passes only { pageviews, visitors } per period (no human-vs-bot
+ * estimate), so the engine has no prior bot share to compare against. That detector
+ * is intentionally absent rather than fabricated; it can be added once the route
+ * threads a per-period bot estimate into PeriodData.
  */
 
 // --- Public input shape ------------------------------------------------------
@@ -122,8 +130,35 @@ const TRAFFIC_CHANGE_MIN = 0.25; // 25%
 const TRAFFIC_CHANGE_HIGH = 0.5; // 50%
 /** AI-referral visitor change of at least this fraction is notable. */
 const AI_CHANGE_MIN = 0.3; // 30%
+/**
+ * An AI engine that had at least this many prior visitors has a "real baseline":
+ * a collapse from it to near-zero is a high-severity loss, not the noise of a 1->0
+ * blip. Below this, a fall to zero is treated as the normal AI_CHANGE_MIN drop.
+ */
+const AI_COLLAPSE_BASELINE_MIN = 5; // visitors
+/**
+ * After a collapse, current visitors at or below this count count as "near zero".
+ * Lets a 12->1 fall register as a collapse, not just a >= 30% shrink.
+ */
+const AI_COLLAPSE_NEAR_ZERO_MAX = 1; // visitors
 /** Conversion (form-submission) change of at least this fraction is notable. */
 const CONVERSION_CHANGE_MIN = 0.3; // 30%
+/**
+ * The current conversion RATE must fall below the prior rate by at least this much
+ * to fire a rate alert (current rate < prior rate * (1 - this)). A 20% relative
+ * rate drop is the medium threshold.
+ */
+const CONVERSION_RATE_DROP_MIN = 0.2; // 20% relative rate drop
+/**
+ * A conversion rate that fell to at most this fraction of the prior rate "roughly
+ * halved" and is high-severity, not medium.
+ */
+const CONVERSION_RATE_HALVED_MAX = 0.5; // current rate <= 50% of prior rate
+/**
+ * A rate alert needs a meaningful prior denominator so a 1-visitor-1-conversion
+ * fluke does not look like a rate collapse. Suppress below this many prior visitors.
+ */
+const CONVERSION_RATE_MIN_PRIOR_VISITORS = 20; // visitors
 
 // Severity ordering for the final sort (high first).
 const SEVERITY_RANK: Record<AlertSeverity, number> = { high: 0, medium: 1, low: 2 };
@@ -282,11 +317,15 @@ const detectTrafficChanges = (current: TrafficTotals, prior: TrafficTotals): Ale
 };
 
 /**
- * AI VISIBILITY. Two distinct signals, both leading AEO indicators:
+ * AI VISIBILITY. Three distinct signals, all leading AEO indicators:
  *   1. A brand-NEW AI engine started referring visitors (an engine present now,
- *      absent prior). "From nothing" IS the signal here, so this is the one rule
- *      that intentionally fires off a zero prior. High severity.
- *   2. An existing AI engine's referral visitors grew/shrank by AI_CHANGE_MIN+.
+ *      absent prior). "From nothing" IS the signal here, so this is one of the two
+ *      rules that intentionally fire off a zero prior. High severity.
+ *   2. An existing AI engine's referral visitors grew/shrank by AI_CHANGE_MIN+
+ *      (medium).
+ *   3. An existing AI engine COLLAPSED from a real baseline to near zero (the
+ *      inverse of #1: a working source has stopped, the lost-citation signal). High
+ *      severity, checked before the ordinary >= 30% shrink so a collapse outranks it.
  * @param {AiEngineCount[]} currentEngines - This period's AI referral engines.
  * @param {AiEngineCount[]} priorEngines - The prior period's AI referral engines.
  * @returns {Alert[]}
@@ -324,6 +363,27 @@ const detectAiChanges = (
       const change = (nowVisitors - beforeVisitors) / beforeVisitors;
       if (Math.abs(change) < AI_CHANGE_MIN) { return; }
       const up = change > 0;
+
+      // COLLAPSE: an engine that had a real baseline of referrals has fallen to near
+      // zero. "Lost the citation" is the most likely cause and the highest-signal AEO
+      // loss, so it is HIGH (vs the MEDIUM ordinary >= 30% shrink below). The inverse
+      // of the brand-new-engine signal: a source that was working has stopped.
+      const collapsedToZero = beforeVisitors >= AI_COLLAPSE_BASELINE_MIN
+         && nowVisitors <= AI_COLLAPSE_NEAR_ZERO_MAX;
+      if (!up && collapsedToZero) {
+         alerts.push({
+            severity: 'high',
+            pillar: 'ai',
+            headline: `${engine} referrals collapsed: ${beforeVisitors} visitors last period, `
+               + `${nowVisitors} now.`,
+            detail: `An AI engine that was sending real traffic has effectively stopped. The usual cause is a `
+               + `lost citation: the pages ${engine} cited changed, were out-ranked, or fell out of its answers.`,
+            recommendation: `Investigate what changed on the pages ${engine} cited (a content edit, a lost rank, `
+               + 'or a competitor displacing you) and restore the direct answer that earned the citation.',
+         });
+         return;
+      }
+
       alerts.push({
          severity: 'medium',
          pillar: 'ai',
@@ -333,7 +393,8 @@ const detectAiChanges = (
             + 'the prior period.',
          recommendation: up
             ? `Keep the pages ${engine} cites fresh and answer-ready so the gain compounds.`
-            : `Review whether the pages ${engine} cited changed or were out-ranked, and restore their clarity.`,
+            : `Review whether the pages ${engine} cited changed or were out-ranked, and restore their clarity `
+               + 'before the source dries up.',
       });
    });
 
@@ -341,29 +402,80 @@ const detectAiChanges = (
 };
 
 /**
- * CONVERSIONS. Compare total form submissions (the autocapture conversion proxy)
- * to the prior period. Fires only off a non-zero prior baseline.
+ * CONVERSIONS. Two distinct signals off the form-submission proxy:
+ *   1. VOLUME: total submissions changed by CONVERSION_CHANGE_MIN+ (drop = high,
+ *      rise = medium). Fires only off a non-zero prior submission baseline.
+ *   2. RATE: submissions-per-visitor fell materially even when raw volume did not
+ *      move enough to trip (1). A rate drop on steady traffic is the leading sign a
+ *      form broke or a landing page regressed, so it is surfaced separately. Fires
+ *      only when BOTH periods have submissions AND a meaningful prior visitor
+ *      denominator, so a tiny sample cannot manufacture a "rate collapse".
+ * Both signals can fire together (a real regression often moves both); they are
+ * distinct alerts because the rate one localizes the cause (page/form) while the
+ * volume one can also be pure traffic loss.
  * @param {number} current - This period's total form submissions.
  * @param {number} prior - The prior period's total form submissions.
+ * @param {number} currentVisitors - This period's visitors (the rate denominator).
+ * @param {number} priorVisitors - The prior period's visitors (the rate denominator).
  * @returns {Alert[]}
  */
-const detectConversionChanges = (current: number, prior: number): Alert[] => {
-   if (prior <= 0) { return []; }
-   const change = (current - prior) / prior;
-   if (Math.abs(change) < CONVERSION_CHANGE_MIN) { return []; }
-   const up = change > 0;
-   const delta_pct = pctChange(current, prior);
-   return [{
-      severity: up ? 'medium' : 'high',
-      pillar: 'conversions',
-      headline: `Form submissions ${up ? 'rose' : 'fell'} ${Math.abs(delta_pct)}% period over period `
-         + `(${prior} to ${current}).`,
-      detail: `Captured form submissions changed ${delta_pct}% versus the prior period.`,
-      recommendation: up
-         ? 'Find the page or source behind the lift and send more traffic to it.'
-         : 'Treat a conversion drop as urgent: check whether a form broke, a high-converting page lost traffic, '
-            + 'or a source dried up, and fix the specific cause.',
-   }];
+const detectConversionChanges = (
+   current: number,
+   prior: number,
+   currentVisitors: number,
+   priorVisitors: number,
+): Alert[] => {
+   const alerts: Alert[] = [];
+
+   // 1. VOLUME change (unchanged behavior).
+   if (prior > 0) {
+      const change = (current - prior) / prior;
+      if (Math.abs(change) >= CONVERSION_CHANGE_MIN) {
+         const up = change > 0;
+         const delta_pct = pctChange(current, prior);
+         alerts.push({
+            severity: up ? 'medium' : 'high',
+            pillar: 'conversions',
+            headline: `Form submissions ${up ? 'rose' : 'fell'} ${Math.abs(delta_pct)}% period over period `
+               + `(${prior} to ${current}).`,
+            detail: `Captured form submissions changed ${delta_pct}% versus the prior period.`,
+            recommendation: up
+               ? 'Find the page or source behind the lift and send more traffic to it.'
+               : 'Treat a conversion drop as urgent: check whether a form broke, a high-converting page lost traffic, '
+                  + 'or a source dried up, and fix the specific cause.',
+         });
+      }
+   }
+
+   // 2. RATE drop. Needs real submissions in BOTH periods and a meaningful prior
+   // visitor denominator, else a small sample fabricates a rate collapse.
+   if (
+      priorVisitors >= CONVERSION_RATE_MIN_PRIOR_VISITORS
+      && prior > 0
+      && currentVisitors > 0
+   ) {
+      const priorRate = prior / priorVisitors;
+      const currentRate = current / currentVisitors;
+      if (priorRate > 0 && currentRate < priorRate * (1 - CONVERSION_RATE_DROP_MIN)) {
+         const halved = currentRate <= priorRate * CONVERSION_RATE_HALVED_MAX;
+         const priorPct = Math.round(priorRate * 1000) / 10; // one decimal place
+         const currentPct = Math.round(currentRate * 1000) / 10;
+         alerts.push({
+            severity: halved ? 'high' : 'medium',
+            pillar: 'conversions',
+            headline: `Your conversion rate fell from ${priorPct}% to ${currentPct}% of visitors `
+               + 'period over period.',
+            detail: `${prior} of ${priorVisitors} prior visitors converted (${priorPct}%); `
+               + `${current} of ${currentVisitors} now (${currentPct}%). A rate drop on steady traffic, not just `
+               + 'a volume swing.',
+            recommendation: 'Check the landing pages and the conversion funnel for a regression: a broken or slow '
+               + 'form, a changed CTA, or a step that started losing people. Compare the top converting pages '
+               + 'period over period.',
+         });
+      }
+   }
+
+   return alerts;
 };
 
 // --- The public entry point --------------------------------------------------
@@ -386,7 +498,12 @@ export const detectChanges = (current: PeriodData, prior: PeriodData): AnalystOu
       ...detectRankChanges(current.keywords, prior.keywords),
       ...detectTrafficChanges(current.traffic, prior.traffic),
       ...detectAiChanges(current.aiEngines, prior.aiEngines),
-      ...detectConversionChanges(current.formSubmissions, prior.formSubmissions),
+      ...detectConversionChanges(
+         current.formSubmissions,
+         prior.formSubmissions,
+         current.traffic.visitors,
+         prior.traffic.visitors,
+      ),
    ];
 
    // Stable pillar tiebreak so equal-severity alerts have a deterministic order.

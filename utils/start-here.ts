@@ -445,7 +445,8 @@ export const whatYouCanSee = (): string[] => [
  * @returns {string[]}
  */
 export const questionsYouCanAsk = (): string[] => [
-   'How is my site doing this week?',
+   'Give me my daily brief.',
+   'What changed since yesterday?',
    'Which of my pages does ChatGPT send people to?',
    'What are my quickest SEO wins?',
    'Did AI search convert anyone last month?',
