@@ -143,9 +143,14 @@ export const isAllowedApiRoute = (req: NextApiRequest): boolean => Boolean(
 // The cross-domain / account / instance routes (export, portfolio, domains, domain, account,
 // account-key, me, invite, waitlist, feature-request, account-data, onboard, refresh, notify,
 // share, searchconsole/connect, adwords, ideas, settings, dbmigrate, clearfailed, cron,
-// collect, volume, login, logout) are EXCLUDED. competitor-visibility, executive-summary,
-// weekly-digest, and onboarding-status DO gate per-domain but are intentionally NOT included here:
-// they are outside the curated share-key surface, fail-closed until explicitly added.
+// collect, volume, login, logout) are EXCLUDED. onboarding-status DOES gate per-domain but is
+// intentionally NOT included: it is an owner-facing setup read (install snippet + setup state) of
+// little value to a read-only viewer, and start-here (allowlisted) already gives a shared viewer the
+// setup/ready picture. competitor-visibility, executive-summary, and weekly-digest were each verified
+// to follow the same per-domain gate as the routes below (authorize -> resolveDomainAccess 403 before
+// any read, every query keyed on the one domain via scopeWhere) and are now EXPLICITLY ADDED: they are
+// read-only, single-domain reports a shared analytics viewer should see, and leaving them out only
+// surfaced a confusing 401 on tools the MCP surface already advertises.
 export const scopedKeyAllowedRoutes: string[] = [
    'GET:/api/start-here',
    'GET:/api/dashboard',
@@ -198,6 +203,14 @@ export const scopedKeyAllowedRoutes: string[] = [
    'GET:/api/goals',
    'GET:/api/segments',
    'GET:/api/install-instructions',
+   // Read-only, single-domain report bundles. Each gates per-domain (authorize ->
+   // resolveDomainAccess 403 before any read; every query keyed on the one domain) exactly like the
+   // routes above, verified by opening each route. Added so a read-only share key does not hit a
+   // confusing 401 on prebuilt-report tools the MCP surface advertises (weekly_digest,
+   // executive_summary, competitor_visibility).
+   'GET:/api/weekly-digest',
+   'GET:/api/executive-summary',
+   'GET:/api/competitor-visibility',
 ];
 
 // isScopedKeyAllowedRoute returns true ONLY for a GET request whose route is in the positive

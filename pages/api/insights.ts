@@ -1,13 +1,17 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { Op } from 'sequelize';
 import { ensureSynced } from '../../database/database';
 import Domain from '../../database/models/domain';
 import Keyword from '../../database/models/keyword';
+import S33kEvent from '../../database/models/s33kEvent';
 import authorize from '../../utils/authorize';
 import resolveDomainAccess from '../../utils/domain-access';
 import { scopeWhere } from '../../utils/scope';
 import type Account from '../../database/models/account';
 import parseKeywords from '../../utils/parseKeywords';
 import { cleanPath } from '../../utils/lodd';
+import { periodStartMs } from '../../utils/period';
+import { sessionize, EventLike } from '../../utils/sessionize';
 import {
    getAnalyticsProvider,
    NormalizedPage,
@@ -115,6 +119,20 @@ const getInsights = async (req: NextApiRequest, res: NextApiResponse<InsightsRes
 
       const provider = getAnalyticsProvider();
 
+      // Fetch + sessionize first-party events so estimateHumanTraffic returns the
+      // authoritative is_bot split (the source IP classified datacenter-or-not at
+      // ingest), giving the same human number as human_traffic, human_analytics,
+      // start_here, and the dashboard. Without these sessions it hits the honest
+      // degraded path (estVisitors 0) and the bot finding below would be suppressed
+      // or, worse, falsely read 0 bots. Tenant-scoped + gated AFTER resolveDomainAccess.
+      const startISO = new Date(periodStartMs(period, Date.now())).toJSON();
+      const eventRows = await S33kEvent.findAll({
+         where: { domain, created: { [Op.gte]: startISO }, ...scopeWhere(account) },
+         attributes: ['session', 'source', 'is_bot', 'device', 'country', 'page', 'type', 'created'],
+         order: [['created', 'ASC']],
+      });
+      const firstPartySessions = sessionize(eventRows.map((r) => r.get({ plain: true }) as EventLike));
+
       // Pull every pillar in parallel. None of these throw; each carries its own
       // error field, which we collect into `notes` instead of failing the route.
       const [allKeywordRows, traffic, referrals, summary, botEstimate] = await Promise.all([
@@ -122,7 +140,7 @@ const getInsights = async (req: NextApiRequest, res: NextApiResponse<InsightsRes
          provider.getPageTraffic(domain, period),
          provider.getReferralSources(domain, period),
          provider.getSummary(domain, period),
-         estimateHumanTraffic(provider, domain, period),
+         estimateHumanTraffic(provider, domain, period, firstPartySessions),
       ]);
 
       const keywords: KeywordType[] = parseKeywords(allKeywordRows.map((e) => e.get({ plain: true })));

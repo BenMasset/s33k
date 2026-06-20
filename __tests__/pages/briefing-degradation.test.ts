@@ -27,11 +27,17 @@ import handler from '../../pages/api/briefing';
 import { getAnalyticsProvider } from '../../utils/analytics';
 import { estimateHumanTraffic } from '../../utils/bot-filter';
 import Keyword from '../../database/models/keyword';
+import S33kEvent from '../../database/models/s33kEvent';
 
 jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn().mockResolvedValue(undefined) }, ensureSynced: jest.fn().mockResolvedValue(undefined) }));
+// Mock sequelize so the route's `Op` import does not drag the real ORM into jest.
+jest.mock('sequelize', () => ({ __esModule: true, Op: { gte: Symbol('gte') } }));
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('../../database/models/domain', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
 jest.mock('../../database/models/keyword', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
+// Mock the first-party events model so the briefing's new sessionize fetch does not
+// pull sequelize decorators into jest (same pattern as human-analytics.test.ts).
+jest.mock('../../database/models/s33kEvent', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../utils/analytics', () => {
    const actual = jest.requireActual('../../utils/analytics');
    return { __esModule: true, ...actual, getAnalyticsProvider: jest.fn() };
@@ -44,6 +50,7 @@ import Domain from '../../database/models/domain';
 const mockedAuthorize = authorize as unknown as jest.Mock;
 const mockedDomainFindOne = (Domain as unknown as { findOne: jest.Mock }).findOne;
 const mockedKeywordFindAll = (Keyword as unknown as { findAll: jest.Mock }).findAll;
+const mockedEventFindAll = (S33kEvent as unknown as { findAll: jest.Mock }).findAll;
 const mockedGetProvider = getAnalyticsProvider as jest.Mock;
 const mockedEstimate = estimateHumanTraffic as jest.Mock;
 
@@ -129,6 +136,10 @@ beforeEach(() => {
    ]);
    mockedEstimate.mockResolvedValue(goodEstimate);
    mockedGetProvider.mockReturnValue(providerStub());
+   // Default: no first-party events. The route sessionizes [] and passes an empty
+   // array to estimateHumanTraffic, which is mocked above, so the existing
+   // degradation cases are unaffected (additive change).
+   mockedEventFindAll.mockResolvedValue([]);
 });
 
 describe('briefing composer graceful degradation', () => {
@@ -189,6 +200,42 @@ describe('briefing composer graceful degradation', () => {
       expect(Array.isArray(captured.body.recommendations)).toBe(true);
       expect(captured.body.recommendations.length).toBeGreaterThan(0);
       expect(typeof captured.body.headline).toBe('string');
+   });
+
+   it('headline human count reflects the FIRST-PARTY split, not the bot-inflated provider visitor total', async () => {
+      // The provider summary reports 724 visitors (bot-inflated). The first-party
+      // sessions are the truth: 2 human + 1 bot. The route must sessionize the events,
+      // pass them to estimateHumanTraffic, and lead the headline with the human number,
+      // not summaryData.visitors. We assert the route forwards the sessionized
+      // first-party set as the 4th arg and that the headline uses the resulting human
+      // count, by computing the estimate from exactly those sessions in the mock.
+      const eventRow = (data: Record<string, unknown>) => ({ get: () => data, ...data });
+      const pageview = (session: string, isBot: boolean) => eventRow({
+         session, page: '/', is_bot: isBot, created: '2026-06-16T10:00:00.000Z',
+         type: 'pageview', source: 'direct', device: 'desktop', country: 'US',
+      });
+      mockedEventFindAll.mockResolvedValue([
+         pageview('A', false), pageview('B', false), pageview('C', true),
+      ]);
+      mockedGetProvider.mockReturnValue({
+         ...providerStub(),
+         getSummary: async () => ({ pageviews: 900, visitors: 724, bounceRate: 97, avgDuration: 2, pagesPerVisit: 1.0, error: null }),
+      });
+      // The mock computes the estimate from the first-party sessions it is HANDED,
+      // proving the route forwards them. Falls back to the degraded shape if absent.
+      const { firstPartyHumanTraffic } = jest.requireActual('../../utils/bot-filter');
+      mockedEstimate.mockImplementation(async (_p: unknown, _d: unknown, _period: unknown, sessions: unknown[]) => {
+         if (Array.isArray(sessions) && sessions.length > 0) { return firstPartyHumanTraffic(sessions); }
+         return { estVisitors: 0, estHumanVisitors: 0, estBotVisitors: 0, botSharePct: 0, botEstimationAvailable: false, method: '', error: null };
+      });
+
+      const { req, res, captured } = makeReqRes({ domain: 'getmasset.com' });
+      await handler(req, res);
+
+      expect(captured.status).toBe(200);
+      // 2 human sessions (A, B), so the headline leads with the human count, not 724.
+      expect(captured.body.headline).toMatch(/about 2 human visitor/i);
+      expect(captured.body.headline).not.toMatch(/724/);
    });
 
    it('returns 401 when the request is not authorized', async () => {

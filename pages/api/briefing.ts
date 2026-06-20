@@ -1,13 +1,17 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { Op } from 'sequelize';
 import { ensureSynced } from '../../database/database';
 import Keyword from '../../database/models/keyword';
 import Domain from '../../database/models/domain';
+import S33kEvent from '../../database/models/s33kEvent';
 import authorize from '../../utils/authorize';
 import resolveDomainAccess from '../../utils/domain-access';
 import { scopeWhere } from '../../utils/scope';
 import type Account from '../../database/models/account';
 import parseKeywords from '../../utils/parseKeywords';
 import { cleanPath } from '../../utils/lodd';
+import { periodStartMs } from '../../utils/period';
+import { sessionize, EventLike } from '../../utils/sessionize';
 import {
    getAnalyticsProvider,
    NormalizedPage,
@@ -133,6 +137,23 @@ const getBriefing = async (req: NextApiRequest, res: NextApiResponse<BriefingRes
    try {
       const provider = getAnalyticsProvider();
 
+      // Fetch + sessionize first-party events so estimateHumanTraffic returns the
+      // authoritative is_bot split (the source IP classified datacenter-or-not at
+      // ingest), giving the same human number as human_traffic, human_analytics,
+      // start_here, and the dashboard. Without these sessions it hits the honest
+      // degraded path (estVisitors 0) and the headline below would fall back to the
+      // bot-inflated provider visitor total. Tenant-scoped + gated AFTER
+      // resolveDomainAccess. Wrapped in .catch so a DB hiccup degrades this one
+      // signal into the provider fallback rather than breaking the briefing.
+      const startISO = new Date(periodStartMs(period, Date.now())).toJSON();
+      const firstPartySessions = await S33kEvent.findAll({
+         where: { domain, created: { [Op.gte]: startISO }, ...scopeWhere(account) },
+         attributes: ['session', 'source', 'is_bot', 'device', 'country', 'page', 'type', 'created'],
+         order: [['created', 'ASC']],
+      })
+         .then((rows) => sessionize(rows.map((r) => r.get({ plain: true }) as EventLike)))
+         .catch(() => [] as ReturnType<typeof sessionize>);
+
       // Pull every pillar in parallel. Each promise is wrapped so a rejection
       // becomes a recoverable value, never an unhandled throw that 500s the
       // briefing. Analytics providers already resolve (not reject) with an
@@ -145,7 +166,7 @@ const getBriefing = async (req: NextApiRequest, res: NextApiResponse<BriefingRes
             pageviews: 0, visitors: 0, bounceRate: 0, avgDuration: 0, pagesPerVisit: 0, error: String(e),
          })),
          provider.getEngagement(domain, period).catch((e) => ({ tiers: [], error: String(e) })),
-         estimateHumanTraffic(provider, domain, period).catch((e) => ({
+         estimateHumanTraffic(provider, domain, period, firstPartySessions).catch((e) => ({
             estVisitors: 0, estHumanVisitors: 0, estBotVisitors: 0, botSharePct: 0, method: '', error: String(e),
          })),
       ]);

@@ -121,6 +121,10 @@ const ALLOWED_GET = [
    '/api/keywords',
    '/api/seo-report',
    '/api/ai-referrals',
+   // Prebuilt single-domain report bundles, added to the share-key surface (verified per-domain gate).
+   '/api/weekly-digest',
+   '/api/executive-summary',
+   '/api/competitor-visibility',
 ];
 
 describe('admin-account share key is DENIED on every cross-domain/account/instance route', () => {
