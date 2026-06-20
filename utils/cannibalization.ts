@@ -63,13 +63,22 @@ const firstUrl = (raw: string): string => {
    }
 };
 
-// Normalize a url for comparison: lowercase, strip protocol, strip a trailing slash, drop the query
-// and hash. Two urls that differ only by http/https, a trailing slash, or tracking params are the
-// SAME page for cannibalization purposes, so this avoids false "different url" flags.
+// Normalize a url for comparison: lowercase, strip protocol AND host, drop the query and hash, strip
+// a trailing slash, so what remains is the PATH. Two urls that differ only by http/https, the host,
+// a trailing slash, or tracking params are the SAME page for cannibalization purposes. Stripping the
+// host is essential: SerpBear stores the ranking url ABSOLUTE (https://www.getmasset.com/x) while a
+// keyword's target_page is RELATIVE (/x), so without this every keyword whose ranking url matched its
+// own target page was a false intent_split ("Google ranks a different page than you optimized").
 const normalizeUrl = (raw: string): string => {
    let s = String(raw || '').trim().toLowerCase();
    if (!s) { return ''; }
    s = s.replace(/^https?:\/\//, '').replace(/[?#].*$/, '');
+   // After dropping the protocol, anything before the first slash is the host: strip it to the path.
+   // A bare host with no path (or an empty path) collapses to '/' (the homepage).
+   if (!s.startsWith('/')) {
+      const slash = s.indexOf('/');
+      s = slash === -1 ? '/' : s.slice(slash);
+   }
    if (s.length > 1 && s.endsWith('/')) { s = s.slice(0, -1); }
    return s;
 };

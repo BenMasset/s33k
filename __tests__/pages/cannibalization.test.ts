@@ -73,6 +73,31 @@ describe('GET /api/cannibalization', () => {
       expect(res.payload.total).toBe(0);
    });
 
+   it('treats an absolute ranking url and a relative target_page for the SAME page as healthy (no false intent split)', async () => {
+      mockKeyword.findAll.mockResolvedValue([
+         // The real-world shape: SerpBear stores the ranking url ABSOLUTE while target_page is RELATIVE.
+         // Same page, so it must NOT flag. Regression guard for the host-not-stripped false positive
+         // that flagged every keyword ranking on its own page.
+         kw('openai codex for marketers', 2,
+            'https://www.getmasset.com/resources/blog/openai-codex-sites-for-marketers',
+            '/resources/blog/openai-codex-sites-for-marketers'),
+      ]);
+      const res = makeRes();
+      await handler(makeReq({ domain: 'getmasset.com' }), res);
+      expect(res.payload.total).toBe(0);
+      expect(byType(res.payload, 'intent_split')).toHaveLength(0);
+   });
+
+   it('still flags intent split when an absolute ranking url and a relative target_page are DIFFERENT paths', async () => {
+      mockKeyword.findAll.mockResolvedValue([
+         // Absolute ranking url, relative target, genuinely different paths -> real intent split.
+         kw('ai-ready dam', 6, 'https://www.getmasset.com/blog/dam', '/dam'),
+      ]);
+      const res = makeRes();
+      await handler(makeReq({ domain: 'getmasset.com' }), res);
+      expect(byType(res.payload, 'intent_split')).toHaveLength(1);
+   });
+
    it('(b) flags shared ranking url across distinct keywords targeting different pages', async () => {
       mockKeyword.findAll.mockResolvedValue([
          // Two keywords both rank on /hub but target different pages -> shared_url conflict.
