@@ -1,21 +1,21 @@
 /**
  * Install-guide library for the s33k onboarding tracking snippet.
  *
- * Once a domain has a provisioned Umami website, the customer needs to add the Umami
- * tracking script to their site so s33k can collect analytics and AEO/AI-referral signal.
- * This module turns a domain + its Umami website id into (1) the exact script snippet and
+ * Once a domain has a provisioned analytics site id, the customer needs to add the s33k
+ * tracker script to their site so s33k can collect analytics and AEO/AI-referral signal.
+ * This module turns a domain + its site id into (1) the exact script snippet and
  * (2) accurate, copy-paste-ready, per-platform install instructions for the surfaces a
  * marketer is most likely to be on.
  *
  * It is pure product knowledge: no network calls, no LLM, no secrets. The snippet points
- * at the same self-hosted Umami instance the rest of s33k reads from (UMAMI_BASE_URL); the
+ * at the configured first-party script host (UMAMI_BASE_URL is the internal env name); the
  * script src is read from UMAMI_SCRIPT_URL when set, otherwise derived as
- * `${UMAMI_BASE_URL}/script.js`, which is the default path Umami serves its tracker from.
+ * `${UMAMI_BASE_URL}/script.js`, which is the default path the tracker is served from.
  *
  * Configuration (read at runtime, never committed):
- *   UMAMI_BASE_URL    Base URL of the self-hosted Umami instance. Used to derive the
+ *   UMAMI_BASE_URL    Base URL of the first-party analytics host. Used to derive the
  *                     script src when UMAMI_SCRIPT_URL is not set.
- *   UMAMI_SCRIPT_URL  Optional explicit full URL to the Umami tracker script (overrides
+ *   UMAMI_SCRIPT_URL  Optional explicit full URL to the s33k tracker script (overrides
  *                     the derived `${UMAMI_BASE_URL}/script.js`).
  */
 
@@ -34,10 +34,10 @@ export type InstallGuides = {
 };
 
 /**
- * Resolve the full URL of the Umami tracker script.
- * Prefers UMAMI_SCRIPT_URL; otherwise derives `${UMAMI_BASE_URL}/script.js`. Falls back to
- * a bare "/script.js" path when no base URL is configured so the snippet is still shaped
- * correctly (the customer can swap the host in).
+ * Resolve the full URL of the s33k tracker script.
+ * Prefers UMAMI_SCRIPT_URL; otherwise derives `${UMAMI_BASE_URL}/script.js` from the
+ * configured first-party script host. Falls back to a bare "/script.js" path when no base
+ * URL is configured so the snippet is still shaped correctly (the customer can swap the host in).
  * @returns {string} The script src to use in the snippet.
  */
 const resolveScriptUrl = (): string => {
@@ -49,10 +49,10 @@ const resolveScriptUrl = (): string => {
 };
 
 /**
- * Build the exact Umami tracking snippet for a website id.
+ * Build the exact s33k tracking snippet for a site id.
  * This is the single line a customer pastes into their site's <head>.
- * @param {string} scriptUrl - Full URL of the Umami tracker script.
- * @param {string} websiteId - The per-domain Umami website id.
+ * @param {string} scriptUrl - Full URL of the s33k tracker script.
+ * @param {string} websiteId - The per-domain analytics site id.
  * @returns {string} The <script> snippet.
  */
 const buildSnippet = (scriptUrl: string, websiteId: string): string => `<script defer src="${scriptUrl}" data-website-id="${websiteId}"></script>`;
@@ -64,11 +64,11 @@ const buildSnippet = (scriptUrl: string, websiteId: string): string => `<script 
  * Manager, WordPress, Webflow, Shopify, Squarespace, Wix, and Next.js/React. Each guide is
  * a numbered list of exact, current steps ending at where the snippet goes.
  * @param {string} domain - The site domain, e.g. "getmasset.com" (used only for copy).
- * @param {string} umamiWebsiteId - The per-domain Umami website id to embed in the snippet.
+ * @param {string} siteId - The per-domain analytics site id to embed in the snippet.
  * @returns {InstallGuides} The snippet, resolved script URL, website id, and platform guides.
  */
-export const getInstallGuides = (domain: string, umamiWebsiteId: string): InstallGuides => {
-   const websiteId = String(umamiWebsiteId || '').trim();
+export const getInstallGuides = (domain: string, siteId: string): InstallGuides => {
+   const websiteId = String(siteId || '').trim();
    const scriptUrl = resolveScriptUrl();
    const snippet = buildSnippet(scriptUrl, websiteId);
 
@@ -88,7 +88,7 @@ export const getInstallGuides = (domain: string, umamiWebsiteId: string): Instal
             'Click Tag Configuration and choose the "Custom HTML" tag type.',
             'Paste the snippet into the HTML field exactly as given.',
             'Under Triggering, choose "All Pages" (the built-in Page View trigger) so it fires site-wide.',
-            'Name the tag (for example "Umami Analytics"), click Save, then click Submit and Publish to push it live.',
+            'Name the tag (for example "s33k Analytics"), click Save, then click Submit and Publish to push it live.',
          ],
       },
       {
@@ -133,7 +133,7 @@ export const getInstallGuides = (domain: string, umamiWebsiteId: string): Instal
          steps: [
             'In the Wix dashboard, go to Settings, then "Custom Code" (under the Advanced section).',
             'Click "Add Custom Code" in the Head section.',
-            'Paste the snippet into the code box and give it a name (for example "Umami Analytics").',
+            'Paste the snippet into the code box and give it a name (for example "s33k Analytics").',
             'Set it to load on "All pages" and place it in the "Head", then click Apply.',
          ],
       },

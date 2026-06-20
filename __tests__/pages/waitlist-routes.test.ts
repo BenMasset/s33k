@@ -29,6 +29,13 @@ jest.mock('../../database/models/waitlist', () => ({
    default: { create: jest.fn(), findOne: jest.fn(), findAll: jest.fn() },
 }));
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
+// Mock the notify side effect so the new-signup-only firing contract is asserted directly, instead
+// of resting on RESEND_API_KEY being unset in jest (which silently no-ops the real notifier).
+jest.mock('../../utils/notify-waitlist', () => ({
+   __esModule: true,
+   notifyWaitlist: jest.fn(async () => ({ emailed: true, segmented: true })),
+   default: jest.fn(async () => ({ emailed: true, segmented: true })),
+}));
 
 // eslint-disable-next-line import/first
 import waitlistHandler from '../../pages/api/waitlist';
@@ -42,10 +49,13 @@ import WaitlistModel from '../../database/models/waitlist';
 import authorizeFn from '../../utils/authorize';
 // eslint-disable-next-line import/first
 import { __resetGenericRateLimit } from '../../utils/rate-limit';
+// eslint-disable-next-line import/first
+import { notifyWaitlist as notifyWaitlistFn } from '../../utils/notify-waitlist';
 
 const mockAccount = AccountModel as unknown as { findOrCreate: jest.Mock, findOne: jest.Mock };
 const mockWaitlist = WaitlistModel as unknown as { create: jest.Mock, findOne: jest.Mock, findAll: jest.Mock };
 const mockAuthorize = authorizeFn as unknown as jest.Mock;
+const mockNotify = notifyWaitlistFn as unknown as jest.Mock;
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -97,6 +107,10 @@ describe('POST /api/waitlist: create', () => {
       expect(createArg.email).toBe('new@person.com');
       expect(createArg.domain).toBe('person.com');
       expect(createArg.status).toBe('waiting');
+      // The owner-notify + Resend-segment side effect fires exactly once on a fresh signup, with
+      // the normalized values, and is best-effort (the route does not await it into the response).
+      expect(mockNotify).toHaveBeenCalledTimes(1);
+      expect(mockNotify).toHaveBeenCalledWith({ email: 'new@person.com', domain: 'person.com', note: null });
    });
 
    it('normalizes a mixed-case email to lower-case before storing', async () => {
@@ -124,6 +138,8 @@ describe('POST /api/waitlist: dedupe', () => {
       expect(res.statusCode).toBe(200);
       expect(res.payload.success).toBe(true);
       expect(mockWaitlist.create).not.toHaveBeenCalled();
+      // A repeat submit must NEVER re-email the owner or re-add the Resend contact.
+      expect(mockNotify).not.toHaveBeenCalled();
    });
 
    it('swallows a concurrent unique-constraint collision to the same thank-you', async () => {

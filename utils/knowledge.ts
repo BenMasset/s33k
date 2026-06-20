@@ -315,7 +315,7 @@ const capabilities: CapabilityEntry[] = [
       category: 'analytics',
       title: 'Traffic breakdown',
       description: 'Breaks a domain\'s traffic down by one dimension: country, region, city, device, browser, os, language, or screen.',
-      whenToUse: 'Use to answer where visitors come from or what they use. Region/city/language/screen are Umami-only extras.',
+      whenToUse: 'Use to answer where visitors come from or what they use. Region/city/language/screen are extended dimensions that may not be available on every instance.',
       examplePrompt: 'Break down getmasset.com traffic by country.',
    },
    {
@@ -350,10 +350,12 @@ const capabilities: CapabilityEntry[] = [
       toolName: 'human_traffic',
       category: 'analytics',
       title: 'Human vs bot traffic estimate',
-      description: 'Estimates how much of a domain\'s traffic is likely humans versus likely bots, using a behavior heuristic with a known-human '
-         + 'referrer floor.',
-      whenToUse: 'Use to sanity-check the other traffic numbers, because most analytics overcount JavaScript-executing scrapers. It is an estimate, '
-         + 'not an exact count.',
+      description: 'Reports how much of a domain\'s traffic is humans versus bots from FIRST-PARTY tracking: each session\'s source IP is classified '
+         + 'as datacenter-or-not at ingest (the is_bot signal a JS pageview tracker cannot see), so cloud scrapers are filtered, not counted. The '
+         + 'human number matches human_analytics, start_here, and the dashboard (one source of truth).',
+      whenToUse: 'Use to sanity-check the other traffic numbers, because JS pageview trackers count JavaScript-executing scrapers as real visitors. '
+         + 'It is exact for the first-party sessions it has. If no first-party sessions have arrived yet, botEstimationAvailable is false and the '
+         + 'split is omitted rather than guessed; install the s33k.js script to populate it.',
       examplePrompt: 'How much of getmasset.com traffic is real humans versus bots?',
    },
    {
@@ -365,9 +367,10 @@ const capabilities: CapabilityEntry[] = [
          + 'default. Each pageview\'s source IP is classified as datacenter-or-not at ingest (is_bot), so JavaScript-executing cloud scrapers are '
          + 'filtered instead of counted. Returns visitors, pageviews, pagesPerSession, bounceRatePct, entryPages, and exitPages with exitRatePct, '
          + 'plus botVisitorsFiltered and botSharePct.',
-      whenToUse: 'Use when you want real human numbers, including the exit rate the Umami-backed traffic view cannot produce. Unlike human_traffic '
-         + '(a behavioral ESTIMATE over Umami data), this is computed from first-party IP-classified pageviews and is exact for the pageviews it '
-         + 'has. Requires the s33k.js tracking script installed so pageviews flow in. Pass includeBots=true for the raw with-bots view.',
+      whenToUse: 'Use when you want real human numbers, including the exit rate the active analytics provider cannot produce. Both human_analytics '
+         + 'and human_traffic now derive the human-vs-bot split from the SAME first-party IP classification (is_bot at ingest), so their human '
+         + 'counts agree; this tool adds bounce, entry, and exit detail. Requires the s33k.js tracking script installed so pageviews flow in. Pass '
+         + 'includeBots=true for the raw with-bots view.',
       examplePrompt: 'Show me getmasset.com analytics for humans only, with bounce and exit rate.',
    },
    {
@@ -758,7 +761,9 @@ const capabilities: CapabilityEntry[] = [
          + 'traffic, a gap to fix), brand-direct (lots of direct/referral entries but no tracked ranking), ai-landing (AI search is a meaningful '
          + 'first-touch source), or opportunity (entry traffic but neither ranking nor AI). Per-page AI-search landing counts are EXACT, computed '
          + 'from s33k\'s own first-party sessions (which pages AI search actually landed on); the four-way source split per page is still '
-         + 'approximated from the site-wide referrer mix and the response says so.',
+         + 'approximated from the site-wide referrer mix and the response says so. The response is summary-first and bounded: the summary covers '
+         + 'all pages while the entryPages array defaults to the top 20 by entries (meta.truncated flags this); pass detail=true for the full array '
+         + 'or limit=N (1..200) to change the cap.',
       whenToUse: 'Use to see which pages are the real acquisition surface, connect "we rank for X" to "X actually lands people", find pages '
          + 'that rank but drive no entry traffic, and decide where to invest. Complements page_scoreboard (all pages) by focusing only on '
          + 'entry pages.',
@@ -1067,7 +1072,7 @@ const capabilities: CapabilityEntry[] = [
 // ---------------------------------------------------------------------------
 const setup = {
    summary: 'Install s33k from source (clone, npm install, set the .env, npm run build, npm start) or run the bundled '
-      + 'docker-compose stack (s33k + Umami + Postgres). Then connect your LLM one of two ways, both exposing the same '
+      + 'docker-compose stack (s33k + its analytics engine + Postgres). Then connect your LLM one of two ways, both exposing the same '
       + 'tools: (1) LOCAL stdio, by adding the MCP server with your s33k API key as S33K_API_KEY and your instance URL '
       + 'as S33K_BASE_URL; or (2) HOSTED HTTP, with no local install, by adding the running server\'s /api/mcp endpoint '
       + 'as an HTTP MCP server with an Authorization: Bearer <api key> header (claude mcp add --transport http s33k '
@@ -1110,9 +1115,9 @@ const reasoning: ReasoningEntry[] = [
          + 'onboarding is "give me your domain," not "configure a scraping backend."',
    },
    {
-      id: 'why_cookieless_umami',
-      question: 'Why self-hosted cookieless Umami analytics instead of a hosted analytics vendor?',
-      answer: 'Two reasons: data ownership and privacy. Self-hosting Umami means the analytics data lives in a database you '
+      id: 'why_cookieless_analytics',
+      question: 'Why self-hosted cookieless analytics instead of a hosted analytics vendor?',
+      answer: 'Two reasons: data ownership and privacy. Self-hosting your analytics means the analytics data lives in a database you '
          + 'can own, not a third party. Cookieless, no-PII tracking (the autocapture script uses no cookies and no '
          + 'fingerprinting, and never reads typed values) means a marketer can start a trial with zero privacy fear. It is '
          + 'the analytics substrate s33k builds its AI-native signals on top of.',

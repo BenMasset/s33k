@@ -119,4 +119,19 @@ describe('getInstallGuides platform coverage and steps', () => {
       expect(joined).toContain('https://analytics.example.com/script.js');
       expect(joined).toContain('data-website-id="web-xyz"');
    });
+
+   it('never leaks the internal provider name into any platform step (user-facing copy is s33k-branded)', () => {
+      const guides = getInstallGuides('example.com', 'web-1');
+      guides.platforms.forEach((p) => {
+         p.steps.forEach((step) => expect(step).not.toMatch(/Umami/i));
+      });
+   });
+
+   it('labels the example tag name as "s33k Analytics" in the GTM and Wix guides', () => {
+      const guides = getInstallGuides('example.com', 'web-1');
+      const gtm = guides.platforms.find((p) => p.platform === 'Google Tag Manager');
+      const wix = guides.platforms.find((p) => p.platform === 'Wix');
+      expect(gtm!.steps.join(' ')).toContain('s33k Analytics');
+      expect(wix!.steps.join(' ')).toContain('s33k Analytics');
+   });
 });

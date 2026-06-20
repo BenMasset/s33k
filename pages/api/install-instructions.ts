@@ -1,11 +1,12 @@
 /**
  * On-demand install instructions for a domain's tracking code.
  *
- * Returns the Umami tracking snippet and per-platform install guides (raw HTML, Google Tag
+ * Returns the s33k tracking snippet and per-platform install guides (raw HTML, Google Tag
  * Manager, WordPress, Webflow, Shopify, Squarespace, Wix, Next.js/React) for an already
  * onboarded domain, without re-running the whole onboard flow. Resolves the per-domain
- * Umami website id from Domain.umami_website_id, falling back to the UMAMI_WEBSITE_ID env so
- * the legacy single-tenant domain (getmasset.com) still returns a usable snippet.
+ * analytics site id from the Domain.umami_website_id column, falling back to the
+ * UMAMI_WEBSITE_ID env so the legacy single-tenant domain (getmasset.com) still returns a
+ * usable snippet.
  *
  * Multi-tenant: scoped via authorize + scopeWhere, matching pages/api/scoreboard.ts. With
  * MULTI_TENANT off the domain is matched by name exactly as today.
@@ -21,7 +22,7 @@ import { getInstallGuides, InstallGuides } from '../../utils/install-guides';
 
 type InstallInstructionsResponse = {
    domain?: string,
-   umamiWebsiteId?: string | null,
+   siteId?: string | null,
    installSnippet?: string,
    installGuides?: InstallGuides,
    error?: string | null,
@@ -62,13 +63,13 @@ const getInstructions = async (
          return res.status(403).json({ error: 'Domain not found for this account' });
       }
       // Per-domain id first, then the legacy env fallback so getmasset.com still works.
-      const umamiWebsiteId = owned.umami_website_id
+      const siteId = owned.umami_website_id
          ? String(owned.umami_website_id)
          : (process.env.UMAMI_WEBSITE_ID || null);
-      const installGuides = getInstallGuides(domain, umamiWebsiteId || '');
+      const installGuides = getInstallGuides(domain, siteId || '');
       return res.status(200).json({
          domain,
-         umamiWebsiteId,
+         siteId,
          installSnippet: installGuides.snippet,
          installGuides,
       });

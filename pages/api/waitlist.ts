@@ -6,6 +6,7 @@ import ensureAdminAccount from '../../utils/ensureAdminAccount';
 import { isAdminAccount } from '../../utils/scope';
 import { rateLimit } from '../../utils/rate-limit';
 import { clientIp } from '../../utils/collect-guards';
+import { notifyWaitlist } from '../../utils/notify-waitlist';
 
 // Hard length caps on the PUBLIC waitlist write (audit area 1). This is the least-defended
 // unauthenticated write surface, so cap every field before persisting: an email max is 254 (RFC
@@ -24,6 +25,21 @@ const WAITLIST_RATE_LIMIT = (() => {
 })();
 const WAITLIST_RATE_WINDOW_MS = (() => {
    const raw = parseInt(process.env.WAITLIST_RATE_WINDOW_MS || '', 10);
+   return Number.isFinite(raw) && raw > 0 ? raw : 60 * 1000;
+})();
+
+// Dedicated GLOBAL brake on the notify FAN-OUT (owner email + Resend contact create), separate
+// from the per-IP write brake above. The per-IP limit bounds rows-per-IP, but across rotating IPs
+// the open endpoint could still amplify into Ben's inbox and the Resend segment. This cap is global
+// (one bucket, not keyed by IP) so the outbound side effect is hard-capped regardless of how many
+// sources hit it. The waitlist ROW still persists for every honest signup; only the email/contact
+// amplification is throttled. Generous for real signup volume, a hard ceiling against an inbox bomb.
+const WAITLIST_NOTIFY_LIMIT = (() => {
+   const raw = parseInt(process.env.WAITLIST_NOTIFY_LIMIT || '', 10);
+   return Number.isFinite(raw) && raw > 0 ? raw : 50;
+})();
+const WAITLIST_NOTIFY_WINDOW_MS = (() => {
+   const raw = parseInt(process.env.WAITLIST_NOTIFY_WINDOW_MS || '', 10);
    return Number.isFinite(raw) && raw > 0 ? raw : 60 * 1000;
 })();
 
@@ -133,6 +149,17 @@ const joinWaitlist = async (req: NextApiRequest, res: NextApiResponse<WaitlistCr
          note: note || null,
          status: 'waiting',
       });
+      // Best-effort side effects on a NEW signup only (the dedupe path above returns before here,
+      // so a repeat submit never re-emails or re-adds). notifyWaitlist never throws; we do not
+      // await it into the response so a slow Resend call cannot delay the user's confirmation.
+      // Gated behind a GLOBAL notify brake so the open endpoint cannot be used as an inbox/contact
+      // bomb across rotating IPs; the row above is already persisted either way.
+      const notifyBrake = rateLimit('waitlist-notify-global', {
+         limit: WAITLIST_NOTIFY_LIMIT, windowMs: WAITLIST_NOTIFY_WINDOW_MS,
+      });
+      if (notifyBrake.allowed) {
+         notifyWaitlist({ email, domain: domain || null, note: note || null }).catch(() => undefined);
+      }
       return res.status(201).json(thankYou);
    } catch (error) {
       // A unique-constraint collision (concurrent duplicate) is not an error from the user's

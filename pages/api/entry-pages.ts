@@ -74,12 +74,28 @@ type EntryPagesSummary = {
    statusCounts: Record<EntryPageStatus, number>,
 }
 
+/**
+ * Truncation metadata for the default summary-first response. The full per-page array on a real
+ * site (getmasset.com) is thousands of rows / ~87k chars, which exceeds the MCP token limit, so the
+ * default response returns only the top-N entryPages plus this meta. The summary + statusCounts are
+ * always computed over ALL records BEFORE truncation, so whole-site accuracy is preserved and the
+ * "which pages did AI search land on" question is answerable from the summary alone. Pass detail=true
+ * to get every row.
+ */
+type EntryPagesMeta = {
+   totalEntryPages: number,
+   returnedEntryPages: number,
+   truncated: boolean,
+   hint: string,
+}
+
 type EntryPagesResponse = {
    domain?: string,
    period?: string,
-   entryPages?: EntryPageRecord[],
    summary?: EntryPagesSummary,
    statusLegend?: Record<EntryPageStatus, string>,
+   entryPages?: EntryPageRecord[],
+   meta?: EntryPagesMeta,
    sourcesNote?: string | null,
    aiReferralNote?: string | null,
    analyticsError?: string | null,
@@ -105,6 +121,13 @@ const getEntryPages = async (req: NextApiRequest, res: NextApiResponse<EntryPage
    }
    const domain = req.query.domain as string;
    const period = (typeof req.query.period === 'string' && req.query.period) ? req.query.period : '30d';
+
+   // detail=true returns the full per-page array (use sparingly: thousands of rows on a real site).
+   // The default is summary-first: top-N entry pages by entries, bounded so the response stays under
+   // the MCP token limit. limit clamps to 1..200 (default 20); the summary always covers ALL pages.
+   const detail = req.query.detail === 'true' || req.query.detail === '1';
+   const rawLimit = Number.parseInt(typeof req.query.limit === 'string' ? req.query.limit : '', 10);
+   const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(200, rawLimit)) : 20;
 
    // Ownership gate (identical to scoreboard.ts): verify the caller owns this domain
    // before exposing any of its data. With MULTI_TENANT off, scopeWhere returns {}.
@@ -234,21 +257,44 @@ const getEntryPages = async (req: NextApiRequest, res: NextApiResponse<EntryPage
          ? { page: rankingNotLanding[0].page, entries: rankingNotLanding[0].entries, keywords: rankingNotLanding[0].keywords.length }
          : null;
 
+      // Summary is computed over ALL entryPages (before any truncation) so it stays whole-site
+      // accurate. topLandingPages and aiLandingPages slice to 10 so "which pages did AI search land
+      // on" is answerable from the summary alone, without expanding the full per-page array.
       const summary: EntryPagesSummary = {
-         topLandingPages: entryPages.slice(0, 5).map((p) => ({ page: p.page, entries: p.entries, status: p.status })),
+         topLandingPages: entryPages.slice(0, 10).map((p) => ({ page: p.page, entries: p.entries, status: p.status })),
          biggestRankingNotLandingGap: gap,
          aiLandingPages: entryPages
             .filter((p) => p.status === 'ai-landing')
+            .slice(0, 10)
             .map((p) => ({ page: p.page, entries: p.entries, aiReferrals: p.aiReferrals })),
          statusCounts,
       };
 
+      // Default response is summary-first and bounded: return the top-N entry pages plus meta that
+      // explains the truncation and points to detail=true for the full array. detail=true returns
+      // every row with truncated:false. The summary above already covers all pages either way.
+      const totalEntryPages = entryPages.length;
+      const returnedPages = detail ? entryPages : entryPages.slice(0, limit);
+      const truncated = !detail && totalEntryPages > returnedPages.length;
+      const meta: EntryPagesMeta = {
+         totalEntryPages,
+         returnedEntryPages: returnedPages.length,
+         truncated,
+         hint: truncated
+            ? `entryPages is truncated to the top ${returnedPages.length} of ${totalEntryPages} pages by entries; the summary and `
+               + 'statusCounts cover ALL pages. Pass detail=true for the full per-page array, or limit=N (1..200) to change the cap.'
+            : 'entryPages contains every entry page for this period.',
+      };
+
+      // summary + statusLegend are ordered BEFORE entryPages in the JSON so a reader sees the
+      // whole-site picture first, then the (bounded) per-page detail.
       return res.status(200).json({
          domain,
          period,
-         entryPages,
          summary,
          statusLegend: ENTRY_PAGE_STATUS_LABELS,
+         entryPages: returnedPages,
+         meta,
          sourcesNote: entryResult.sourcesNote,
          aiReferralNote,
          analyticsError,

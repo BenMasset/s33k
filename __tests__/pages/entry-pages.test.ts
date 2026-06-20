@@ -437,3 +437,107 @@ describe('GET /api/entry-pages honesty + graceful degradation', () => {
       expect(captured.body.statusLegend.working.length).toBeGreaterThan(10);
    });
 });
+
+describe('GET /api/entry-pages summary-first bounding', () => {
+   /** Build N entry pages each with a distinct path and descending entries, all 'opportunity'. */
+   const manyPages = (n: number) => Array.from({ length: n }, (_unused, i) => entryPage({
+      page: `/p${i}`,
+      pathClean: `/p${i}`,
+      entries: n - i,
+      sources: { ...ZERO, direct: n - i },
+   }));
+
+   it('defaults to top-20 entryPages while the summary + statusCounts cover ALL pages', async () => {
+      mockedFindAll.mockResolvedValue([]);
+      mockedGetProvider.mockReturnValue(providerStub({ entry: { pages: manyPages(57) } }));
+
+      const { req, res, captured } = makeReqRes({ domain: 'getmasset.com' });
+      await handler(req, res);
+
+      expect(captured.status).toBe(200);
+      // Default cap is 20 rows.
+      expect(captured.body.entryPages.length).toBe(20);
+      // meta reflects the FULL count and flags the truncation.
+      expect(captured.body.meta.totalEntryPages).toBe(57);
+      expect(captured.body.meta.returnedEntryPages).toBe(20);
+      expect(captured.body.meta.truncated).toBe(true);
+      expect(captured.body.meta.hint).toMatch(/summary/i);
+      // statusCounts sums to the FULL count, not the truncated count.
+      const counts = captured.body.summary.statusCounts;
+      const total = Object.values(counts).reduce((a: number, b) => a + (b as number), 0);
+      expect(total).toBe(57);
+      // The bounded rows are still the highest-entries pages (sorted desc).
+      expect(captured.body.entryPages[0].pathClean).toBe('/p0');
+   });
+
+   it('detail=true returns the full array with truncated false', async () => {
+      mockedFindAll.mockResolvedValue([]);
+      mockedGetProvider.mockReturnValue(providerStub({ entry: { pages: manyPages(57) } }));
+
+      const { req, res, captured } = makeReqRes({ domain: 'getmasset.com', detail: 'true' });
+      await handler(req, res);
+
+      expect(captured.status).toBe(200);
+      expect(captured.body.entryPages.length).toBe(57);
+      expect(captured.body.meta.totalEntryPages).toBe(57);
+      expect(captured.body.meta.returnedEntryPages).toBe(57);
+      expect(captured.body.meta.truncated).toBe(false);
+   });
+
+   it('limit=5 returns 5 rows', async () => {
+      mockedFindAll.mockResolvedValue([]);
+      mockedGetProvider.mockReturnValue(providerStub({ entry: { pages: manyPages(57) } }));
+
+      const { req, res, captured } = makeReqRes({ domain: 'getmasset.com', limit: '5' });
+      await handler(req, res);
+
+      expect(captured.body.entryPages.length).toBe(5);
+      expect(captured.body.meta.truncated).toBe(true);
+   });
+
+   it('limit above 200 clamps to 200', async () => {
+      mockedFindAll.mockResolvedValue([]);
+      mockedGetProvider.mockReturnValue(providerStub({ entry: { pages: manyPages(250) } }));
+
+      const { req, res, captured } = makeReqRes({ domain: 'getmasset.com', limit: '9999' });
+      await handler(req, res);
+
+      expect(captured.body.entryPages.length).toBe(200);
+      expect(captured.body.meta.totalEntryPages).toBe(250);
+      expect(captured.body.meta.truncated).toBe(true);
+   });
+
+   it('does not flag truncation when total pages fit under the cap', async () => {
+      mockedFindAll.mockResolvedValue([]);
+      mockedGetProvider.mockReturnValue(providerStub({ entry: { pages: manyPages(3) } }));
+
+      const { req, res, captured } = makeReqRes({ domain: 'getmasset.com' });
+      await handler(req, res);
+
+      expect(captured.body.entryPages.length).toBe(3);
+      expect(captured.body.meta.truncated).toBe(false);
+      expect(captured.body.meta.returnedEntryPages).toBe(3);
+   });
+
+   it('top-10 summary surfaces AI-landing pages without expanding the full array', async () => {
+      mockedFindAll.mockResolvedValue([]);
+      // 25 pages; the first 12 are AI-landing (ai source share), the rest opportunity.
+      const pages = Array.from({ length: 25 }, (_unused, i) => entryPage({
+         page: `/p${i}`,
+         pathClean: `/p${i}`,
+         entries: 25 - i,
+         sources: i < 12 ? { ...ZERO, ai: 25 - i } : { ...ZERO, direct: 25 - i },
+      }));
+      mockedGetProvider.mockReturnValue(providerStub({ entry: { pages } }));
+
+      const { req, res, captured } = makeReqRes({ domain: 'getmasset.com' });
+      await handler(req, res);
+
+      // aiLandingPages caps at 10 in the summary even though 12 pages qualify.
+      expect(captured.body.summary.aiLandingPages.length).toBe(10);
+      // topLandingPages caps at 10.
+      expect(captured.body.summary.topLandingPages.length).toBe(10);
+      // statusCounts still counts all 12 ai-landing pages.
+      expect(captured.body.summary.statusCounts['ai-landing']).toBe(12);
+   });
+});

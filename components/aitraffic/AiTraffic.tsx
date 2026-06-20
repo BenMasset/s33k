@@ -17,7 +17,6 @@ type ReferralSource = {
 type ByEngineRow = {
    engine: string,
    visitors: number,
-   pageViews: number,
 }
 
 export type AiTrafficData = {
@@ -86,7 +85,6 @@ const AiTraffic = ({ data, isLoading = true }: AiTrafficProps) => {
                      text-gray-600 justify-between items-center font-semibold border-y`}>
                      <span className='flex-1 basis-60 w-auto'>Engine</span>
                      <span className='flex-1 text-center'>Visitors</span>
-                     <span className='flex-1 text-center'>Page Views</span>
                      <span className='flex-1 text-center'>Share</span>
                   </div>
 
@@ -113,10 +111,6 @@ const AiTraffic = ({ data, isLoading = true }: AiTrafficProps) => {
                               <span className='flex-1 text-left lg:text-center'>
                                  <span className='lg:hidden text-gray-400 mr-2'>Visitors:</span>
                                  {row.visitors.toLocaleString()}
-                              </span>
-                              <span className='flex-1 text-left lg:text-center'>
-                                 <span className='lg:hidden text-gray-400 mr-2'>Page Views:</span>
-                                 {row.pageViews > 0 ? row.pageViews.toLocaleString() : 'n/a'}
                               </span>
                               <span className='flex-1 text-left lg:text-center'>
                                  <span className='lg:hidden text-gray-400 mr-2'>Share:</span>

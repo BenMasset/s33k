@@ -28,7 +28,7 @@
 import { cleanPath } from './lodd';
 import { classifyReferrer } from './ai-sources';
 import {
-   SessionAgg, GoalDef, isEngaged, sessionConverted,
+   SessionAgg, GoalDef, isEngaged, sessionConverted, humanBotSplit,
 } from './sessionize';
 import { buildWebVitals, WebVitalRow, WebVitalMetric } from './web-vitals';
 import type { NormalizedPage, ReferralSource, SummaryResult } from './analytics';
@@ -400,7 +400,7 @@ export const buildDashboard = (input: DashboardInput): Dashboard => {
       : null;
 
    // ===== headline: a tiny "state of the site" summary the LLM leads with. ==
-   const humanVisitors = sessions.filter((s) => !s.isBot).length
+   const humanVisitors = humanBotSplit(sessions).human
       || (summary && !errors.summary ? (summary.visitors || 0) : 0);
    // The single best opportunity: a high-traffic page whose best keyword does
    // not rank on page one, or that has no tracked keyword at all.

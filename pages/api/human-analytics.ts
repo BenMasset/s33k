@@ -9,7 +9,8 @@ import S33kEvent from '../../database/models/s33kEvent';
 import type Account from '../../database/models/account';
 import { periodStartMs } from '../../utils/period';
 import {
-   sessionize, applyFilters, parseSegmentFilters, isEngaged, EventLike, SegmentFilters, SessionAgg,
+   sessionize, applyFilters, parseSegmentFilters, isEngaged, humanBotSplit,
+   EventLike, SegmentFilters, SessionAgg,
 } from '../../utils/sessionize';
 
 // GET /api/human-analytics?domain=&period=[&includeBots=true][&<filters>]
@@ -74,11 +75,12 @@ const getHumanAnalytics = async (req: NextApiRequest, res: NextApiResponse<Human
       });
       const allSessions = sessionize(rows.map((r) => r.get({ plain: true }) as EventLike));
 
-      // Bot transparency is computed BEFORE the segment filters, against the humanOnly cut.
-      const botVisitors = allSessions.filter((s) => s.isBot).length;
-      const humanVisitors = allSessions.length - botVisitors;
-      const totalForShare = allSessions.length;
-      const botSharePct = totalForShare > 0 ? Math.round((1000 * botVisitors) / totalForShare) / 10 : 0;
+      // Bot transparency is computed BEFORE the segment filters, against the humanOnly cut. Uses the
+      // shared first-party is_bot split so this number matches human_traffic, start_here, and the
+      // dashboard headline exactly (one source of truth in utils/sessionize.ts).
+      const split = humanBotSplit(allSessions);
+      const botVisitors = split.bot;
+      const { botSharePct } = split;
 
       // Apply the segment filters (humanOnly included). Traffic metrics are pageview-based.
       const sessions: SessionAgg[] = applyFilters(allSessions, filters).filter((s) => s.pageviewCount > 0);

@@ -13,8 +13,8 @@
  *      subsequent analytics reads resolve per-domain automatically (see utils/umami.ts).
  *   5. Return the install snippet + per-platform install guides for the tracking code.
  *
- * Degrades gracefully: if Umami provisioning fails, the domain, keywords, and rankings still
- * come back with umamiWebsiteId = null and a note. The endpoint never 500s the whole onboard
+ * Degrades gracefully: if analytics provisioning fails, the domain, keywords, and rankings still
+ * come back with siteId = null and a note. The endpoint never 500s the whole onboard
  * for an analytics-provisioning failure.
  *
  * Multi-tenant: follows the wired pattern in pages/api/domains.ts and pages/api/scoreboard.ts
@@ -51,7 +51,7 @@ type OnboardResponse = {
    discoveredKeywords?: string[],
    addedKeywords?: KeywordType[],
    rankingsPending?: boolean,
-   umamiWebsiteId?: string | null,
+   siteId?: string | null,
    installSnippet?: string,
    installGuides?: InstallGuides,
    firstRunHint?: FirstRunHint,
@@ -158,16 +158,16 @@ const onboardDomain = async (req: NextApiRequest, res: NextApiResponse<OnboardRe
          refreshAndUpdateKeywords(newKeywords, settings);
       }
 
-      // 4. Provision a per-domain Umami website and stamp the id. Degrade gracefully.
-      let umamiWebsiteId: string | null = null;
+      // 4. Provision a per-domain analytics site and stamp the id. Degrade gracefully.
+      let siteId: string | null = null;
       let note: string | null = null;
       if (domainRow.umami_website_id) {
-         umamiWebsiteId = String(domainRow.umami_website_id);
+         siteId = String(domainRow.umami_website_id);
       } else {
          const provisioned = await createUmamiWebsite(domain);
          if (provisioned.websiteId) {
-            umamiWebsiteId = provisioned.websiteId;
-            await domainRow.update({ umami_website_id: umamiWebsiteId });
+            siteId = provisioned.websiteId;
+            await domainRow.update({ umami_website_id: siteId });
          } else {
             note = `Analytics website was not provisioned: ${provisioned.error || 'unknown error'}. `
                + 'The domain, keywords, and rankings are set up; add analytics later by re-running onboarding once Umami is reachable.';
@@ -176,7 +176,7 @@ const onboardDomain = async (req: NextApiRequest, res: NextApiResponse<OnboardRe
 
       // 5. Build the tracking snippet + per-platform install guides (empty id is allowed,
       //    so the customer still sees the shape even if provisioning was deferred).
-      const installGuides = getInstallGuides(domain, umamiWebsiteId || '');
+      const installGuides = getInstallGuides(domain, siteId || '');
 
       // 6. Hand the user off to the dashboard so they never face a blank slate after setup.
       const firstRunHint: FirstRunHint = {
@@ -193,7 +193,7 @@ const onboardDomain = async (req: NextApiRequest, res: NextApiResponse<OnboardRe
          discoveredKeywords: selected.map((item) => item.keyword),
          addedKeywords,
          rankingsPending: addedKeywords.length > 0,
-         umamiWebsiteId,
+         siteId,
          installSnippet: installGuides.snippet,
          installGuides,
          firstRunHint,

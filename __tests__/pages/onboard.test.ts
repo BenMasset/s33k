@@ -143,7 +143,8 @@ describe('POST /api/onboard happy path', () => {
       expect(payload.rankingsPending).toBe(true);
 
       // Analytics provisioned and stamped onto the Domain row.
-      expect(payload.umamiWebsiteId).toBe('web-new');
+      expect(payload.siteId).toBe('web-new');
+      expect(payload).not.toHaveProperty('umamiWebsiteId');
       expect((row.update as jest.Mock)).toHaveBeenCalledWith({ umami_website_id: 'web-new' });
 
       // Install snippet + guides come back, embedding the new website id.
@@ -163,7 +164,8 @@ describe('POST /api/onboard happy path', () => {
       expect(res.statusCode).toBe(201);
       expect(mockDomain.create).not.toHaveBeenCalled();
       // The already-stamped id is reused; no re-provision call.
-      expect(res.payload.umamiWebsiteId).toBe('existing-web');
+      expect(res.payload.siteId).toBe('existing-web');
+      expect(res.payload).not.toHaveProperty('umamiWebsiteId');
       expect(mockProvision).not.toHaveBeenCalled();
    });
 
@@ -283,7 +285,8 @@ describe('POST /api/onboard graceful degradation', () => {
       expect(res.payload.domain).toBe('noanalytics.com');
       expect(res.payload.rankingsPending).toBe(true);
       // Analytics is null with an explanatory note; install guides still return (empty id).
-      expect(res.payload.umamiWebsiteId).toBeNull();
+      expect(res.payload.siteId).toBeNull();
+      expect(res.payload).not.toHaveProperty('umamiWebsiteId');
       expect(res.payload.note).toMatch(/not provisioned/i);
       expect(res.payload.installGuides.platforms.length).toBeGreaterThan(0);
       expect(res.payload.installSnippet).toContain('data-website-id=""');

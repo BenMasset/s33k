@@ -7,27 +7,29 @@ The code is built, tested, and deployed. What remains is configuration + a smoke
 
 ---
 
-## Current prod state (verified 2026-06-19)
+## Current prod state (verified 2026-06-20)
 
 | Item | State | Note |
 |---|---|---|
 | `MULTI_TENANT` | **`true` (already on)** | The multi-tenant system + the `/api/auth/*` magic-link routes are LIVE right now, not dormant. The legacy `APIKEY` still resolves to admin, so admin/MCP access is unchanged. |
 | `Account.email` migration | **applied** | Boot is fail-loud; the app is Online serving, so the additive `email` column applied cleanly. |
-| `NEXT_PUBLIC_APP_URL` | **set** (`https://s33k-production.up.railway.app`) | Magic-link and invite links are built from this, so they point at the right host. |
-| `RESEND_API_KEY` | **NOT set** | THE blocker. With it unset, `sendInviteEmail` / `sendMagicLinkEmail` skip the send. Invite + magic-link routes still return success (by design, non-leak), but no email is ever delivered, so a user can never complete login. |
-| Railway plan | **Free, at the resource ceiling** | The current single instance is fine. Provisioning anything new (extra replicas, a Redis, etc.) is blocked until you upgrade. |
+| `NEXT_PUBLIC_APP_URL` | **set** (`https://app.s33k.io`) | Magic-link and invite links are built from this, so they point at the right host. |
+| `RESEND_API_KEY` | **SET and WORKING (do not re-debug this)** | Verified 2026-06-20 by the Resend send log: s33k delivered real invite + site-share + send-test emails on 6/18 and 6/19 (e.g. "You have been invited to s33k" -> ben@getmasset.com, "A site (getmasset.com) was shared with you" -> tyler@getmasset.com, both `delivered`). The `railway variables` CLI shows the value column BLANK because it is a reference/shared var (the documented CLI display artifact), NOT because it is unset. The send path is live. |
+| Sending domain | **`invites.s33k.io` verified in Resend, sending enabled** | Default sender `s33k <noreply@invites.s33k.io>` resolves. No `RESEND_FROM_EMAIL` override needed. |
+| Railway plan | **single instance** | The current single instance is fine. Provisioning anything new (extra replicas, a Redis, etc.) is blocked until you upgrade. |
 
-Net: the system is on, but **email is the missing wire.** Set `RESEND_API_KEY` and the loop closes.
+Net: the email loop is CLOSED and proven. Multi-tenant invite/login is wired end to end. The only remaining gate before inviting friends is running the smoke test below once.
 
 ---
 
 ## Pre-flight (do these before inviting a real user)
 
-1. **Set `RESEND_API_KEY`** on the `s33k` Railway service. This is the one hard blocker.
-   `railway variables --set "RESEND_API_KEY=<key>" --service s33k` then redeploy (`railway up`).
-2. **Verify the sending domain in Resend.** The default sender is `s33k <noreply@invites.s33k.io>`.
-   Either verify `invites.s33k.io` in your Resend account, OR set `RESEND_FROM_EMAIL` to an
-   address on a domain you have already verified there. An unverified domain = Resend rejects the send.
+1. ~~**Set `RESEND_API_KEY`**~~ **DONE.** Already set and proven working in prod (see the state table
+   above). Do not re-debug this; the blank `railway variables` value column is a CLI display artifact
+   for reference vars, not an unset key.
+2. ~~**Verify the sending domain in Resend.**~~ **DONE.** `invites.s33k.io` is verified with sending
+   enabled, so the default sender `s33k <noreply@invites.s33k.io>` works. No `RESEND_FROM_EMAIL`
+   override needed.
 3. **Stay on ONE instance.** Do NOT enable horizontal scaling / multiple replicas yet. The rate
    limiters (per-IP and the per-email inbox-bomb cap on `/api/auth/request-link`) are in-process, so
    N replicas means N times the intended ceiling. The per-email cap is the only inbox-flood defense,

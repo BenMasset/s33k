@@ -49,7 +49,6 @@ import * as reportCache from '../../utils/report-cache';
 type AiReferralRow = {
    engine: string,
    visitors: number,
-   pageViews: number,
 }
 
 /** Per-engine summary row. */
@@ -134,12 +133,14 @@ const getAeoReport = async (req: NextApiRequest, res: NextApiResponse<AeoReportR
          referralError = refErr instanceof Error ? refErr.message : String(refErr);
       }
 
+      // Aggregate AI visitors by engine. Per-engine pageviews are NOT surfaced: the Umami
+      // provider cannot return a per-referrer pageview count, so it would always be 0, a
+      // false value (a visitor implies at least one pageview).
       const referralEngineMap = new Map<string, AiReferralRow>();
       aiReferralSources.forEach((s) => {
          const engine = s.engine || s.name || 'Unknown AI';
-         const existing = referralEngineMap.get(engine) || { engine, visitors: 0, pageViews: 0 };
+         const existing = referralEngineMap.get(engine) || { engine, visitors: 0 };
          existing.visitors += Number(s.unique_visitors ?? 0);
-         existing.pageViews += Number(s.page_views ?? 0);
          referralEngineMap.set(engine, existing);
       });
       const referralByEngine = Array.from(referralEngineMap.values()).sort((a, b) => b.visitors - a.visitors);

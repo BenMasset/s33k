@@ -8,7 +8,6 @@ import { getAnalyticsProvider, ReferralSource } from '../../utils/analytics';
 type ByEngineRow = {
    engine: string,
    visitors: number,
-   pageViews: number,
 }
 
 type AiReferralsResponse = {
@@ -54,19 +53,19 @@ const getAiReferrals = async (req: NextApiRequest, res: NextApiResponse<AiReferr
 
       // Visitor count per source, used for AI share and per-engine totals.
       const visitorsOf = (s: ReferralSource): number => Number(s.unique_visitors ?? 0);
-      const pageViewsOf = (s: ReferralSource): number => Number(s.page_views ?? 0);
 
       const aiSources = sources
          .filter((s) => s.isAI)
          .sort((a, b) => visitorsOf(b) - visitorsOf(a));
 
-      // Aggregate AI visitors and page views by normalized engine label.
+      // Aggregate AI visitors by normalized engine label. Per-engine pageviews are NOT
+      // surfaced: the Umami provider cannot return a per-referrer pageview count, so it
+      // would always be 0, a false value (a visitor implies at least one pageview).
       const engineMap = new Map<string, ByEngineRow>();
       aiSources.forEach((s) => {
          const engine = s.engine || s.name || 'Unknown AI';
-         const existing = engineMap.get(engine) || { engine, visitors: 0, pageViews: 0 };
+         const existing = engineMap.get(engine) || { engine, visitors: 0 };
          existing.visitors += visitorsOf(s);
-         existing.pageViews += pageViewsOf(s);
          engineMap.set(engine, existing);
       });
       const byEngine = Array.from(engineMap.values()).sort((a, b) => b.visitors - a.visitors);

@@ -124,7 +124,10 @@ describe('aeo_report: aiReferrals section', () => {
       const { byEngine, totals } = captured.body.aiReferrals;
       // Non-AI google.com is excluded from byEngine but counted in the denominator.
       expect(byEngine.map((e: any) => e.engine)).toEqual(['ChatGPT', 'Perplexity']);
-      expect(byEngine[0]).toEqual({ engine: 'ChatGPT', visitors: 9, pageViews: 11 });
+      // pageViews is intentionally NOT surfaced: Umami cannot return a per-referrer
+      // pageview count, so it would always be 0, a false value.
+      expect(byEngine[0]).toEqual({ engine: 'ChatGPT', visitors: 9 });
+      expect(byEngine[0]).not.toHaveProperty('pageViews');
       expect(totals.aiVisitors).toBe(12);
       expect(totals.allReferredVisitors).toBe(20);
       expect(totals.aiSharePct).toBe(60);

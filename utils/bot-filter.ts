@@ -33,6 +33,7 @@
  */
 
 import type { AnalyticsProvider } from './analytics';
+import { humanBotSplit, SessionAgg } from './sessionize';
 
 /**
  * Bounce threshold (percent). At or above this, the segment is "all bounce".
@@ -194,49 +195,93 @@ export type HumanTrafficEstimate = {
    estVisitors: number,
    estHumanVisitors: number,
    estBotVisitors: number,
+   /**
+    * Bot share percent. ONLY meaningful when botEstimationAvailable is true. In the honest degraded
+    * shape it is 0 AND botEstimationAvailable is false AND estVisitors is 0, so it never reads as a
+    * real "0% bots". Kept a number (not null) so existing numeric consumers stay type-clean; the
+    * botEstimationAvailable flag is the authoritative "did we actually compute a split?" signal.
+    */
    botSharePct: number,
+   /**
+    * True when a real human-vs-bot split was computed (first-party is_bot, or the behavioral fallback).
+    * False in the degraded shape, where estBotVisitors/botSharePct are 0 because we DECLINED to guess,
+    * not because zero bots were found. Consumers must not read 0 bots as "no bots" when this is false.
+    */
+   botEstimationAvailable: boolean,
    method: string,
    error: string | null,
+};
+
+/** Method string for the authoritative first-party split. No provider/vendor name. */
+const FIRST_PARTY_METHOD = 'First-party tracking: each session\'s source IP is classified as datacenter-or-not at ingest '
+   + '(the is_bot signal a JavaScript pageview tracker cannot see), so JavaScript-executing cloud scrapers are filtered '
+   + 'instead of counted. Exact for the first-party sessions it has, not a heuristic over provider-reported metrics.';
+
+/** Method string for the behavioral fallback (used only when a provider exposes page-grain bounce). */
+const BEHAVIORAL_METHOD = `Behavioral estimate from the active analytics provider: bounce>=${BOUNCE_MIN}% AND `
+   + `avgDuration<${DURATION_MAX}s over page rows, with a known-human referrer floor (search/social/AI/email). `
+   + 'Estimate, not exact: separates likely humans from likely bots by behavior, not per-session.';
+
+/** Method string for the honest degraded shape: no signal at all, so we decline to guess. */
+const DEGRADED_METHOD = 'No first-party sessions yet and the active analytics provider exposes no page-level bounce, '
+   + 'so a human-vs-bot split cannot be computed. Install the s33k.js tracking script so first-party IP-classified '
+   + 'sessions flow in. Bot numbers are deliberately omitted rather than guessed.';
+
+/**
+ * Build the human-vs-bot estimate from the FIRST-PARTY is_bot tally (the authoritative path).
+ * Shares the single source of truth in utils/sessionize.ts (humanBotSplit), so this matches
+ * human_analytics, start_here, and the dashboard headline exactly. Never throws.
+ *
+ * @param {SessionAgg[]} sessions - Sessionized first-party sessions for the domain+window.
+ * @returns {HumanTrafficEstimate}
+ */
+export const firstPartyHumanTraffic = (sessions: SessionAgg[]): HumanTrafficEstimate => {
+   const split = humanBotSplit(sessions);
+   return {
+      estVisitors: split.total,
+      estHumanVisitors: split.human,
+      estBotVisitors: split.bot,
+      botSharePct: split.botSharePct,
+      botEstimationAvailable: true,
+      method: FIRST_PARTY_METHOD,
+      error: null,
+   };
 };
 
 /**
  * Build a human-vs-bot estimate for a domain over a window.
  *
- * Why pages, not countries: the Lodd country breakdown does NOT expose
- * bounce_rate / avg_duration (only visitor counts), so the behavioral heuristic
- * has nothing to act on at the country grain. The page breakdown DOES carry
- * bounce_rate and avg_duration, so the bot signal is applied there. Referral
- * sources supply the known-human floor (search / social / AI / email visitors
- * are never counted as bots). The scaling step below then projects the page-row
- * bot share onto the site-wide unique-visitor total from the summary.
+ * Source of truth, in order:
+ *   1. FIRST-PARTY is_bot split. When sessionized first-party sessions are supplied (and non-empty),
+ *      this is authoritative: the IP-classified is_bot tally, identical to human_analytics / start_here
+ *      / the dashboard headline. No heuristic, no fabricated 0-bots.
+ *   2. BEHAVIORAL FALLBACK. Only for providers that actually expose page-grain bounce (e.g. Lodd, where
+ *      page rows carry a non-null bounce_rate). The Umami provider returns null bounce at page grain, so
+ *      this path is correctly SKIPPED for it (the old bug was running this path anyway and short-circuiting
+ *      every row to "human", reporting 0 bots / 100% human).
+ *   3. HONEST DEGRADED SHAPE. When neither signal exists, return botEstimationAvailable false (with
+ *      estVisitors/estBotVisitors/botSharePct all 0) rather than inventing a real "0 bots / 100% human".
+ *      estBotVisitors 0 here means "declined to guess", not "no bots found"; the flag says which it is,
+ *      and estVisitors 0 keeps existing estVisitors-gated consumers (briefing, insights) from printing it.
  *
- * The estimate is computed as:
- *   1. raw site total visitors  = summary.visitors.
- *   2. page-level bot share      = splitHumanBot(page rows) over the behavioral
- *                                  rows (each page row carries bounce/duration).
- *   3. known-human floor         = unique visitors from referral sources tagged
- *                                  AI or matching a human referrer. The bot
- *                                  count is capped so it can never exceed
- *                                  (total - human floor).
- *   4. estBotVisitors            = round(rawVisitors * pageBotShare), capped by
- *                                  the human floor; estHumanVisitors is the rest.
- *
- * Never throws: provider errors are surfaced in the returned `error` field and
- * the estimate degrades to all-human (botSharePct 0) on missing data.
+ * Never throws: provider errors are surfaced in `error`; missing data degrades honestly.
  *
  * @param {AnalyticsProvider} provider - The active analytics provider.
  * @param {string} domain - The site domain, e.g. "getmasset.com".
  * @param {string} [period] - Reporting window hint, e.g. "30d".
+ * @param {SessionAgg[]} [firstPartySessions] - Sessionized first-party sessions; the authoritative split.
  * @returns {Promise<HumanTrafficEstimate>}
  */
 export const estimateHumanTraffic = async (
    provider: AnalyticsProvider,
    domain: string,
    period = '30d',
+   firstPartySessions?: SessionAgg[],
 ): Promise<HumanTrafficEstimate> => {
-   const method = `bounce>=${BOUNCE_MIN}% AND avgDuration<${DURATION_MAX}s over page rows, `
-      + 'with a known-human referrer floor (search/social/AI/email). '
-      + 'Estimate, not exact: separates likely humans from likely bots by behavior, not per-session.';
+   // Path 1: first-party is_bot split (authoritative, one source of truth with the other views).
+   if (Array.isArray(firstPartySessions) && firstPartySessions.length > 0) {
+      return firstPartyHumanTraffic(firstPartySessions);
+   }
 
    try {
       const [summary, traffic, referrals] = await Promise.all([
@@ -248,8 +293,29 @@ export const estimateHumanTraffic = async (
       const errors = [summary.error, traffic.error, referrals.error].filter(Boolean) as string[];
       const error = errors.length ? errors.join('; ') : null;
 
-      // Behavioral split over page rows (these carry bounce_rate / avg_duration).
-      const pageRows: BotRow[] = (traffic.pages || []).map((p) => ({
+      // Does the provider actually expose page-grain bounce? Umami returns null bounce at page grain,
+      // so the behavioral heuristic has nothing to act on and must NOT run (it would fabricate 0 bots).
+      const pages = traffic.pages || [];
+      const hasPageBounce = pages.some((p) => typeof p.bounce_rate === 'number' && Number.isFinite(p.bounce_rate));
+
+      if (!hasPageBounce) {
+         // Path 3: no first-party sessions AND no provider bounce. Decline to guess, honestly.
+         // estVisitors is 0 here (not summary.visitors): a split could not be computed, and reporting a
+         // visitor total beside botEstimationAvailable:false would invite consumers to imply "0 bots of N".
+         // Downstream callers gate their bot lines on estVisitors > 0, so 0 cleanly omits the caveat.
+         return {
+            estVisitors: 0,
+            estHumanVisitors: 0,
+            estBotVisitors: 0,
+            botSharePct: 0,
+            botEstimationAvailable: false,
+            method: DEGRADED_METHOD,
+            error,
+         };
+      }
+
+      // Path 2: behavioral fallback over page rows that DO carry bounce_rate / avg_duration.
+      const pageRows: BotRow[] = pages.map((p) => ({
          name: p.pathClean || p.url,
          unique_visitors: typeof p.unique_visitors === 'number' ? p.unique_visitors : 0,
          bounce_rate: typeof p.bounce_rate === 'number' ? p.bounce_rate : null,
@@ -279,7 +345,8 @@ export const estimateHumanTraffic = async (
          estHumanVisitors,
          estBotVisitors,
          botSharePct,
-         method,
+         botEstimationAvailable: true,
+         method: BEHAVIORAL_METHOD,
          error,
       };
    } catch (err) {
@@ -289,7 +356,8 @@ export const estimateHumanTraffic = async (
          estHumanVisitors: 0,
          estBotVisitors: 0,
          botSharePct: 0,
-         method,
+         botEstimationAvailable: false,
+         method: DEGRADED_METHOD,
          error: `Error estimating human traffic: ${message}`,
       };
    }

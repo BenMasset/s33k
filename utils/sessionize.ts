@@ -175,6 +175,34 @@ export const applyFilters = (sessions: SessionAgg[], f: SegmentFilters): Session
    return true;
 });
 
+/** The first-party human-vs-bot split of a set of sessions. */
+export type HumanBotSessionSplit = {
+   human: number, // session count whose is_bot is false
+   bot: number, // session count whose is_bot is true
+   total: number, // human + bot
+   botSharePct: number, // round((100 * bot / total), 1); 0 when total is 0
+};
+
+/**
+ * Split sessionized data into human vs bot by the FIRST-PARTY is_bot tally, the one true bot signal.
+ * Each session's is_bot comes from classifying the source IP as datacenter-or-not at ingest (the
+ * signal a JS pageview tracker cannot see), so this is exact for the sessions it has, not a heuristic
+ * over provider-reported bounce/duration. This is the SINGLE source of truth for the human number, so
+ * human_traffic, human_analytics, start_here, and the dashboard headline all agree. Never throws: a
+ * non-array input yields an all-zero split.
+ *
+ * @param {SessionAgg[]} sessions - Sessionized first-party sessions.
+ * @returns {HumanBotSessionSplit}
+ */
+export const humanBotSplit = (sessions: SessionAgg[]): HumanBotSessionSplit => {
+   const safe = Array.isArray(sessions) ? sessions : [];
+   const bot = safe.reduce((sum, s) => sum + (s && s.isBot ? 1 : 0), 0);
+   const total = safe.length;
+   const human = total - bot;
+   const botSharePct = total > 0 ? Math.round((1000 * bot) / total) / 10 : 0;
+   return { human, bot, total, botSharePct };
+};
+
 /**
  * Did a session complete a goal? page_reached matches a viewed path (prefix by default, or exact);
  * event matches a fired event type, optionally constrained to a page (prefix).

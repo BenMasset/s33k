@@ -67,7 +67,7 @@ export const KNOWLEDGE_RESOURCES: { uri: string; topic: string; name: string; de
       uri: 'knowledge://reasoning',
       topic: 'reasoning',
       name: 'Design reasoning',
-      description: 'Why s33k is built the way it is: MCP-first control, Serper for rankings, cookieless Umami analytics, '
+      description: 'Why s33k is built the way it is: MCP-first control, Serper for rankings, cookieless first-party analytics,'
          + 'the caps/invite model, no-model-training, open source.',
    },
    {
@@ -359,7 +359,7 @@ server.registerTool(
    {
       title: 'Page scoreboard',
       description:
-         'Join per-page traffic with tracked keywords for a domain, the core SEO-plus-analytics view. Use this to see which pages earn traffic, what each ranks for, and where the gaps are. Returns a per-page scoreboard (traffic plus the keywords targeting each page, sorted by page views), pages that have traffic but no tracked keyword (a content-gap signal), and keywords whose target page matched no analytics page. Each page row also carries aiReferralVisitors (AI-engine-referred visitors that landed on that page); this is EXACT from first-party sessions when the s33k.js tracking script is installed, and falls back to a provider landing_path or 0 (aiReferralNote explains) otherwise. OPTIONAL goal parameter: pass a goal name or goalId to add per-page conversions (goal conversions whose first-party session LANDED on that page) and conversionRate (over first-party sessions that landed there, percent) to every page row; conversionsNote explains the denominators and conversionRate is null on a page with no first-party landing sessions. Omit goal and the scoreboard is unchanged (no conversion fields). Per-page bounce_rate and avg_duration may be null when the provider (e.g. Umami) cannot report them at page grain; metricsNote explains the null.',
+         'Join per-page traffic with tracked keywords for a domain, the core SEO-plus-analytics view. Use this to see which pages earn traffic, what each ranks for, and where the gaps are. Returns a per-page scoreboard (traffic plus the keywords targeting each page, sorted by page views), pages that have traffic but no tracked keyword (a content-gap signal), and keywords whose target page matched no analytics page. Each page row also carries aiReferralVisitors (AI-engine-referred visitors that landed on that page); this is EXACT from first-party sessions when the s33k.js tracking script is installed, and falls back to a provider landing_path or 0 (aiReferralNote explains) otherwise. OPTIONAL goal parameter: pass a goal name or goalId to add per-page conversions (goal conversions whose first-party session LANDED on that page) and conversionRate (over first-party sessions that landed there, percent) to every page row; conversionsNote explains the denominators and conversionRate is null on a page with no first-party landing sessions. Omit goal and the scoreboard is unchanged (no conversion fields). Per-page bounce_rate and avg_duration may be null when s33k\'s analytics engine cannot report them at page grain; metricsNote explains the null.',
       inputSchema: {
          domain: z.string().describe('The domain to build the scoreboard for, e.g. "getmasset.com".'),
          period: z
@@ -410,21 +410,34 @@ server.registerTool(
          + 'AI-LANDING COUNTS ARE EXACT: per-page aiReferrals is the exact count of AI-search-first sessions that landed on each page, computed from '
          + 's33k\'s own first-party sessions (install the s33k.js tracking script); aiReferralNote clears when this exact data is present, and only '
          + 'falls back to a provider landing_path or 0 when there are no first-party AI sessions yet. The per-page entry counts and tracked ranks are '
-         + 'also exact. HONEST DATA NOTE: the four-way source SPLIT per page is still APPROXIMATED from the site-wide referrer mix when the provider '
-         + '(e.g. Umami) only reports referrers site-wide (sourcesNote flags this). Complements page_scoreboard (all pages) by focusing only on entry '
-         + 'pages. Never queries an LLM; degrades gracefully and never fails on a missing sub-signal.',
+         + 'also exact. HONEST DATA NOTE: the four-way source SPLIT per page is still APPROXIMATED from the site-wide referrer mix when s33k\'s analytics engine '
+         + 'only reports referrers site-wide (sourcesNote flags this). RESPONSE IS SUMMARY-FIRST AND BOUNDED BY DEFAULT: the summary '
+         + '(topLandingPages, biggestRankingNotLandingGap, aiLandingPages, statusCounts) covers ALL pages, while the entryPages array returns only the '
+         + 'top 20 by entries (see meta.truncated / meta.totalEntryPages). Pass detail=true for every row, or limit=N (1..200) to change the cap. '
+         + 'Complements page_scoreboard (all pages) by focusing only on entry pages. Never queries an LLM; degrades gracefully and never fails on a '
+         + 'missing sub-signal.',
       inputSchema: {
          domain: z.string().describe('The domain to analyze entry pages for, e.g. "getmasset.com".'),
          period: z
             .string()
             .optional()
             .describe('Reporting window for analytics, e.g. "30d", "7d". Defaults to "30d".'),
+         limit: z
+            .number()
+            .optional()
+            .describe('Max entry pages returned in the entryPages array, top-N by entries. Clamps to 1..200. Defaults to 20. The summary always covers all pages.'),
+         detail: z
+            .boolean()
+            .optional()
+            .describe('Set true to return the FULL per-page entryPages array (can be thousands of rows on a real site). Default false returns the bounded top-N.'),
       },
    },
-   async ({ domain, period }) => {
+   async ({ domain, period, limit, detail }) => {
       try {
          const query: Record<string, string> = { domain };
          if (period) { query.period = period; }
+         if (typeof limit === 'number') { query.limit = String(limit); }
+         if (detail) { query.detail = 'true'; }
          const data = await s33kFetch('/api/entry-pages', { query });
          return jsonResult(data);
       } catch (err) {
@@ -441,7 +454,7 @@ server.registerTool(
    {
       title: 'AI referrals',
       description:
-         'Report which AI engines (ChatGPT, Perplexity, Gemini, Claude, Copilot, and more) are sending real visitors to a domain. Use this to measure AEO outcomes: actual traffic that AI answer engines drove. It reads analytics REFERRAL data and never queries an LLM. Returns a per-engine breakdown (visitors and page views, sorted by visitors) plus totals: AI visitors, all referred visitors, and the AI share of referred traffic.',
+         'Report which AI engines (ChatGPT, Perplexity, Gemini, Claude, Copilot, and more) are sending real visitors to a domain. Use this to measure AEO outcomes: actual traffic that AI answer engines drove. It reads analytics REFERRAL data and never queries an LLM. Returns a per-engine breakdown (visitors, sorted by visitors) plus totals: AI visitors, all referred visitors, and the AI share of referred traffic.',
       inputSchema: {
          domain: z.string().describe('The domain to report AI referrals for, e.g. "getmasset.com".'),
          period: z
@@ -540,7 +553,7 @@ server.registerTool(
    {
       title: 'Human vs bot traffic estimate',
       description:
-         'Estimate how much of a domain\'s traffic is likely humans versus likely bots. Use this to sanity-check the other traffic numbers, because most analytics (including Lodd) overcount automated traffic: JavaScript-executing scrapers run the tracking script and get counted as real visitors (for example heavy Hong Kong, Singapore, and China datacenter traffic at roughly 99 to 100 percent bounce with near-zero time on page). It applies a behavior heuristic (bounce at or above 99 percent AND average duration under 15 seconds across page rows) with a known-human referrer floor (search, social, AI, and email visitors are never flagged as bots). Returns estVisitors, estHumanVisitors, estBotVisitors, botSharePct, and method. This is an ESTIMATE, not an exact count: it separates likely humans from likely bots by aggregate behavior, not per session.',
+         'Report how much of a domain\'s traffic is humans versus bots. Use this to sanity-check the other traffic numbers, because JavaScript pageview trackers count JavaScript-executing cloud scrapers as real visitors (for example heavy Hong Kong, Singapore, and China datacenter traffic at near-100 percent bounce). The split comes from FIRST-PARTY tracking: each session\'s source IP is classified as datacenter-or-not at ingest (the is_bot signal a JS pageview tracker cannot see), so cloud scrapers are filtered instead of counted. This makes the number EXACT for the first-party sessions it has, and identical to human_analytics, start_here, and the dashboard headline (one source of truth). Returns estVisitors, estHumanVisitors, estBotVisitors, botSharePct, botEstimationAvailable, and method. If no first-party sessions have arrived yet (the s33k.js script is not installed) and the active analytics provider exposes no page-level bounce, botEstimationAvailable is false and the bot split is omitted rather than guessed: install s33k.js to populate it.',
       inputSchema: {
          domain: z.string().describe('The domain to estimate human vs bot traffic for, e.g. "getmasset.com".'),
          period: z
@@ -571,12 +584,12 @@ server.registerTool(
       description:
          'Human-only traffic analytics computed from s33k\'s OWN first-party pageview events, with '
          + 'datacenter/bot traffic EXCLUDED by default. This does the one thing a JavaScript pageview '
-         + 'tracker (Umami, GA) cannot: it classifies each pageview\'s source IP as datacenter/hosting '
+         + 'tracker cannot: it classifies each pageview\'s source IP as datacenter/hosting '
          + 'or not at ingest (the is_bot flag), so JavaScript-executing scrapers running in the cloud '
          + 'are filtered out instead of counted as visitors. Returns visitors, pageviews, '
          + 'pagesPerSession, bounceRatePct, entryPages (each session\'s first pageview with share), and '
          + 'exitPages WITH exitRatePct (each session\'s last pageview; the exit-rate metric the '
-         + 'Umami-backed summary cannot produce), plus botVisitorsFiltered and botSharePct for '
+         + 'standard analytics summary cannot produce), plus botVisitorsFiltered and botSharePct for '
          + 'transparency. Requires the s33k.js tracking script to be installed on the site (pageviews '
          + 'flow into /api/collect). Pass includeBots=true to see the raw with-bots numbers for comparison.',
       inputSchema: {
@@ -1657,7 +1670,7 @@ server.registerTool(
    {
       title: 'Traffic breakdown',
       description:
-         'Break a domain\'s traffic down by a single dimension. Use this to answer where visitors come from or what they use. The country, device, browser, and os dimensions work on every provider; region, city, language, and screen are Umami-only extras (Lodd returns a "Not supported by Lodd" error for them). Each row has a name, page views, and unique visitors.',
+         'Break a domain\'s traffic down by a single dimension. Use this to answer where visitors come from or what they use. The country, device, browser, and os dimensions are always available; region, city, language, and screen are extended dimensions that may not be available on every s33k instance. Each row has a name, page views, and unique visitors.',
       inputSchema: {
          domain: z.string().describe('The domain to break down, e.g. "getmasset.com".'),
          dimension: z
@@ -1752,7 +1765,7 @@ server.registerTool(
    {
       title: 'Engagement tiers',
       description:
-         'Break a domain\'s sessions into engagement tiers (such as bounced, browsed, and engaged) over a window. Use this to judge traffic quality, not just volume: a high bounced share signals low-quality or bot traffic. Each tier has a label, session count, percentage of all sessions, and (where available) average duration and average pages per session. Lodd serves these directly; Umami derives them from stats.',
+         'Break a domain\'s sessions into engagement tiers (such as bounced, browsed, and engaged) over a window. Use this to judge traffic quality, not just volume: a high bounced share signals low-quality or bot traffic. Each tier has a label, session count, percentage of all sessions, and (where available) average duration and average pages per session.',
       inputSchema: {
          domain: z.string().describe('The domain to measure engagement for, e.g. "getmasset.com".'),
          period: z
@@ -2327,7 +2340,7 @@ registerAdminTool(
    {
       title: 'Onboard a domain',
       description:
-         'Give me a domain and I set up everything for it in one call, the fastest way to go from nothing to live data. s33k will: create the domain, crawl a few of its pages and heuristically discover candidate target keywords (no LLM needed), add up to 20 of them and immediately queue background Google rank scrapes (rankings appear shortly, so rankingsPending comes back true), provision a dedicated analytics website for the domain, and return the tracking snippet plus copy-paste install guides for common platforms (raw HTML, Google Tag Manager, WordPress, Webflow, Shopify, Squarespace, Wix, Next.js/React). Pass a bare domain like "getmasset.com", not a full URL. Use this as the first thing you do for a brand new site. Degrades gracefully: if analytics provisioning is unavailable, umamiWebsiteId comes back null with a note while the domain, keywords, and rankings are still set up. Returns { domain, discoveredKeywords, addedKeywords, rankingsPending, umamiWebsiteId, installSnippet, installGuides, note }.',
+         'Give me a domain and I set up everything for it in one call, the fastest way to go from nothing to live data. s33k will: create the domain, crawl a few of its pages and heuristically discover candidate target keywords (no LLM needed), add up to 20 of them and immediately queue background Google rank scrapes (rankings appear shortly, so rankingsPending comes back true), provision a dedicated analytics website for the domain, and return the tracking snippet plus copy-paste install guides for common platforms (raw HTML, Google Tag Manager, WordPress, Webflow, Shopify, Squarespace, Wix, Next.js/React). Pass a bare domain like "getmasset.com", not a full URL. Use this as the first thing you do for a brand new site. Degrades gracefully: if analytics provisioning is unavailable, siteId comes back null with a note while the domain, keywords, and rankings are still set up. Returns { domain, discoveredKeywords, addedKeywords, rankingsPending, siteId, installSnippet, installGuides, note }.',
       inputSchema: {
          domain: z.string().describe('The bare domain to onboard, e.g. "getmasset.com". No protocol, no path.'),
       },
@@ -2350,7 +2363,7 @@ server.registerTool(
    {
       title: 'Install instructions',
       description:
-         'Show how to add the s33k analytics tracking code to a site, including the exact snippet and step-by-step instructions for the user\'s platform. Use this when someone asks "how do I add the tracking code on <platform>" (WordPress, Webflow, Shopify, Squarespace, Wix, Google Tag Manager, Next.js/React, or raw HTML), or any time after onboarding when they need the snippet again. The domain must already be onboarded. Returns { domain, umamiWebsiteId, installSnippet, installGuides } where installGuides.platforms is a list of { platform, steps }. Read the steps for the platform the user named and walk them through it.',
+         'Show how to add the s33k analytics tracking code to a site, including the exact snippet and step-by-step instructions for the user\'s platform. Use this when someone asks "how do I add the tracking code on <platform>" (WordPress, Webflow, Shopify, Squarespace, Wix, Google Tag Manager, Next.js/React, or raw HTML), or any time after onboarding when they need the snippet again. The domain must already be onboarded. Returns { domain, siteId, installSnippet, installGuides } where installGuides.platforms is a list of { platform, steps }. Read the steps for the platform the user named and walk them through it.',
       inputSchema: {
          domain: z.string().describe('The already-onboarded domain, e.g. "getmasset.com".'),
       },

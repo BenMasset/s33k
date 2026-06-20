@@ -26,6 +26,13 @@ jest.mock('sequelize', () => ({ __esModule: true, Op: { in: Symbol('in'), gte: S
 jest.mock('../../database/models/domain', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
 
+// The route now reads first-party sessions before estimating, so stub the event model + sessionizer so
+// the proceed path stays pure (no DB, no real sequelize model wiring). The ownership guard still runs
+// against the mocked Domain model above.
+jest.mock('../../database/models/s33kEvent', () => ({ __esModule: true, default: { findAll: jest.fn(async () => []) } }));
+jest.mock('../../utils/period', () => ({ __esModule: true, periodStartMs: jest.fn(() => 0) }));
+jest.mock('../../utils/sessionize', () => ({ __esModule: true, sessionize: jest.fn(() => []) }));
+
 // Downstream analytics sources for the human-traffic shape, stubbed so a proceed path is pure.
 jest.mock('../../utils/analytics', () => ({ __esModule: true, getAnalyticsProvider: jest.fn(() => ({})) }));
 jest.mock('../../utils/bot-filter', () => ({
