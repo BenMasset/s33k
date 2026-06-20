@@ -1,13 +1,19 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { Op } from 'sequelize';
 import { ensureSynced } from '../../database/database';
 import Domain from '../../database/models/domain';
+import Goal from '../../database/models/goal';
 import Keyword from '../../database/models/keyword';
+import S33kEvent from '../../database/models/s33kEvent';
 import authorize from '../../utils/authorize';
 import resolveDomainAccess from '../../utils/domain-access';
 import { scopeWhere } from '../../utils/scope';
 import type Account from '../../database/models/account';
 import parseKeywords from '../../utils/parseKeywords';
 import { cleanPath } from '../../utils/lodd';
+import { periodStartMs } from '../../utils/period';
+import { sessionize, sessionConverted, EventLike, GoalDef } from '../../utils/sessionize';
+import { aiLandingFromSessions } from '../../utils/ai-landing';
 import { getAnalyticsProvider, NormalizedPage, ReferralSource } from '../../utils/analytics';
 import { aggregateTrafficPages } from '../../utils/aggregate-traffic-pages';
 
@@ -29,6 +35,10 @@ type ScoreboardPage = {
    metricsNote?: string,
    aiReferralVisitors: number,
    keywords: ScoreboardKeyword[],
+   // Present only when a goal is supplied: conversions = goal conversions whose session LANDED on
+   // this page, conversionRate = conversions / first-party sessions that landed here (percent).
+   conversions?: number,
+   conversionRate?: number | null,
 }
 
 type ContentGapPage = {
@@ -41,6 +51,8 @@ type ContentGapPage = {
    avg_duration?: number | null,
    metricsNote?: string,
    aiReferralVisitors: number,
+   conversions?: number,
+   conversionRate?: number | null,
 }
 
 type UnmatchedKeyword = ScoreboardKeyword & { target_page: string }
@@ -48,12 +60,14 @@ type UnmatchedKeyword = ScoreboardKeyword & { target_page: string }
 type ScoreboardResponse = {
    domain?: string,
    period?: string,
+   goal?: { id: number, name: string } | null,
    scoreboard?: ScoreboardPage[],
    pagesWithTrafficNoKeywords?: ContentGapPage[],
    keywordsWithNoMatchingPage?: UnmatchedKeyword[],
    analyticsError?: string | null,
    referralError?: string | null,
    aiReferralNote?: string | null,
+   conversionsNote?: string | null,
    loddError?: string | null,
    error?: string | null,
 }
@@ -84,7 +98,38 @@ const getScoreboard = async (req: NextApiRequest, res: NextApiResponse<Scoreboar
       return res.status(403).json({ error: 'Domain not found for this account' });
    }
 
+   // OPTIONAL goal: when supplied, add per-page conversions + conversionRate. Resolved exactly like
+   // entry-page-report.ts (scoped by domain + account, goalId or goal name). A bad goal returns a
+   // clear 400/404; the resolution lives INSIDE the try so a transient Goal.findOne throw degrades to
+   // the controlled error, never a 500 (the early 400/404 returns work fine inside a try). Omit the
+   // goal and the scoreboard is byte-for-byte unchanged (no conversion fields).
+   const goalIdRaw = typeof req.query.goalId === 'string' ? req.query.goalId.trim() : '';
+   const goalNameRaw = typeof req.query.goal === 'string' ? req.query.goal.trim() : '';
+
    try {
+      let goal: GoalDef | null = null;
+      let goalMeta: { id: number, name: string } | null = null;
+      if (goalIdRaw || goalNameRaw) {
+         const goalWhere: Record<string, unknown> = { domain, ...scopeWhere(account) };
+         if (goalIdRaw) {
+            const gid = parseInt(goalIdRaw, 10);
+            if (!Number.isFinite(gid)) { return res.status(400).json({ error: 'goalId must be a number.' }); }
+            goalWhere.ID = gid;
+         } else {
+            goalWhere.name = goalNameRaw;
+         }
+         const goalRow = await Goal.findOne({ where: goalWhere });
+         if (!goalRow) { return res.status(404).json({ error: 'Goal not found. Create it first with create_goal, or list goals.' }); }
+         const g = goalRow.get({ plain: true }) as Record<string, unknown>;
+         goal = {
+            kind: g.kind === 'event' ? 'event' : 'page_reached',
+            matchValue: String(g.match_value),
+            matchPage: (g.match_page as string) || null,
+            matchMode: g.match_mode === 'exact' ? 'exact' : 'prefix',
+         };
+         goalMeta = { id: g.ID as number, name: String(g.name) };
+      }
+
       // 1. Load this domain's keywords from the DB (same path as keywords.ts getKeywords).
       const allKeywords: Keyword[] = await Keyword.findAll({ where: { domain, ...scopeWhere(account) } });
       const keywords: KeywordType[] = parseKeywords(allKeywords.map((e) => e.get({ plain: true })));
@@ -98,34 +143,90 @@ const getScoreboard = async (req: NextApiRequest, res: NextApiResponse<Scoreboar
       const { pages: rawTrafficPages, error: analyticsError } = await provider.getPageTraffic(domain, period);
       const trafficPages = aggregateTrafficPages(rawTrafficPages);
 
-      // 2b. Fetch AI-referral sources so we can attribute AI-referred visitors to
-      // a landing page when the provider exposes a per-landing-page detail. Most
-      // providers report referrals only site-wide (no landing_path), in which
-      // case per-page AI attribution is unavailable and we surface 0 with a note
-      // rather than guessing. Never let a referral failure break the scoreboard.
+      // 2b. Per-page AI-search landing counts + (when a goal is given) per-page conversions, both
+      // from FIRST-PARTY sessions: sessionize this domain's scoped s33k_event rows once and reuse
+      // them. AI counts: take 'ai'-channel sessions grouped by landing page (EXACT, no provider
+      // landing_path needed). Conversions: count goal conversions whose session landed on each page,
+      // and sessions landed there (the denominator). A failure here NEVER breaks the scoreboard.
       let aiVisitorsByLanding = new Map<string, number>();
+      let aiLandingExact = false;
+      const goalConversionsByLanding = new Map<string, number>();
+      const sessionsByLanding = new Map<string, number>();
+      try {
+         const startISO = new Date(periodStartMs(period, Date.now())).toJSON();
+         const eventRows: S33kEvent[] = await S33kEvent.findAll({
+            where: { domain, created: { [Op.gte]: startISO }, ...scopeWhere(account) },
+            attributes: ['id', 'session', 'source', 'is_bot', 'device', 'country', 'page', 'type', 'created'],
+            order: [['created', 'ASC']],
+         });
+         const plainRows = eventRows.map((r) => r.get({ plain: true }) as EventLike);
+         const { byLanding, totalAiSessions } = aiLandingFromSessions(plainRows);
+         if (totalAiSessions > 0) {
+            aiVisitorsByLanding = byLanding;
+            aiLandingExact = true;
+         }
+         if (goal) {
+            // Sessionize once more for conversions, HUMAN-only (drop bots), matching the entry-page
+            // report's human-only default and the human-only AI-landing counts above so all per-page
+            // numbers share one population. Only sessions with a pageview credit a landing page (the
+            // pageviewCount guard): a pageview-less session cannot land on a page never viewed.
+            sessionize(plainRows).filter((s) => !s.isBot && s.pageviewCount > 0).forEach((s) => {
+               const key = cleanPath(s.landingPage);
+               sessionsByLanding.set(key, (sessionsByLanding.get(key) || 0) + 1);
+               if (goal && sessionConverted(s, goal)) {
+                  goalConversionsByLanding.set(key, (goalConversionsByLanding.get(key) || 0) + 1);
+               }
+            });
+         }
+      } catch (evErr) {
+         console.log('[WARN] scoreboard first-party sessionize failed for ', domain, evErr);
+      }
+
+      // 2c. Fallback for AI-by-landing only: when there were NO first-party AI sessions, try the
+      // provider's per-source landing_path (most providers, e.g. Umami, expose none). Never let a
+      // referral failure break the scoreboard.
       let referralError: string | null = null;
       let aiReferralLandingAvailable = false;
-      try {
-         const { sources, error: refError } = await provider.getReferralSources(domain, period);
-         referralError = refError;
-         const aiSources = (sources || []).filter((s: ReferralSource) => s.isAI);
-         aiSources.forEach((s) => {
-            if (s.landing_path) {
-               aiReferralLandingAvailable = true;
-               const key = cleanPath(s.landing_path);
-               const visitors = Number(s.unique_visitors ?? 0);
-               aiVisitorsByLanding.set(key, (aiVisitorsByLanding.get(key) || 0) + visitors);
-            }
-         });
-      } catch (refErr) {
-         referralError = refErr instanceof Error ? refErr.message : String(refErr);
-         aiVisitorsByLanding = new Map<string, number>();
+      if (!aiLandingExact) {
+         try {
+            const { sources, error: refError } = await provider.getReferralSources(domain, period);
+            referralError = refError;
+            const aiSources = (sources || []).filter((s: ReferralSource) => s.isAI);
+            aiSources.forEach((s) => {
+               if (s.landing_path) {
+                  aiReferralLandingAvailable = true;
+                  const key = cleanPath(s.landing_path);
+                  const visitors = Number(s.unique_visitors ?? 0);
+                  aiVisitorsByLanding.set(key, (aiVisitorsByLanding.get(key) || 0) + visitors);
+               }
+            });
+         } catch (refErr) {
+            referralError = refErr instanceof Error ? refErr.message : String(refErr);
+            aiVisitorsByLanding = new Map<string, number>();
+         }
       }
-      const aiReferralNote = aiReferralLandingAvailable
+      // The note clears when per-page AI counts are exact: first-party sessions or a provider
+      // landing_path. It stays set only when neither is available.
+      const aiReferralNote = (aiLandingExact || aiReferralLandingAvailable)
          ? null
-         : 'AI-referral data has no per-landing-page detail from this provider, so aiReferralVisitors '
-            + 'is 0 (n/a) on every page. Use the ai_referrals tool for site-wide AI-engine totals.';
+         : 'AI-referral data has no per-landing-page detail from this provider and no first-party AI sessions yet, so '
+            + 'aiReferralVisitors is 0 (n/a) on every page. Install the s33k.js tracking script for exact per-page '
+            + 'AI-search landing counts, or use the ai_referrals tool for site-wide AI-engine totals.';
+
+      // Per-page conversion attachment helper (no-op when no goal). conversions = goal conversions
+      // whose session landed on the page; conversionRate = conversions / first-party sessions landed
+      // there (percent, one decimal). null rate when the page had no first-party landing sessions.
+      const conversionFieldsFor = (pathClean: string): { conversions?: number, conversionRate?: number | null } => {
+         if (!goal) { return {}; }
+         const conversions = goalConversionsByLanding.get(pathClean) || 0;
+         const landed = sessionsByLanding.get(pathClean) || 0;
+         return { conversions, conversionRate: landed > 0 ? Math.round((1000 * conversions) / landed) / 10 : null };
+      };
+      const conversionsNote = goal
+         ? 'conversions = goal conversions whose HUMAN first-party session LANDED on that page; conversionRate is over '
+            + 'human first-party sessions that landed there (percent). conversionRate is null on a page with no human '
+            + 'first-party landing sessions. Provider page_views and first-party landing sessions are different denominators.'
+         : null;
 
       // 3. Build a lookup of traffic pages by clean path.
       const pageByPath = new Map<string, NormalizedPage>();
@@ -162,6 +263,7 @@ const getScoreboard = async (req: NextApiRequest, res: NextApiResponse<Scoreboar
       trafficPages.forEach((page) => {
          const matched = keywordsByPath.get(page.pathClean) || [];
          const aiReferralVisitors = aiVisitorsByLanding.get(page.pathClean) || 0;
+         const conv = conversionFieldsFor(page.pathClean);
          if (matched.length > 0) {
             scoreboard.push({
                url: page.url,
@@ -174,6 +276,7 @@ const getScoreboard = async (req: NextApiRequest, res: NextApiResponse<Scoreboar
                metricsNote: page.metricsNote,
                aiReferralVisitors,
                keywords: matched,
+               ...conv,
             });
          } else {
             // Content-gap signal: this page gets traffic but has no tracked keyword.
@@ -187,6 +290,7 @@ const getScoreboard = async (req: NextApiRequest, res: NextApiResponse<Scoreboar
                avg_duration: page.avg_duration,
                metricsNote: page.metricsNote,
                aiReferralVisitors,
+               ...conv,
             });
          }
       });
@@ -198,12 +302,14 @@ const getScoreboard = async (req: NextApiRequest, res: NextApiResponse<Scoreboar
       return res.status(200).json({
          domain,
          period,
+         goal: goalMeta,
          scoreboard,
          pagesWithTrafficNoKeywords,
          keywordsWithNoMatchingPage,
          analyticsError,
          referralError,
          aiReferralNote,
+         conversionsNote,
          // Back-compat alias: existing UI/MCP consumers may still read loddError.
          loddError: analyticsError,
       });

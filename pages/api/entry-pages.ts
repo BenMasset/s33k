@@ -18,9 +18,15 @@
  * This is a SEGMENTATION (entry pages by source class) plus a JOIN to existing
  * per-page keyword/rank/AI data, NOT new data collection. It is honest where the
  * data is thin: Umami reports referrers site-wide, so per-page source splits are
- * APPROXIMATED from the site-wide mix (sourcesNote flags it), and per-page AI
- * referrals are only exact when the provider reports a landing_path (aiReferralNote
- * flags the fallback), mirroring how page_scoreboard and ai_visibility stay honest.
+ * APPROXIMATED from the site-wide mix (sourcesNote flags it).
+ *
+ * Per-page AI-search landing counts are now EXACT when we have first-party data:
+ * s33k sessionizes its own s33k_event rows, takes the sessions classified to the
+ * 'ai' channel, and groups them by landing page. That answers "which pages did AI
+ * search land on" exactly, from data we own, with no provider landing_path needed
+ * (Umami exposes none). aiReferralNote clears in that case. Only when there are NO
+ * first-party AI sessions at all do we fall back to the provider's per-source
+ * landing_path (rare) or to 0 with the note, mirroring how the route stays honest.
  *
  * Never 500s on a sub-signal failure: a referral or keyword read that fails degrades
  * that one signal (surfaced as referralError / a zeroed signal) while the entry-page
@@ -28,15 +34,20 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { Op } from 'sequelize';
 import { ensureSynced } from '../../database/database';
 import Domain from '../../database/models/domain';
 import Keyword from '../../database/models/keyword';
+import S33kEvent from '../../database/models/s33kEvent';
 import authorize from '../../utils/authorize';
 import resolveDomainAccess from '../../utils/domain-access';
 import { scopeWhere } from '../../utils/scope';
 import type Account from '../../database/models/account';
 import parseKeywords from '../../utils/parseKeywords';
 import { cleanPath } from '../../utils/lodd';
+import { periodStartMs } from '../../utils/period';
+import { EventLike } from '../../utils/sessionize';
+import { aiLandingFromSessions } from '../../utils/ai-landing';
 import { getAnalyticsProvider, ReferralSource, EntryPageSources } from '../../utils/analytics';
 import { classifyEntryPage, EntryPageStatus, ENTRY_PAGE_STATUS_LABELS } from '../../utils/entry-page-status';
 
@@ -110,31 +121,57 @@ const getEntryPages = async (req: NextApiRequest, res: NextApiResponse<EntryPage
       const entryResult = await provider.getEntryPages(domain, period);
       const analyticsError = entryResult.error;
 
-      // 2. Per-page AI-referral attribution, reusing the scoreboard's approach: AI
-      // referrals can only be attributed to a specific landing page when the provider
-      // exposes a per-source landing_path. When it does not, per-page AI referrals are
-      // 0 and aiReferralNote explains it. A referral failure NEVER breaks this route.
+      // 2. Per-page AI-search landing counts. PREFER first-party sessions: sessionize this
+      // domain's scoped s33k_event rows, take the 'ai'-channel sessions, and group by landing
+      // page. That is an EXACT count of AI-search-first entries per page, from data we own, with
+      // no provider landing_path needed (Umami exposes none). Only when there are zero first-party
+      // AI sessions do we fall back to the provider's per-source landing_path, then to 0 + a note.
+      // A failure on either path NEVER breaks this route.
       let aiVisitorsByLanding = new Map<string, number>();
       let referralError: string | null = null;
-      let aiReferralLandingAvailable = false;
+      let aiLandingExact = false;
       try {
-         const { sources, error: refError } = await provider.getReferralSources(domain, period);
-         referralError = refError;
-         (sources || []).filter((s: ReferralSource) => s.isAI).forEach((s) => {
-            if (s.landing_path) {
-               aiReferralLandingAvailable = true;
-               const key = cleanPath(s.landing_path);
-               aiVisitorsByLanding.set(key, (aiVisitorsByLanding.get(key) || 0) + Number(s.unique_visitors ?? 0));
-            }
+         const startISO = new Date(periodStartMs(period, Date.now())).toJSON();
+         const eventRows: S33kEvent[] = await S33kEvent.findAll({
+            where: { domain, created: { [Op.gte]: startISO }, ...scopeWhere(account) },
+            attributes: ['id', 'session', 'source', 'is_bot', 'device', 'country', 'page', 'type', 'created'],
+            order: [['created', 'ASC']],
          });
-      } catch (refErr) {
-         referralError = refErr instanceof Error ? refErr.message : String(refErr);
-         aiVisitorsByLanding = new Map<string, number>();
+         const { byLanding, totalAiSessions } = aiLandingFromSessions(eventRows.map((r) => r.get({ plain: true }) as EventLike));
+         if (totalAiSessions > 0) {
+            aiVisitorsByLanding = byLanding;
+            aiLandingExact = true;
+         }
+      } catch (evErr) {
+         console.log('[WARN] entry-pages first-party AI-landing read failed for ', domain, evErr);
       }
-      const aiReferralNote = aiReferralLandingAvailable
+      // Fallback: only when we have no first-party AI sessions, try the provider's per-source
+      // landing_path (most providers, e.g. Umami, expose none, so this usually stays empty).
+      let aiReferralLandingAvailable = false;
+      if (!aiLandingExact) {
+         try {
+            const { sources, error: refError } = await provider.getReferralSources(domain, period);
+            referralError = refError;
+            (sources || []).filter((s: ReferralSource) => s.isAI).forEach((s) => {
+               if (s.landing_path) {
+                  aiReferralLandingAvailable = true;
+                  const key = cleanPath(s.landing_path);
+                  aiVisitorsByLanding.set(key, (aiVisitorsByLanding.get(key) || 0) + Number(s.unique_visitors ?? 0));
+               }
+            });
+         } catch (refErr) {
+            referralError = refErr instanceof Error ? refErr.message : String(refErr);
+            aiVisitorsByLanding = new Map<string, number>();
+         }
+      }
+      // The note clears whenever the per-page AI counts are exact: first-party sessions (exact) or
+      // a provider landing_path (exact). It only stays set when neither is available.
+      const aiReferralNote = (aiLandingExact || aiReferralLandingAvailable)
          ? null
-         : 'AI-referral data has no per-landing-page detail from this provider, so aiReferrals is 0 per page; the '
-            + 'ai-landing status still uses the approximated per-page AI source share. Use ai_referrals for site-wide totals.';
+         : 'AI-referral data has no per-landing-page detail from this provider and no first-party AI sessions yet, so '
+            + 'aiReferrals is 0 per page; the ai-landing status still uses the approximated per-page AI source share. '
+            + 'Install the s33k.js tracking script for exact per-page AI-search landing counts, or use ai_referrals for '
+            + 'site-wide totals.';
 
       // 3. Tracked keywords for this domain, grouped by normalized target_page path
       // (same join as page_scoreboard). A keyword read failure degrades to "no tracked

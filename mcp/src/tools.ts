@@ -359,19 +359,29 @@ server.registerTool(
    {
       title: 'Page scoreboard',
       description:
-         'Join per-page traffic with tracked keywords for a domain, the core SEO-plus-analytics view. Use this to see which pages earn traffic, what each ranks for, and where the gaps are. Returns a per-page scoreboard (traffic plus the keywords targeting each page, sorted by page views), pages that have traffic but no tracked keyword (a content-gap signal), and keywords whose target page matched no analytics page. Each page row also carries aiReferralVisitors (AI-engine-referred visitors that landed on that page) when the analytics provider exposes per-landing-page referral detail; when it does not, aiReferralVisitors is 0 and aiReferralNote explains it. Per-page bounce_rate and avg_duration may be null when the provider (e.g. Umami) cannot report them at page grain; metricsNote explains the null.',
+         'Join per-page traffic with tracked keywords for a domain, the core SEO-plus-analytics view. Use this to see which pages earn traffic, what each ranks for, and where the gaps are. Returns a per-page scoreboard (traffic plus the keywords targeting each page, sorted by page views), pages that have traffic but no tracked keyword (a content-gap signal), and keywords whose target page matched no analytics page. Each page row also carries aiReferralVisitors (AI-engine-referred visitors that landed on that page); this is EXACT from first-party sessions when the s33k.js tracking script is installed, and falls back to a provider landing_path or 0 (aiReferralNote explains) otherwise. OPTIONAL goal parameter: pass a goal name or goalId to add per-page conversions (goal conversions whose first-party session LANDED on that page) and conversionRate (over first-party sessions that landed there, percent) to every page row; conversionsNote explains the denominators and conversionRate is null on a page with no first-party landing sessions. Omit goal and the scoreboard is unchanged (no conversion fields). Per-page bounce_rate and avg_duration may be null when the provider (e.g. Umami) cannot report them at page grain; metricsNote explains the null.',
       inputSchema: {
          domain: z.string().describe('The domain to build the scoreboard for, e.g. "getmasset.com".'),
          period: z
             .string()
             .optional()
             .describe('Reporting window for analytics, e.g. "30d", "7d". Defaults to "30d".'),
+         goal: z
+            .string()
+            .optional()
+            .describe('OPTIONAL goal name to add per-page conversions + conversionRate. Get goal names from list_goals. Mutually exclusive with goalId.'),
+         goalId: z
+            .string()
+            .optional()
+            .describe('OPTIONAL goal id (numeric) to add per-page conversions + conversionRate, instead of goal name. Get ids from list_goals.'),
       },
    },
-   async ({ domain, period }) => {
+   async ({ domain, period, goal, goalId }) => {
       try {
          const query: Record<string, string> = { domain };
          if (period) { query.period = period; }
+         if (goal) { query.goal = goal; }
+         if (goalId) { query.goalId = goalId; }
          const data = await s33kFetch('/api/scoreboard', { query });
          return jsonResult(data);
       } catch (err) {
@@ -388,19 +398,21 @@ server.registerTool(
    {
       title: 'Entry page analysis: which pages AI search (and every source) lands on',
       description:
-         'Answers "which pages did AI search land on" and, more broadly, which landing pages each traffic source first hits. Analyze a domain\'s '
-         + 'ENTRY (landing) pages, where sessions START and acquisition actually happens, and behave differently from deeper '
-         + 'pages. This is the cross-pillar join nobody else offers: for each entry page it connects "we rank for X" to "X actually LANDS people". '
-         + 'Per entry page it returns the first-touch SOURCE split (direct / referral / search / ai), the page\'s tracked keywords with current '
-         + 'Google rank, its aiReferrals (AI-engine-referred entries), and a STATUS: "working" (ranks AND is a real landing page from search), '
-         + '"ranking-not-landing" (s33k tracks ranking keywords for it but it gets little or no entry traffic, the clearest gap to fix), '
-         + '"brand-direct" (lots of direct/referral entries but no tracked ranking, brand-driven not search-driven), "ai-landing" (AI search is a '
-         + 'meaningful first-touch source for the page), or "opportunity" (entry traffic but neither ranking nor AI, where to invest). Also returns a '
-         + 'summary (topLandingPages, biggestRankingNotLandingGap, aiLandingPages, statusCounts) and a statusLegend. HONEST DATA NOTE: most providers '
-         + '(e.g. Umami) report referrers site-wide, not per landing page, so each page\'s source split is APPROXIMATED from the site-wide referrer '
-         + 'mix (sourcesNote flags this) and per-page aiReferrals is 0 unless the provider exposes a landing path (aiReferralNote flags that). The '
-         + 'per-page entry counts and tracked ranks are exact. Complements page_scoreboard (all pages) by focusing only on entry pages. Never queries '
-         + 'an LLM; degrades gracefully and never fails on a missing sub-signal.',
+         'Answers "which pages did AI search land on" with EXACT per-page counts, and more broadly which landing pages each traffic source first '
+         + 'hits. Analyze a domain\'s ENTRY (landing) pages, where sessions START and acquisition actually happens, and behave differently from '
+         + 'deeper pages. This is the cross-pillar join nobody else offers: for each entry page it connects "we rank for X" to "X actually LANDS '
+         + 'people". Per entry page it returns the first-touch SOURCE split (direct / referral / search / ai), the page\'s tracked keywords with '
+         + 'current Google rank, its aiReferrals (AI-search-first entries that landed on that page), and a STATUS: "working" (ranks AND is a real '
+         + 'landing page from search), "ranking-not-landing" (s33k tracks ranking keywords for it but it gets little or no entry traffic, the '
+         + 'clearest gap to fix), "brand-direct" (lots of direct/referral entries but no tracked ranking, brand-driven not search-driven), '
+         + '"ai-landing" (AI search is a meaningful first-touch source for the page), or "opportunity" (entry traffic but neither ranking nor AI, '
+         + 'where to invest). Also returns a summary (topLandingPages, biggestRankingNotLandingGap, aiLandingPages, statusCounts) and a statusLegend. '
+         + 'AI-LANDING COUNTS ARE EXACT: per-page aiReferrals is the exact count of AI-search-first sessions that landed on each page, computed from '
+         + 's33k\'s own first-party sessions (install the s33k.js tracking script); aiReferralNote clears when this exact data is present, and only '
+         + 'falls back to a provider landing_path or 0 when there are no first-party AI sessions yet. The per-page entry counts and tracked ranks are '
+         + 'also exact. HONEST DATA NOTE: the four-way source SPLIT per page is still APPROXIMATED from the site-wide referrer mix when the provider '
+         + '(e.g. Umami) only reports referrers site-wide (sourcesNote flags this). Complements page_scoreboard (all pages) by focusing only on entry '
+         + 'pages. Never queries an LLM; degrades gracefully and never fails on a missing sub-signal.',
       inputSchema: {
          domain: z.string().describe('The domain to analyze entry pages for, e.g. "getmasset.com".'),
          period: z

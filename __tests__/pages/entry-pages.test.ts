@@ -30,6 +30,7 @@ jest.mock('../../database/database', () => ({ __esModule: true, default: { sync:
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('../../database/models/domain', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
 jest.mock('../../database/models/keyword', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
+jest.mock('../../database/models/s33kEvent', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../utils/analytics', () => {
    const actual = jest.requireActual('../../utils/analytics');
    return { __esModule: true, ...actual, getAnalyticsProvider: jest.fn() };
@@ -37,13 +38,24 @@ jest.mock('../../utils/analytics', () => {
 
 import authorize from '../../utils/authorize';
 import Domain from '../../database/models/domain';
+import S33kEvent from '../../database/models/s33kEvent';
 
 const mockedAuthorize = authorize as unknown as jest.Mock;
 const mockedDomainFindOne = (Domain as unknown as { findOne: jest.Mock }).findOne;
 const mockedFindAll = (Keyword as unknown as { findAll: jest.Mock }).findAll;
+const mockedEventFindAll = (S33kEvent as unknown as { findAll: jest.Mock }).findAll;
 const mockedGetProvider = getAnalyticsProvider as jest.Mock;
 
 const ZERO = { direct: 0, referral: 0, search: 0, ai: 0 };
+
+/** A s33k_event DB-row stand-in: the route calls .get({ plain: true }) on each row. */
+const eventRow = (over: Record<string, unknown>) => {
+   const plain = {
+      id: 1, session: 's1', source: 'direct', is_bot: false, device: 'desktop', country: 'US',
+      page: '/', type: 'pageview', created: '2026-06-18T00:00:00.000Z', ...over,
+   };
+   return { get: () => plain };
+};
 
 /** A DB-row stand-in: the route calls .get({ plain: true }) on each row. */
 const keywordRow = (overrides: Record<string, unknown>) => {
@@ -108,6 +120,9 @@ beforeEach(() => {
    mockedAuthorize.mockResolvedValue({ authorized: true, account: { ID: 1 } });
    mockedDomainFindOne.mockResolvedValue({ ID: 1, domain: 'getmasset.com' });
    mockedFindAll.mockResolvedValue([]);
+   // Default: NO first-party events, so the route falls back to the provider landing_path / note
+   // path. The exact-AI tests below override this with real ai-channel sessions.
+   mockedEventFindAll.mockResolvedValue([]);
 });
 
 describe('GET /api/entry-pages ownership gate', () => {
@@ -252,6 +267,101 @@ describe('GET /api/entry-pages join + status classification', () => {
       expect(mcp.keywords).toEqual([{ keyword: 'mcp', rank: 1 }]);
       expect(mcp.aiReferrals).toBe(4);
       expect(mcp.status).toBe('ai-landing');
+   });
+});
+
+describe('GET /api/entry-pages EXACT AI-landing from first-party sessions', () => {
+   it('counts ai-channel sessions per landing page exactly and clears the aiReferralNote', async () => {
+      mockedFindAll.mockResolvedValue([keywordRow({ ID: 1, keyword: 'masset', target_page: '/' })]);
+      // Three distinct AI sessions: 2 landed on /, 1 landed on /software/mcp. A non-AI session and a
+      // bot AI session must NOT count. Provider exposes NO landing_path, proving the exactness comes
+      // from first-party data, not the provider.
+      mockedEventFindAll.mockResolvedValue([
+         eventRow({ id: 1, session: 'a', source: 'ai', page: '/', type: 'pageview' }),
+         eventRow({ id: 2, session: 'b', source: 'ai', page: '/', type: 'pageview' }),
+         eventRow({ id: 3, session: 'c', source: 'ai', page: '/software/mcp', type: 'pageview' }),
+         eventRow({ id: 4, session: 'd', source: 'organic-search', page: '/', type: 'pageview' }),
+         eventRow({ id: 5, session: 'e', source: 'ai', is_bot: true, page: '/', type: 'pageview' }),
+      ]);
+      mockedGetProvider.mockReturnValue(providerStub({
+         entry: {
+            pages: [
+               entryPage({ page: '/', pathClean: '/', entries: 100, sources: { direct: 50, referral: 0, search: 50, ai: 0 } }),
+               entryPage({ page: '/software/mcp', pathClean: '/software/mcp', entries: 30, sources: { ...ZERO, search: 30 } }),
+            ],
+         },
+         // AI referral exists site-wide only (no landing_path); first-party data must win regardless.
+         referral: { sources: [{ name: 'ChatGPT', type: 'ai', engine: 'ChatGPT', isAI: true, unique_visitors: 99 }] },
+      }));
+
+      const { req, res, captured } = makeReqRes({ domain: 'getmasset.com' });
+      await handler(req, res);
+
+      expect(captured.status).toBe(200);
+      // Bot AI session is excluded; only the 2 human AI sessions on / count, 1 on /software/mcp.
+      const home = captured.body.entryPages.find((p: any) => p.pathClean === '/');
+      const mcp = captured.body.entryPages.find((p: any) => p.pathClean === '/software/mcp');
+      expect(home.aiReferrals).toBe(2);
+      expect(mcp.aiReferrals).toBe(1);
+      // Exact data present, so the note clears and the provider's site-wide 99 is ignored.
+      expect(captured.body.aiReferralNote).toBeNull();
+      // ai-landing status fires on the exact AI-landing pages.
+      expect(home.status).toBe('ai-landing');
+      expect(captured.body.summary.aiLandingPages).toEqual(
+         expect.arrayContaining([{ page: '/', entries: 100, aiReferrals: 2 }]),
+      );
+   });
+
+   it('falls back to the provider landing_path + keeps note logic ONLY when no first-party AI sessions exist', async () => {
+      mockedFindAll.mockResolvedValue([]);
+      // Only non-AI first-party sessions, so totalAiSessions is 0 and the route falls back.
+      mockedEventFindAll.mockResolvedValue([
+         eventRow({ id: 1, session: 'a', source: 'direct', page: '/', type: 'pageview' }),
+      ]);
+      mockedGetProvider.mockReturnValue(providerStub({
+         entry: { pages: [entryPage({ pathClean: '/', entries: 100, sources: { direct: 50, referral: 0, search: 50, ai: 0 } })] },
+         referral: { sources: [{ name: 'chatgpt.com', type: 'ai', engine: 'ChatGPT', isAI: true, unique_visitors: 6, landing_path: '/' }] },
+      }));
+
+      const { req, res, captured } = makeReqRes({ domain: 'getmasset.com' });
+      await handler(req, res);
+
+      const home = captured.body.entryPages.find((p: any) => p.pathClean === '/');
+      // No first-party AI -> provider landing_path used -> exact (6), note clears.
+      expect(home.aiReferrals).toBe(6);
+      expect(captured.body.aiReferralNote).toBeNull();
+   });
+
+   it('keeps the note set when there are neither first-party AI sessions nor a provider landing_path', async () => {
+      mockedFindAll.mockResolvedValue([]);
+      mockedEventFindAll.mockResolvedValue([]); // no first-party sessions at all
+      mockedGetProvider.mockReturnValue(providerStub({
+         entry: { pages: [entryPage({ page: '/ai', pathClean: '/ai', entries: 20, sources: { direct: 10, referral: 0, search: 0, ai: 10 } })] },
+         referral: { sources: [{ name: 'ChatGPT', type: 'ai', engine: 'ChatGPT', isAI: true, unique_visitors: 5 }] },
+      }));
+
+      const { req, res, captured } = makeReqRes({ domain: 'getmasset.com' });
+      await handler(req, res);
+
+      const ai = captured.body.entryPages.find((p: any) => p.pathClean === '/ai');
+      expect(ai.aiReferrals).toBe(0);
+      expect(captured.body.aiReferralNote).toMatch(/no per-landing-page detail/i);
+   });
+
+   it('never 500s when the first-party event read throws; degrades to the provider fallback', async () => {
+      mockedFindAll.mockResolvedValue([]);
+      mockedEventFindAll.mockRejectedValue(new Error('events table down'));
+      mockedGetProvider.mockReturnValue(providerStub({
+         entry: { pages: [entryPage({ pathClean: '/', entries: 100, sources: { direct: 40, referral: 0, search: 60, ai: 0 } })] },
+         referral: { sources: [{ name: 'chatgpt.com', type: 'ai', engine: 'ChatGPT', isAI: true, unique_visitors: 3, landing_path: '/' }] },
+      }));
+
+      const { req, res, captured } = makeReqRes({ domain: 'getmasset.com' });
+      await handler(req, res);
+
+      expect(captured.status).toBe(200);
+      const home = captured.body.entryPages.find((p: any) => p.pathClean === '/');
+      expect(home.aiReferrals).toBe(3);
    });
 });
 

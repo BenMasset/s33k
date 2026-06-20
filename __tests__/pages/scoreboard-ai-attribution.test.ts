@@ -33,7 +33,9 @@ jest.mock('sequelize', () => ({ __esModule: true, Op: { in: Symbol('in'), gte: S
 jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn().mockResolvedValue(undefined) }, ensureSynced: jest.fn().mockResolvedValue(undefined) }));
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('../../database/models/domain', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
+jest.mock('../../database/models/goal', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
 jest.mock('../../database/models/keyword', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
+jest.mock('../../database/models/s33kEvent', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../utils/analytics', () => {
    const actual = jest.requireActual('../../utils/analytics');
    return { __esModule: true, ...actual, getAnalyticsProvider: jest.fn() };
@@ -41,10 +43,12 @@ jest.mock('../../utils/analytics', () => {
 
 import authorize from '../../utils/authorize';
 import Domain from '../../database/models/domain';
+import S33kEvent from '../../database/models/s33kEvent';
 
 const mockedAuthorize = authorize as unknown as jest.Mock;
 const mockedDomainFindOne = (Domain as unknown as { findOne: jest.Mock }).findOne;
 const mockedFindAll = (Keyword as unknown as { findAll: jest.Mock }).findAll;
+const mockedEventFindAll = (S33kEvent as unknown as { findAll: jest.Mock }).findAll;
 const mockedGetProvider = getAnalyticsProvider as jest.Mock;
 
 /** A DB-row stand-in: the route calls .get({ plain: true }) on each row. */
@@ -109,6 +113,9 @@ beforeEach(() => {
    mockedAuthorize.mockResolvedValue({ authorized: true, account: { ID: 1 } });
    mockedDomainFindOne.mockResolvedValue({ ID: 1, domain: 'getmasset.com' });
    mockedFindAll.mockResolvedValue([keywordRow({ ID: 1, keyword: 'masset', target_page: '/' })]);
+   // Default: NO first-party events, so these AI-attribution cases exercise the provider fallback
+   // exactly as before (the existing assertions about provider landing_path still hold).
+   mockedEventFindAll.mockResolvedValue([]);
 });
 
 describe('scoreboard AI-referral attribution', () => {

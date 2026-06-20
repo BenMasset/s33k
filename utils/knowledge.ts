@@ -741,9 +741,11 @@ const capabilities: CapabilityEntry[] = [
       category: 'cross-pillar',
       title: 'Page scoreboard',
       description: 'Joins per-page traffic with tracked keywords for a domain: which pages earn traffic, what each ranks for, and where the content '
-         + 'gaps are.',
-      whenToUse: 'Use for the core SEO-plus-analytics view, and to find pages with traffic but no tracked keyword (a content-gap signal).',
-      examplePrompt: 'Show the per-page scoreboard for getmasset.com.',
+         + 'gaps are. Pass an OPTIONAL goal (name or goalId) to add per-page conversions (goal conversions whose first-party session LANDED on that '
+         + 'page) and conversionRate (over first-party sessions that landed there); omit it and the scoreboard is unchanged.',
+      whenToUse: 'Use for the core SEO-plus-analytics view, to find pages with traffic but no tracked keyword (a content-gap signal), and with a '
+         + 'goal to see which pages convert.',
+      examplePrompt: 'Show the per-page scoreboard for getmasset.com, with conversions for the "demo-request" goal.',
    },
    {
       id: 'entry_pages',
@@ -754,8 +756,9 @@ const capabilities: CapabilityEntry[] = [
          + 'first-touch source split (direct/referral/search/ai), the page\'s tracked keywords and current Google rank, and its AI referrals, '
          + 'then assigns a status: working (ranks AND lands from search), ranking-not-landing (tracks ranking keywords but gets little entry '
          + 'traffic, a gap to fix), brand-direct (lots of direct/referral entries but no tracked ranking), ai-landing (AI search is a meaningful '
-         + 'first-touch source), or opportunity (entry traffic but neither ranking nor AI). Per-page source splits are approximated from the '
-         + 'site-wide referrer mix and the response says so.',
+         + 'first-touch source), or opportunity (entry traffic but neither ranking nor AI). Per-page AI-search landing counts are EXACT, computed '
+         + 'from s33k\'s own first-party sessions (which pages AI search actually landed on); the four-way source split per page is still '
+         + 'approximated from the site-wide referrer mix and the response says so.',
       whenToUse: 'Use to see which pages are the real acquisition surface, connect "we rank for X" to "X actually lands people", find pages '
          + 'that rank but drive no entry traffic, and decide where to invest. Complements page_scoreboard (all pages) by focusing only on '
          + 'entry pages.',
