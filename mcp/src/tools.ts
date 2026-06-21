@@ -96,8 +96,9 @@ export function registerS33kTools(server: McpServer, fetchImpl: FetchImpl): { to
 
    // Customer-vs-admin surface split. The DEFAULT surface (S33K_MCP_ADMIN unset / not 'true') is
    // customer-only: a marketer connecting their LLM to read their own SEO / analytics / AEO and
-   // manage their own tracking. The 12 app-management tools (invites, waitlist, domain sharing,
-   // create_domain, onboard, account-data deletion, feature requests) are registered ONLY when the
+   // manage their own tracking (including adding their own site via create_domain / onboard, which
+   // are customer self-serve tools). The 10 true app-MANAGEMENT tools (invites, waitlist, domain
+   // sharing, account-data deletion, feature requests) are registered ONLY when the
    // operator opts in with S33K_MCP_ADMIN=true. When off, those tools are truly ABSENT from
    // tools/list, not present-but-erroring, so a customer never even sees them.
    //
@@ -2210,7 +2211,11 @@ server.registerTool(
 // ---------------------------------------------------------------------------
 // create_domain
 // ---------------------------------------------------------------------------
-registerAdminTool(
+// CUSTOMER self-serve tool, NOT admin-gated: adding your own site is the very first thing every
+// user does, so it must be on the default surface (a new user could not onboard from their LLM
+// otherwise). Safe to expose to every connection: POST /api/domains requires a full-account key,
+// and a read-only share key is GET-only at the API layer, so a share key cannot create domains.
+server.registerTool(
    'create_domain',
    {
       title: 'Create domain',
@@ -2335,7 +2340,11 @@ server.registerTool(
 // ---------------------------------------------------------------------------
 // onboard
 // ---------------------------------------------------------------------------
-registerAdminTool(
+// CUSTOMER self-serve tool, NOT admin-gated: this is the one-shot "add my site + discover keywords
+// + provision tracking + return the snippet" flow a new user runs first, so it must be on the
+// default surface. Safe for the same reason as create_domain: POST /api/onboard needs a full-account
+// key; a read-only share key is GET-only at the API and cannot run it.
+server.registerTool(
    'onboard',
    {
       title: 'Onboard a domain',
@@ -3154,7 +3163,8 @@ for (const resource of KNOWLEDGE_RESOURCES) {
    );
 }
 
-   // 70 customer tools are always registered; the 12 admin tools add on only under S33K_MCP_ADMIN.
-   // Report the count actually registered for this mode (70 customer-only, or the full 82 with admin).
-   return { tools: 70 + adminToolsRegistered, resources: KNOWLEDGE_RESOURCES.length };
+   // 72 customer tools are always registered (incl. the self-serve create_domain + onboard); the 10
+   // remaining admin tools add on only under S33K_MCP_ADMIN. Report the count actually registered for
+   // this mode (72 customer-only, or the full 82 with admin).
+   return { tools: 72 + adminToolsRegistered, resources: KNOWLEDGE_RESOURCES.length };
 }

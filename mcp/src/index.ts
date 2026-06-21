@@ -85,7 +85,7 @@ async function main() {
    const adminOn = process.env.S33K_MCP_ADMIN === 'true';
    const surfaceNote = adminOn
       ? `${tools} tools (full admin surface)`
-      : `${tools} customer tools (set S33K_MCP_ADMIN=true for the full ${tools + 12}-tool admin surface)`;
+      : `${tools} customer tools (set S33K_MCP_ADMIN=true for the full ${tools + 10}-tool admin surface)`;
    process.stderr.write(
       `s33k-mcp connected (base URL: ${BASE_URL}). ${surfaceNote} and ${KNOWLEDGE_RESOURCES.length} resources registered.\n`,
    );
