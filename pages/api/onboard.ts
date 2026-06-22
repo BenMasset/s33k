@@ -36,8 +36,20 @@ import { getAppSettings } from './settings';
 import { discoverKeywords } from '../../utils/keyword-discovery';
 import { createUmamiWebsite } from '../../utils/umami-provision';
 import { getInstallGuides, InstallGuides } from '../../utils/install-guides';
-import { resolveCaps, isAccountActive } from '../../utils/plans';
+import { isAccountActive } from '../../utils/plans';
+import { reserveSite, CapExceeded } from '../../utils/caps-guard';
 import { rateLimit } from '../../utils/rate-limit';
+
+// Local control-flow signal: the canonical domain is already registered by ANY account. Thrown from
+// inside the reserveSite createFn so the check-and-insert stays atomic, then mapped to the existing
+// "already registered" 400 by the caller. A dedicated class (not a string match) so it can never be
+// confused with a real DB error.
+class DomainAlreadyRegistered extends Error {
+   constructor() {
+      super('Domain already registered.');
+      this.name = 'DomainAlreadyRegistered';
+   }
+}
 
 // Default cap on how many discovered keywords are added during onboarding. Keeps the
 // starting set focused and bounds the per-onboard SERP cost. The user can prune or extend.
@@ -111,30 +123,44 @@ const onboardDomain = async (req: NextApiRequest, res: NextApiResponse<OnboardRe
          // upgrade message; an active account is held to its plan's site count. resolveCaps returns the
          // very-high UNLIMITED caps when MULTI_TENANT is off / for the admin sentinel, so this is a
          // no-op in single-tenant (same as the keyword cap). scopeWhere is {} in that case too.
-         const caps = resolveCaps(account);
-         const existingSites = await Domain.count({ where: { ...scopeWhere(account) } });
-         if (existingSites + 1 > caps.sites) {
-            const locked = !isAccountActive(account);
-            const message = locked
-               ? 'Your trial has ended or your subscription is inactive. Subscribe to add sites and resume tracking.'
-               : `Site limit reached for your plan (max ${caps.sites}; ${existingSites} already tracked). Upgrade to add more.`;
-            return res.status(403).json({ error: message });
+         //
+         // ATOMICITY (TOCTOU fix): the site count + create now run UNDER A ROW LOCK on the account
+         // inside one transaction via reserveSite, so two concurrent onboards cannot both read
+         // existingSites = 0 and both create past a 1-site cap. The canonical-collision check and the
+         // create both run INSIDE the same transaction (createFn(t)). The flag-off / admin path is a
+         // lock-free passthrough (unlimited caps), identical to before. A DomainAlreadyRegistered
+         // signal (the existing-elsewhere case) and CapExceeded are mapped to their existing copies
+         // in the catch below, so the user-facing 400/403 messages are unchanged.
+         try {
+            domainRow = await reserveSite<Domain>(account, async (t) => {
+               // Before creating, reject a canonical name already owned by ANY account (the column is
+               // globally @Unique). Without this, a tenant onboarding a canonical-equal variant of an
+               // existing domain would hit a raw unique-constraint 400; checking explicitly returns a
+               // clean message and guarantees we never attempt a colliding insert. Run inside the
+               // transaction so the check-and-insert is atomic too.
+               const existingElsewhere = await Domain.findOne({ where: { domain }, ...(t ? { transaction: t } : {}) });
+               if (existingElsewhere) { throw new DomainAlreadyRegistered(); }
+               return Domain.create({
+                  domain,
+                  slug: domain.replaceAll('-', '_').replaceAll('.', '-').replaceAll('/', '-'),
+                  lastUpdated: new Date().toJSON(),
+                  added: new Date().toJSON(),
+                  owner_id,
+               }, t ? { transaction: t } : undefined);
+            });
+         } catch (capError) {
+            if (capError instanceof DomainAlreadyRegistered) {
+               return res.status(400).json({ error: 'This domain is already registered.' });
+            }
+            if (capError instanceof CapExceeded) {
+               const locked = !isAccountActive(account);
+               const message = locked
+                  ? 'Your trial has ended or your subscription is inactive. Subscribe to add sites and resume tracking.'
+                  : `Site limit reached for your plan (max ${capError.limit}; ${capError.existing} already tracked). Upgrade to add more.`;
+               return res.status(403).json({ error: message });
+            }
+            throw capError;
          }
-         // Before creating, reject a canonical name already owned by ANY account (the column is
-         // globally @Unique). Without this, a tenant onboarding a canonical-equal variant of an
-         // existing domain would hit a raw unique-constraint 400; checking explicitly returns a
-         // clean message and guarantees we never attempt a colliding insert.
-         const existingElsewhere = await Domain.findOne({ where: { domain } });
-         if (existingElsewhere) {
-            return res.status(400).json({ error: 'This domain is already registered.' });
-         }
-         domainRow = await Domain.create({
-            domain,
-            slug: domain.replaceAll('-', '_').replaceAll('.', '-').replaceAll('/', '-'),
-            lastUpdated: new Date().toJSON(),
-            added: new Date().toJSON(),
-            owner_id,
-         });
       }
 
       // 2. Heuristically discover candidate target keywords per page (no LLM). Crawl

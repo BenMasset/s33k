@@ -138,6 +138,47 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
    return collect(req, res);
 }
 
+// Per-row fallback insert: store each row independently, skipping the offending one. This is the
+// resilience floor (a single bad row never fails the batch) and the path taken when bulkCreate is
+// unavailable. Returns the count actually stored. Never throws.
+const storeRowsPerRow = async (rows: Record<string, unknown>[], domain: string): Promise<number> => {
+   let recorded = 0;
+   for (const row of rows) {
+      try {
+         // eslint-disable-next-line no-await-in-loop
+         await S33kEvent.create(row);
+         recorded += 1;
+      } catch (rowError) {
+         // Skip the offending row, keep going. Never let one event 500 the batch.
+         console.log('[WARN] Skipping bad collect event for ', domain, rowError);
+      }
+   }
+   return recorded;
+};
+
+// Store the batch with ONE bulkCreate when the model supports it, falling back to per-row create on
+// any bulk failure. bulkCreate({ validate: true }) runs the same per-row validation as create, so an
+// invalid row is rejected, not silently coerced. WHY the fallback: a bulk insert is all-or-nothing on
+// a single bad row, which would violate the skip-and-continue contract (one PII/oversized row must
+// not lose the whole batch); when bulk throws we retry row-by-row so the good rows still land. The
+// `typeof bulkCreate === 'function'` guard also keeps the existing tests green: their S33kEvent mock
+// exposes only `create`, so they exercise the per-row path with identical behavior to before, while
+// the real Sequelize model (which has bulkCreate) takes the single-statement fast path in prod.
+const storeRows = async (rows: Record<string, unknown>[], domain: string): Promise<number> => {
+   const model = S33kEvent as unknown as { bulkCreate?: (r: unknown[], opts: unknown) => Promise<unknown[]> };
+   if (typeof model.bulkCreate === 'function') {
+      try {
+         const inserted = await model.bulkCreate(rows, { validate: true });
+         return Array.isArray(inserted) ? inserted.length : rows.length;
+      } catch (bulkError) {
+         // A single bad row failed the bulk insert; recover the good rows one at a time.
+         console.log('[WARN] Bulk insert failed, falling back to per-row for ', domain, bulkError);
+         return storeRowsPerRow(rows, domain);
+      }
+   }
+   return storeRowsPerRow(rows, domain);
+};
+
 const collect = async (req: NextApiRequest, res: NextApiResponse<CollectResponse>) => {
    try {
       // Per-IP request-rate brake FIRST, before any parsing/DB work, so a flood is cheapest to
@@ -232,65 +273,56 @@ const collect = async (req: NextApiRequest, res: NextApiResponse<CollectResponse
       }
       const ownerId = (owned.owner_id ?? null) as number | null;
 
-      // 5 + skip-and-continue: store each clean event; a single bad row never fails the batch.
+      // 5 + skip-and-continue: store the batch. Build ALL rows (clean engagement events + the
+      // additive web-vital rows) once, then insert them in ONE bulkCreate instead of N awaited
+      // per-row creates. At scale a busy site posts batches constantly; one INSERT per batch
+      // collapses the per-event round-trips into a single statement, bounding DB connection churn.
+      // The UTM tags and segments are stamped on every row exactly as before, so each stored row is
+      // byte-for-byte identical to what the old per-row create produced.
       const created = new Date().toJSON();
-      let recorded = 0;
-      for (const ev of clean) {
-         try {
-            // eslint-disable-next-line no-await-in-loop
-            await S33kEvent.create({
-               domain,
-               owner_id: ownerId,
-               type: ev.type,
-               page: ev.page,
-               label: ev.label,
-               selector: ev.selector,
-               value: ev.value,
-               session,
-               source: ev.source,
-               // Session-level UTM tags spread onto every row (utm_source ... utm_content),
-               // each already null when the landing URL carried no UTM params.
-               ...utm,
-               is_bot: isBot,
-               device,
-               country,
-               created,
-            });
-            recorded += 1;
-         } catch (rowError) {
-            // Skip the offending row, keep going. Never let one event 500 the batch.
-            console.log('[WARN] Skipping bad collect event for ', domain, rowError);
-         }
+      const rows: Record<string, unknown>[] = clean.map((ev) => ({
+         domain,
+         owner_id: ownerId,
+         type: ev.type,
+         page: ev.page,
+         label: ev.label,
+         selector: ev.selector,
+         value: ev.value,
+         session,
+         source: ev.source,
+         // Session-level UTM tags spread onto every row (utm_source ... utm_content),
+         // each already null when the landing URL carried no UTM params.
+         ...utm,
+         is_bot: isBot,
+         device,
+         country,
+         created,
+      }));
+      // Web-vital rows, the additive type:'webvital' path. The numeric value lives in metric_value,
+      // the metric name in label, value/selector left null/empty. Stamped with the same owner_id /
+      // session / source / segments so they scope and attribute like every other row, and inserted in
+      // the SAME bulk statement so the open ingest stays one write per batch across event types.
+      for (const wv of webvitals) {
+         rows.push({
+            domain,
+            owner_id: ownerId,
+            type: 'webvital',
+            page: wv.page,
+            label: wv.label,
+            metric_value: wv.metricValue,
+            session,
+            // Same session-level first-touch source the clean events carry (sanitizeBatch applied
+            // it per-event from body.source; here we reuse the identical hoisted sanitizeSource result).
+            source: wvSource,
+            ...utm,
+            is_bot: isBot,
+            device,
+            country,
+            created,
+         });
       }
 
-      // Web-vital rows, same skip-and-continue discipline. type:'webvital', the numeric value in
-      // metric_value, the metric name in label, value/selector left null/empty. Stamped with the
-      // same owner_id / session / source / segments so they scope and attribute like every other row.
-      for (const wv of webvitals) {
-         try {
-            // eslint-disable-next-line no-await-in-loop
-            await S33kEvent.create({
-               domain,
-               owner_id: ownerId,
-               type: 'webvital',
-               page: wv.page,
-               label: wv.label,
-               metric_value: wv.metricValue,
-               session,
-               // Same session-level first-touch source the clean events carry (sanitizeBatch applied
-               // it per-event from body.source; here we reuse the identical hoisted sanitizeSource result).
-               source: wvSource,
-               ...utm,
-               is_bot: isBot,
-               device,
-               country,
-               created,
-            });
-            recorded += 1;
-         } catch (rowError) {
-            console.log('[WARN] Skipping bad collect webvital for ', domain, rowError);
-         }
-      }
+      const recorded = await storeRows(rows, domain);
 
       // Total-failure honesty: reaching here guarantees there was at least one clean event OR
       // web-vital to store (the all-empty case already returned a clean 200 above). If NOT ONE

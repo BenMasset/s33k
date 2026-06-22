@@ -40,6 +40,15 @@ export type ResolvedAccount = {
 // on the hot path for the legacy key; the scoping helper only cares about the ID.
 const adminAccount = (): Account => ({ ID: ADMIN_ACCOUNT_ID } as Account);
 
+// last_used_at is observability, not correctness, so we coalesce its write. Without this, EVERY
+// authorized per-account-key request wrote api_key (a read amplified into a read + write) and at
+// ~1000 tenants that is pure churn on a hot row. We instead refresh last_used_at at most once per
+// LAST_USED_THROTTLE_MS (5 min by default), which keeps the "is this key live / when last used"
+// signal accurate to the minute while collapsing the write rate by orders of magnitude. Tunable
+// via env so an operator can trade freshness for fewer writes (0 is treated as the 5-min default,
+// since Number('') and an unset var both yield NaN -> falls through to the default).
+const LAST_USED_THROTTLE_MS = Number(process.env.LAST_USED_THROTTLE_MS) || 300000;
+
 // Hash a full key the same way mint-time will: SHA-256, hex-encoded. Storing only the
 // hash means a leaked DB dump does not leak usable keys.
 export const hashApiKey = (fullKey: string): string => crypto.createHash('sha256').update(fullKey).digest('hex');
@@ -110,12 +119,17 @@ const resolveAccount = async (req: NextApiRequest, res: NextApiResponse): Promis
       if (candidate && candidate.key_hash === hashApiKey(bearer)) {
          const account = await Account.findOne({ where: { ID: candidate.account_id } });
          if (account && account.status === 'active') {
-            // Best-effort observability; never block auth on this write.
-            try {
-               candidate.last_used_at = new Date();
-               await candidate.save();
-            } catch (saveError) {
-               // ignore
+            // Best-effort observability; never block auth on this write. Throttled: only refresh
+            // last_used_at when it has never been set or the throttle window has elapsed, so a
+            // hot key does not turn every authorized read into an api_key write (see the constant).
+            const lastUsedMs = candidate.last_used_at ? new Date(candidate.last_used_at).getTime() : 0;
+            if (!candidate.last_used_at || (Date.now() - lastUsedMs) > LAST_USED_THROTTLE_MS) {
+               try {
+                  candidate.last_used_at = new Date();
+                  await candidate.save();
+               } catch (saveError) {
+                  // ignore
+               }
             }
             // Surface the key's scoped_domain so authorize() can enforce the per-domain share
             // restriction. A normal key has null here (no restriction); a share key carries the

@@ -8,7 +8,8 @@ import authorize from '../../utils/authorize';
 import { scopeWhere, ownerIdFor } from '../../utils/scope';
 import { canonicalizeDomain } from '../../utils/canonical-domain';
 import { MAX_KEYWORDS_PER_REQUEST, MAX_KEYWORDS_PER_DOMAIN } from '../../utils/limits';
-import { resolveCaps, isAccountActive } from '../../utils/plans';
+import { isAccountActive } from '../../utils/plans';
+import { reserveKeywordSlots, CapExceeded } from '../../utils/caps-guard';
 import { rateLimit } from '../../utils/rate-limit';
 import type Account from '../../database/models/account';
 import parseKeywords from '../../utils/parseKeywords';
@@ -153,20 +154,15 @@ const addKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGet
       // the account's effective keyword ceiling: the TRIAL caps while trialing, the subscribed
       // plan's caps when active, and a LOCKED 0 once the trial expires / the sub is canceled or
       // past_due. With MULTI_TENANT off (or for the admin sentinel) the account is always active and
-      // gets the most generous caps, so this is a no-op in single-tenant. We count this account's
-      // EXISTING tracked keywords (scopeWhere) plus the number being added; if it would exceed the
-      // cap we 403 naming the limit and that they can upgrade. An inactive (locked) account has a 0
-      // cap, so any add is rejected here; reads are unaffected (GET does not reach this path).
-      const caps = resolveCaps(account);
+      // gets the most generous caps, so this is a no-op in single-tenant. An inactive (locked)
+      // account has a 0 cap, so any add is rejected; reads are unaffected (GET does not reach this).
+      //
+      // ATOMICITY (TOCTOU fix): the count-then-create is now done UNDER A ROW LOCK on the account
+      // inside one transaction via reserveKeywordSlots, so two concurrent adds cannot both read
+      // existing = 49 and both insert past a 50 cap. The bulkCreate runs INSIDE the same transaction
+      // (createFn(t)) so the count it was checked against and the insert are one atomic unit. The
+      // flag-off / admin path is a lock-free passthrough (unlimited caps), identical to before.
       const requestedCount = keywords.length;
-      const existingTotal = await Keyword.count({ where: { ...scopeWhere(account) } });
-      if (existingTotal + requestedCount > caps.keywords) {
-         const locked = !isAccountActive(account);
-         const message = locked
-            ? 'Your trial has ended or your subscription is inactive. Subscribe to add keywords and resume rank tracking.'
-            : `Keyword limit reached for your plan (max ${caps.keywords}; ${existingTotal} already tracked). Upgrade to add more.`;
-         return res.status(403).json({ error: message });
-      }
 
       const keywordsToAdd: any = []; // QuickFIX for bug: https://github.com/sequelize/sequelize-typescript/issues/936
       const owner_id = ownerIdFor(account);
@@ -204,7 +200,12 @@ const addKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGet
       });
 
       try {
-         const newKeywords:Keyword[] = await Keyword.bulkCreate(keywordsToAdd);
+         // reserveKeywordSlots checks the billing cap UNDER LOCK and runs the bulkCreate inside the
+         // same transaction (createFn(t)), closing the count-then-create race. It throws CapExceeded
+         // when over cap, which we map below to the EXISTING 403 copy (unchanged user-facing strings).
+         const newKeywords:Keyword[] = await reserveKeywordSlots(account, requestedCount, (t) => (
+            Keyword.bulkCreate(keywordsToAdd, t ? { transaction: t } : undefined)
+         ));
          const formattedkeywords = newKeywords.map((el) => el.get({ plain: true }));
          const keywordsParsed: KeywordType[] = parseKeywords(formattedkeywords);
 
@@ -223,6 +224,16 @@ const addKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGet
 
          return res.status(201).json({ keywords: keywordsParsed });
       } catch (error) {
+         // Map the typed cap error to the EXISTING 403 copy (verbatim, unchanged). An inactive
+         // (locked) account shows the trial/subscription message; an active account at its plan cap
+         // shows the limit-reached/upgrade message. Any other error stays the generic 400.
+         if (error instanceof CapExceeded) {
+            const locked = !isAccountActive(account);
+            const message = locked
+               ? 'Your trial has ended or your subscription is inactive. Subscribe to add keywords and resume rank tracking.'
+               : `Keyword limit reached for your plan (max ${error.limit}; ${error.existing} already tracked). Upgrade to add more.`;
+            return res.status(403).json({ error: message });
+         }
          console.log('[ERROR] Adding New Keywords ', error);
          return res.status(400).json({ error: 'Could Not Add New Keyword!' });
       }

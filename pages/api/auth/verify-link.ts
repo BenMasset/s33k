@@ -8,6 +8,7 @@ import { generateApiKey, hashApiKey, apiKeyPrefix } from '../../../utils/resolve
 import { resolveBaseUrl } from '../../../utils/baseUrl';
 import { isMultiTenantEnabled } from '../../../utils/scope';
 import { clientIp } from '../../../utils/collect-guards';
+import { rateLimitAsync } from '../../../utils/rate-limit';
 import { LOGIN_TOKEN_TTL_MS } from './request-link';
 
 // PUBLIC passwordless-login VERIFY endpoint. The other half of magic-link login: the user clicks the
@@ -46,23 +47,11 @@ const RATE_LIMIT_MAX = (() => {
    return Number.isFinite(raw) && raw > 0 ? raw : 10;
 })();
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
-const attempts = new Map<string, { count: number, resetAt: number }>();
 
 const ipFor = (req: NextApiRequest): string => clientIp(
    req.headers as Record<string, string | string[] | undefined>,
    req.socket?.remoteAddress,
 );
-
-const isRateLimited = (ip: string): boolean => {
-   const now = Date.now();
-   const entry = attempts.get(ip);
-   if (!entry || entry.resetAt <= now) {
-      attempts.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
-      return false;
-   }
-   entry.count += 1;
-   return entry.count > RATE_LIMIT_MAX;
-};
 
 // Atomically CLAIM a login token before any key is minted. The guarded conditional UPDATE (status
 // pending -> used WHILE still pending) is serialized by the DB: of N concurrent redemptions exactly
@@ -107,7 +96,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
    if (!isMultiTenantEnabled()) {
       return res.status(404).json({ error: 'Not found.' });
    }
-   if (isRateLimited(ipFor(req))) {
+   const ipBrake = await rateLimitAsync(`auth-verify-ip:${ipFor(req)}`, { limit: RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS });
+   if (!ipBrake.allowed) {
       return res.status(429).json({ error: 'Too many attempts. Try again shortly.' });
    }
 

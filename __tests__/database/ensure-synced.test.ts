@@ -40,6 +40,7 @@ jest.mock('../../database/models/segment', () => modelStub);
 jest.mock('../../database/models/promptCheck', () => modelStub);
 jest.mock('../../database/models/setting', () => modelStub);
 jest.mock('../../database/models/auditLog', () => modelStub);
+jest.mock('../../database/models/rateLimit', () => modelStub);
 
 describe('ensureSynced', () => {
    beforeEach(() => {

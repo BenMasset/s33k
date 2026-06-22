@@ -2,6 +2,7 @@ import { setTimeout as sleep } from 'timers/promises';
 import { RefreshResult, removeFromRetryQueue, retryScrape, scrapeKeywordWithStrategy } from './scraper';
 import parseKeywords from './parseKeywords';
 import Keyword from '../database/models/keyword';
+import { runWithConcurrency, scrapeConcurrency } from './scrape-queue';
 
 /**
  * Refreshes the Keywords position by Scraping Google Search Result by
@@ -124,12 +125,22 @@ export const updateKeywordPosition = async (keywordRaw:Keyword, updatedKeyword: 
  * @returns {Promise}
  */
 const refreshParallel = async (keywords:KeywordType[], settings:SettingsType, domains?: DomainType[]) : Promise<RefreshResult[]> => {
-   const promises: Promise<RefreshResult>[] = keywords.map((keyword) => {
-      const domainSettings = domains?.find((d) => d.domain === keyword.domain);
-      return scrapeKeywordWithStrategy(keyword, settings, domainSettings);
-   });
-
-   const results = await Promise.allSettled(promises);
+   // Schedule the per-keyword scrapes through a BOUNDED-concurrency runner (SCRAPE_CONCURRENCY,
+   // default 10) instead of firing every scrape at once with Promise.allSettled. The old form
+   // launched one HTTP promise per keyword simultaneously, so a full sweep (1000 sites x 50 kw)
+   // meant 50,000 concurrent SERP calls in one request: OOM, socket exhaustion, a Serper spend
+   // spike, and a timeout that lost all progress. runWithConcurrency does the SAME total work,
+   // returns the SAME per-item settlements in input order, and rejects nothing (a throwing scrape
+   // becomes a 'rejected' settlement), so the aggregation/return shape below is byte-for-byte the
+   // same as the previous Promise.allSettled: keep only the fulfilled values, in order.
+   const results = await runWithConcurrency<KeywordType, RefreshResult>(
+      keywords,
+      (keyword) => {
+         const domainSettings = domains?.find((d) => d.domain === keyword.domain);
+         return scrapeKeywordWithStrategy(keyword, settings, domainSettings);
+      },
+      scrapeConcurrency(),
+   );
    const fulfilled = results.filter((r): r is PromiseFulfilledResult<RefreshResult> => r.status === 'fulfilled');
 
    return fulfilled.map((r) => r.value);

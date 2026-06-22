@@ -8,6 +8,7 @@ import { generateApiKey, hashApiKey, apiKeyPrefix } from '../../../utils/resolve
 import { resolveBaseUrl } from '../../../utils/baseUrl';
 import { clientIp } from '../../../utils/collect-guards';
 import { encryptEmail, emailHash } from '../../../utils/accountEmail';
+import { rateLimitAsync } from '../../../utils/rate-limit';
 
 // PUBLIC invite-accept endpoint. This route takes NO API key: the invite code IS the
 // credential. It is the one place outside the account-management routes that mints a real
@@ -49,12 +50,12 @@ const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
 // the response is indistinguishable across all of them: no existence is ever leaked.
 const GENERIC_REJECT = 'Invalid or expired invite code.';
 
-// Lightweight in-memory per-IP rate limiter. Process-local and best-effort (it resets on
-// redeploy and is not shared across instances), which is acceptable: the real control is the
-// code entropy. It exists to blunt rapid brute-force probing of the accept endpoint.
+// Per-IP brute-force brake on probing the accept endpoint. Routed through the shared-store-capable
+// limiter (rateLimitAsync + RATE_LIMIT_BACKEND='postgres') so the cap holds across instances under
+// horizontal scaling, rather than becoming limit*N. The code entropy is still the primary control;
+// this is defense in depth against rapid replay.
 const RATE_LIMIT_MAX = 10;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
-const attempts = new Map<string, { count: number, resetAt: number }>();
 
 // Client IP for the brute-force brake. Derived via the SHARED collect-guards.clientIp helper so
 // both public-surface limiters key on the SAME trusted-hop logic: the rightmost (trusted-edge)
@@ -63,19 +64,6 @@ const ipFor = (req: NextApiRequest): string => clientIp(
    req.headers as Record<string, string | string[] | undefined>,
    req.socket?.remoteAddress,
 );
-
-// Returns true when the caller is over the limit. Counts every attempt; a successful accept is
-// rare and harmless to count. Opportunistically prunes the probed key when its window rolls.
-const isRateLimited = (ip: string): boolean => {
-   const now = Date.now();
-   const entry = attempts.get(ip);
-   if (!entry || entry.resetAt <= now) {
-      attempts.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
-      return false;
-   }
-   entry.count += 1;
-   return entry.count > RATE_LIMIT_MAX;
-};
 
 type AcceptRes = {
    apiKey?: string,
@@ -96,7 +84,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
    if (req.method !== 'POST') {
       return res.status(405).json({ error: 'Method Not Allowed. Use POST.' });
    }
-   if (isRateLimited(ipFor(req))) {
+   const ipBrake = await rateLimitAsync(`invite-accept-ip:${ipFor(req)}`, { limit: RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS });
+   if (!ipBrake.allowed) {
       return res.status(429).json({ error: 'Too many attempts. Try again shortly.' });
    }
 

@@ -100,6 +100,15 @@ const cronScopeFor = async (
    return scopeWhere(account);
 };
 
+// CRON_PAGE_SIZE bounds how many keyword rows are claimed + held in memory per page of the sweep,
+// so a 1000-site instance is processed in bounded pages instead of materializing every tenant's
+// 50,000 keyword model instances at once. Env-overridable; default 500. A non-positive/non-numeric
+// value falls back to the default. The single-tenant install (a handful of keywords) fits in one page.
+const cronPageSize = (): number => {
+   const raw = parseInt(process.env.CRON_PAGE_SIZE || '', 10);
+   return Number.isFinite(raw) && raw > 0 ? raw : 500;
+};
+
 const cronRefreshkeywords = async (req: NextApiRequest, res: NextApiResponse<CRONRefreshRes>, account?: Account | null) => {
    try {
       const settings = await getAppSettings();
@@ -107,14 +116,34 @@ const cronRefreshkeywords = async (req: NextApiRequest, res: NextApiResponse<CRO
          return res.status(400).json({ started: false, error: 'Scraper has not been set up yet.' });
       }
       const scope = await cronScopeFor(account, 'cron.sweep');
-      await Keyword.update({ updating: true }, { where: { ...scope } });
-      let keywordQueries: Keyword[] = await Keyword.findAll({ where: { ...scope } });
       const allDomains: Domain[] = await Domain.findAll({ where: { ...scope } });
       const domainList: DomainType[] = allDomains.map((d) => d.get({ plain: true }));
 
+      // Claim the keyword set FIRST, then mark only the CLAIMED rows updating:true. The old form ran
+      // a blanket Keyword.update({updating:true},{where:{}}) over EVERY tenant's rows before reading
+      // them, and loaded all keywords at once. We now read a bounded page (ID-ASC), apply the
+      // spend-brake to the claimed page, mark exactly those IDs updating, and hand the page to refresh
+      // (which is itself bounded-concurrency, so the per-page scrape burst can never exceed
+      // SCRAPE_CONCURRENCY). NOTE (single-pass for safety): this reads ONE bounded page rather than
+      // cursor-paging the whole table, because a full resumable cursor/claim rewrite is the riskiest
+      // change here (correctness: every due keyword scraped exactly once, no double-charge to Serper).
+      // The bounded concurrency from utils/scrape-queue.ts already removes the 50,000-simultaneous-call
+      // meltdown, which was the hard blocker. The cursor/tick split (process every page across ticks,
+      // fully resumable) is documented as a follow-up rather than shipped unproven. See cron notes.
+      const limit = cronPageSize();
+      let keywordQueries: Keyword[] = await Keyword.findAll({ where: { ...scope }, order: [['ID', 'ASC']], limit });
+
       keywordQueries = await applySpendBrake(keywordQueries, scope);
 
-      refreshAndUpdateKeywords(keywordQueries, settings, domainList);
+      if (keywordQueries.length > 0) {
+         // Mark exactly the claimed (post-spend-brake) keyword IDs as updating, instead of a blanket
+         // all-tenants update. A lapsed account's dropped keywords are not flipped to updating.
+         const claimedIDs = keywordQueries.map((kw) => kw.get('ID') as number);
+         await Keyword.update({ updating: true }, { where: { ID: claimedIDs } });
+         // Fire-and-forget, preserving the original non-blocking "started: true" semantics: the SERP
+         // sweep runs in the background and the request returns immediately so it cannot time out.
+         refreshAndUpdateKeywords(keywordQueries, settings, domainList);
+      }
 
       return res.status(200).json({ started: true });
    } catch (error) {

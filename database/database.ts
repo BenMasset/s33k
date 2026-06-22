@@ -15,12 +15,18 @@ import Segment from './models/segment';
 import PromptCheck from './models/promptCheck';
 import Setting from './models/setting';
 import AuditLog from './models/auditLog';
+import RateLimit from './models/rateLimit';
 
 const models = [
    Domain, Keyword, CrawlerHit, Account, ApiKey, Invite, Waitlist, S33kEvent,
-   FeatureRequest, Goal, Segment, PromptCheck, Setting, AuditLog,
+   FeatureRequest, Goal, Segment, PromptCheck, Setting, AuditLog, RateLimit,
 ];
-const pool = { max: 5, min: 0, idle: 10000 };
+// DB_POOL_MAX makes the connection-pool ceiling tunable for higher tenant load; default 5 keeps
+// the prior behavior byte-for-byte when unset. acquire:30000 fails a saturated pool fast (30s)
+// instead of hanging a request indefinitely.
+const pool = {
+   max: Number(process.env.DB_POOL_MAX) || 5, min: 0, idle: 10000, acquire: 30000,
+};
 
 // Use Postgres when DATABASE_URL is set (hosted deploy), otherwise SQLite (local dev).
 const connection = process.env.DATABASE_URL

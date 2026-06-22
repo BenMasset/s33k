@@ -9,6 +9,7 @@ import { sendMagicLinkEmail } from '../../../utils/send-invite';
 import { isMultiTenantEnabled } from '../../../utils/scope';
 import { clientIp } from '../../../utils/collect-guards';
 import { emailHash } from '../../../utils/accountEmail';
+import { rateLimitAsync } from '../../../utils/rate-limit';
 
 // PUBLIC passwordless-login REQUEST endpoint. A returning user who has an account but no key on
 // THIS device POSTs their email; if the email maps to an account we mail a one-time, 15-minute
@@ -48,29 +49,14 @@ const REQUEST_RATE_LIMIT_MAX = (() => {
 const REQUEST_RATE_WINDOW_MS = 60 * 1000;
 
 // Per-EMAIL brake: at most this many login links per email per hour, so an attacker cannot flood a
-// victim's inbox even from many IPs. Keyed on the normalized email, not the IP.
+// victim's inbox even from many IPs. Keyed on the normalized email, not the IP. This is the brake
+// that degrades WORST under horizontal scaling (limit*N), so it is now routed through the shared-store
+// limiter (rateLimitAsync + RATE_LIMIT_BACKEND='postgres') so the 3/hour cap holds across instances.
 const EMAIL_RATE_LIMIT_MAX = (() => {
    const raw = parseInt(process.env.AUTH_EMAIL_RATE_LIMIT || '', 10);
    return Number.isFinite(raw) && raw > 0 ? raw : 3;
 })();
 const EMAIL_RATE_WINDOW_MS = 60 * 60 * 1000;
-
-// In-memory fixed-window limiters. Process-local + best-effort (reset on redeploy), acceptable for
-// an abuse brake: the token entropy + single-use + short TTL are the real controls. Two maps so the
-// per-IP and per-email windows never collide.
-const ipAttempts = new Map<string, { count: number, resetAt: number }>();
-const emailAttempts = new Map<string, { count: number, resetAt: number }>();
-
-const isLimited = (store: Map<string, { count: number, resetAt: number }>, key: string, max: number, windowMs: number): boolean => {
-   const now = Date.now();
-   const entry = store.get(key);
-   if (!entry || entry.resetAt <= now) {
-      store.set(key, { count: 1, resetAt: now + windowMs });
-      return false;
-   }
-   entry.count += 1;
-   return entry.count > max;
-};
 
 const ipFor = (req: NextApiRequest): string => clientIp(
    req.headers as Record<string, string | string[] | undefined>,
@@ -104,8 +90,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       return res.status(404).json({ error: 'Not found.' });
    }
 
-   // Per-IP brake FIRST, before any parsing or DB work, so a flood is cheapest to reject.
-   if (isLimited(ipAttempts, ipFor(req), REQUEST_RATE_LIMIT_MAX, REQUEST_RATE_WINDOW_MS)) {
+   // Per-IP brake FIRST, before any parsing or DB work, so a flood is cheapest to reject. Routed
+   // through the shared-store-capable limiter so the cap holds across instances when configured.
+   const ipBrake = await rateLimitAsync(`auth-req-ip:${ipFor(req)}`, { limit: REQUEST_RATE_LIMIT_MAX, windowMs: REQUEST_RATE_WINDOW_MS });
+   if (!ipBrake.allowed) {
       return res.status(429).json({ error: 'Too many requests. Please slow down.' });
    }
 
@@ -121,8 +109,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
    }
 
    // Per-EMAIL brake: bound how many links one inbox can be sent per hour, independent of IP. Runs
-   // before the lookup so the amount of work is identical whether or not the account exists.
-   if (isLimited(emailAttempts, email, EMAIL_RATE_LIMIT_MAX, EMAIL_RATE_WINDOW_MS)) {
+   // before the lookup so the amount of work is identical whether or not the account exists. Keyed on
+   // the normalized email so the shared-store counter is the SAME row across every instance: the
+   // 3/hour cap holds globally, closing the 3*N inbox-flood the per-process limiter left open.
+   const emailBrake = await rateLimitAsync(`auth-req-email:${email}`, { limit: EMAIL_RATE_LIMIT_MAX, windowMs: EMAIL_RATE_WINDOW_MS });
+   if (!emailBrake.allowed) {
       return res.status(429).json({ error: 'Too many requests. Please slow down.' });
    }
 

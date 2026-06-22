@@ -1,21 +1,22 @@
 /**
- * Generic, dependency-free, in-memory fixed-window rate limiter.
+ * Generic, dependency-free, in-memory fixed-window rate limiter PLUS an async shared-store front
+ * door (rateLimitAsync) selected by RATE_LIMIT_BACKEND.
  *
- * This is a basic abuse brake, NOT a distributed limiter. The counters live in this single
- * process's memory, so on the single-container Railway deploy they are authoritative, but they
- * reset on restart and are NOT shared if the app is ever scaled to multiple instances. That is
- * an accepted tradeoff: the limiter exists to blunt a flood from one source, not to meter usage
- * for billing. Anything needing cross-instance accuracy must use a shared store (Redis), not this.
+ * The SYNC rateLimit() below is the in-memory limiter: an abuse brake whose counters live in this
+ * single process's memory, authoritative on a single container but NOT shared across instances. It
+ * resets on restart. Fixed window (not sliding) on purpose: cheapest correct shape, a flood is just
+ * as blocked. Each key holds a window start and a hit count; when the window elapses the entry resets
+ * on the next hit. Unbounded growth is prevented two ways: expired entries drop lazily on access, and
+ * a hard MAX_KEYS ceiling triggers a sweep (then a clear) so a unique-key flood (spoofed IPs) cannot
+ * grow the map without bound. Nothing in the sync path throws. The SYNC rateLimit() signature is
+ * UNCHANGED, so every existing sync call site inherits it with zero edits.
  *
- * Fixed window (not a sliding window) on purpose: it is the cheapest correct shape and a flood
- * is just as blocked by it. Each key holds the window start and a hit count; when the window
- * elapses the entry resets to a fresh window on the next hit.
- *
- * Unbounded growth is prevented two ways: expired entries are dropped lazily on access, and a
- * hard MAX_KEYS ceiling triggers a sweep (then, if still over, a clear) so a flood of unique
- * keys (e.g. spoofed IPs) cannot grow the map without bound.
- *
- * Nothing here throws.
+ * For surfaces that need a limit to hold ACROSS instances (horizontal scaling), use the ASYNC
+ * rateLimitAsync(): when RATE_LIMIT_BACKEND='postgres' it delegates to utils/rate-limit-store.ts (one
+ * shared Postgres counter per key, so the per-EMAIL magic-link brake stays 3/hour total, not 3*N).
+ * When RATE_LIMIT_BACKEND is anything else (default 'memory') it is the EXACT in-memory rateLimit()
+ * wrapped in a resolved promise, so flag-off behavior is byte-for-byte the sync path. Async-handler
+ * call sites (the auth/invite brakes) await it; sync call sites keep calling rateLimit() unchanged.
  */
 
 export type RateLimitOptions = {
@@ -118,3 +119,33 @@ export const rateLimit = (key: string, options: RateLimitOptions, now = Date.now
 
 /** Test-only: clear all in-memory rate-limit state (per-key buckets and the global ceiling). */
 export const __resetGenericRateLimit = (): void => { buckets.clear(); globalWindowStart = 0; globalCount = 0; };
+
+// True when the shared-store (cross-instance) backend is selected. Default ('memory' or unset) keeps
+// the byte-for-byte in-memory path, so flipping this on is the only thing that changes behavior. Read
+// on each call so it is tunable without a rebuild and overridable in tests.
+const isPostgresBackend = (): boolean => (process.env.RATE_LIMIT_BACKEND || 'memory').toLowerCase() === 'postgres';
+
+/**
+ * Async front door over the limiter, selected by RATE_LIMIT_BACKEND. Use this from async handlers
+ * (the auth/invite brakes) where a limit must hold ACROSS instances under horizontal scaling.
+ *
+ *   RATE_LIMIT_BACKEND='postgres' -> one shared Postgres counter per key (utils/rate-limit-store.ts),
+ *                                    so e.g. the per-email magic-link cap is 3/hour TOTAL, not 3*N.
+ *   anything else (default)       -> the EXACT in-memory rateLimit() above, wrapped in a resolved
+ *                                    promise, so the default path is byte-for-byte unchanged.
+ *
+ * The store module is imported LAZILY (dynamic import) only on the postgres branch, so the default
+ * memory path never pulls the database/sequelize import graph in (keeps memory-only call sites and
+ * tests free of any DB dependency). Same contract as rateLimit(), just async.
+ * @param {string} key - Caller-namespaced bucket key.
+ * @param {RateLimitOptions} options - limit (max hits) and windowMs (window length).
+ * @param {number} [now] - Current epoch ms; injectable for deterministic tests.
+ * @returns {Promise<RateLimitResult>} allowed + retryAfterMs.
+ */
+export const rateLimitAsync = async (key: string, options: RateLimitOptions, now = Date.now()): Promise<RateLimitResult> => {
+   if (isPostgresBackend()) {
+      const { rateLimitStore } = await import('./rate-limit-store');
+      return rateLimitStore(key, options, now);
+   }
+   return rateLimit(key, options, now);
+};
