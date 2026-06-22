@@ -62,8 +62,8 @@ export const getDomains = async (req: NextApiRequest, res: NextApiResponse<Domai
    const withStats = !!req?.query?.withstats;
    try {
       const allDomains: Domain[] = await Domain.findAll({ where: { ...scopeWhere(account) } });
-      const formattedDomains: DomainType[] = allDomains.map((el) => {
-         const domainItem: any = el.get({ plain: true });
+      const formattedDomains: DomainType[] = allDomains.map((el): DomainType => {
+         const domainItem = el.get({ plain: true }) as Record<string, unknown>;
          // FIELD HYGIENE for the customer surface (the same response the UI and the hosted MCP read):
          //   1. Never emit credential-shaped fields. The raw Search Console blob carries cryptr-
          //      encrypted client_email / private_key (and an oauth_refresh_token); we strip ALL of them
@@ -73,16 +73,17 @@ export const getDomains = async (req: NextApiRequest, res: NextApiResponse<Domai
          //   2. Rename the internal `umami_website_id` column to a neutral `siteId`, so the customer
          //      surface never names the analytics backend. The DB column read is unchanged; only the
          //      response key is reshaped.
-         const scData = domainItem?.search_console ? JSON.parse(domainItem.search_console) : {};
+         const rawSC = typeof domainItem.search_console === 'string' ? domainItem.search_console : '';
+         const scData = rawSC ? JSON.parse(rawSC) : {};
          const searchConsoleConnected = !!(scData?.client_email && scData?.private_key) || !!scData?.oauth_refresh_token;
          const safeSearchConsole = { property_type: scData?.property_type || 'domain', url: scData?.url || '' };
          const { search_console, umami_website_id, ...rest } = domainItem;
          return {
-            ...rest,
+            ...(rest as unknown as DomainType),
             siteId: umami_website_id ? String(umami_website_id) : null,
             searchConsoleConnected,
             search_console: JSON.stringify(safeSearchConsole),
-         } as DomainType;
+         };
       });
       const theDomains: DomainType[] = withStats ? await getdomainStats(formattedDomains) : formattedDomains;
       return res.status(200).json({ domains: theDomains });
@@ -98,7 +99,7 @@ const addDomain = async (req: NextApiRequest, res: NextApiResponse<DomainsAddRes
       // key cannot fan out unbounded site creation (each new site queues cost-bearing work downstream).
       // Keyed on the resolved account id (the admin sentinel under MULTI_TENANT off shares one key,
       // which is fine: it is the single operator). Mirrors the onboard / hosted-MCP rate brake.
-      const brake = rateLimit(`write:${ownerIdFor(account)}`, { limit: 60, windowMs: 60000 });
+      const brake = rateLimit(`write:${ownerIdFor(account) ?? 'admin'}`, { limit: 60, windowMs: 60000 });
       if (!brake.allowed) {
          res.setHeader('Retry-After', Math.ceil(brake.retryAfterMs / 1000));
          return res.status(429).json({ domains: null, error: 'Too many requests. Please slow down and retry shortly.' });

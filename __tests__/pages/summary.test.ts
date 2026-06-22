@@ -85,7 +85,9 @@ describe('GET /api/summary', () => {
       await handler(makeReq({ domain: 'getmasset.com' }), res);
 
       expect(res.payload.humanVisitors).toBe(177);
-      expect(res.payload.note).toBe('Raw total includes bots; humanVisitors is the datacenter-filtered real number.');
+      expect(res.payload.note).toBe(
+         'Raw provider total counts differently and includes bots; humanVisitors is the datacenter-filtered first-party number to trust.',
+      );
    });
 
    it('omits the note when raw and human are within 25%', async () => {

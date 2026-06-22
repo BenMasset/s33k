@@ -38,10 +38,10 @@ const SingleDomain: NextPage = () => {
       return active;
    }, [router.query.slug, domainsData]);
 
-   const domainHasScAPI = useMemo(() => {
-      const domainSc = activDomain?.search_console ? JSON.parse(activDomain.search_console) : {};
-      return !!(domainSc?.client_email && domainSc?.private_key);
-   }, [activDomain]);
+   // The /api/domains list response now ships a searchConsoleConnected boolean instead of the raw SC
+   // credential blob, so detect connection via that boolean (the old client_email check is always
+   // falsy on the list shape).
+   const domainHasScAPI = useMemo(() => !!activDomain?.searchConsoleConnected, [activDomain]);
 
    const { keywordsData, keywordsLoading } = useFetchKeywords(router, activDomain?.domain || '', setKeywordSPollInterval, keywordSPollInterval);
    const theDomains: DomainType[] = (domainsData && domainsData.domains) || [];

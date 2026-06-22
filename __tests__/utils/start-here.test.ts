@@ -53,9 +53,14 @@ describe('composeHeadline gathering-awareness (via buildReady)', () => {
       expect(r.headline).not.toContain('about 0 human visitor');
    });
 
-   it('leads with momentum when a rank check is still pending even if some traffic exists', () => {
+   it('keeps the real headline (with a rank-running note) when traffic exists but a rank check is pending', () => {
       const r = buildReady(readyInput({ humanVisitors: 12, aiReferredVisitors: 3, rankPending: true }));
-      expect(r.headline.toLowerCase()).toContain('tracking is live');
+      // Real numbers must NOT be hidden behind the gathering headline just because one new keyword is
+      // still being rank-checked on an established site.
+      expect(r.headline).toContain('about 12 human visitor(s)');
+      expect(r.headline).toContain('3 AI-referred visitor(s)');
+      expect(r.headline.toLowerCase()).toContain('first rank check is running');
+      expect(r.headline.toLowerCase()).not.toContain('first numbers are coming in');
    });
 
    it('shows the real headline once a real number has landed', () => {

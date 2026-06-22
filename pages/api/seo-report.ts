@@ -150,7 +150,10 @@ const isScraperConfigError = (message: string): boolean => {
    return m.includes('no scraper client')
       || m.includes('quota') || m.includes('rate limit') || m.includes('rate-limit') || m.includes('429')
       || m.includes('unauthorized') || m.includes('401') || m.includes('403')
-      || m.includes('invalid api key') || m.includes('invalid key') || m.includes('api key')
+      // Match only the specific API-KEY problem phrasings, NOT the bare substring 'api key' (which a
+      // benign message could contain), so a real "no/missing/invalid api key" is caught without
+      // false-positiving on any sentence that merely mentions an api key.
+      || m.includes('no api key') || m.includes('missing api key') || m.includes('invalid api key') || m.includes('invalid key')
       || m.includes('forbidden') || m.includes('not authorized') || m.includes('authentication');
 };
 

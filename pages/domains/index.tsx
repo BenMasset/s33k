@@ -40,9 +40,10 @@ const Domains: NextPage = () => {
    const domainSCAPiObj = useMemo(() => {
       const domainsSCAPI:{ [ID:string] : boolean } = {};
       if (domainsData?.domains) {
-         domainsData.domains.forEach(async (domain:DomainType) => {
-            const domainSc = domain?.search_console ? JSON.parse(domain.search_console) : {};
-            domainsSCAPI[domain.ID] = domainSc.client_email && domainSc.private_key;
+         domainsData.domains.forEach((domain:DomainType) => {
+            // The /api/domains list response no longer carries SC credentials; read the boolean it
+            // now ships instead of JSON.parse(search_console).client_email (always falsy now).
+            domainsSCAPI[domain.ID] = !!domain.searchConsoleConnected;
          });
       }
       return domainsSCAPI;

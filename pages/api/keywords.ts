@@ -96,7 +96,7 @@ const addKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGet
       // id (the admin sentinel under MULTI_TENANT off shares one key, which is fine: single operator).
       // Mirrors the addDomain / onboard / hosted-MCP rate brake. Runs before the per-request cap so a
       // flood takes the cheaper rejection.
-      const brake = rateLimit(`write:${ownerIdFor(account)}`, { limit: 60, windowMs: 60000 });
+      const brake = rateLimit(`write:${ownerIdFor(account) ?? 'admin'}`, { limit: 60, windowMs: 60000 });
       if (!brake.allowed) {
          res.setHeader('Retry-After', Math.ceil(brake.retryAfterMs / 1000));
          return res.status(429).json({ error: 'Too many requests. Please slow down and retry shortly.' });

@@ -18,6 +18,13 @@ type DomainType = {
    scImpressions?: number,
    scPosition?: number,
    search_console?: string,
+   // The /api/domains LIST response no longer ships the raw Search Console credential blob; it ships
+   // a neutral `siteId` (renamed from the internal umami_website_id column) and a boolean
+   // `searchConsoleConnected`. UI pages must detect "Search Console connected" via this boolean, NOT
+   // by JSON.parse(search_console).client_email (which the list response intentionally strips). The
+   // singular /api/domain route still returns the full per-domain config for the settings modal.
+   siteId?: string | null,
+   searchConsoleConnected?: boolean,
    ideas_settings?: string,
    scrape_strategy?: ScrapeStrategy | '',
    scrape_pagination_limit?: number,

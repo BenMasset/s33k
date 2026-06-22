@@ -529,7 +529,10 @@ export type ReadyResult = {
  * @returns {string}
  */
 const composeHeadline = (d: ReadyInput): string => {
-   const gathering = (d.humanVisitors <= 0 && d.aiReferredVisitors <= 0) || Boolean(d.rankPending);
+   // GATHERING only when nothing real has landed yet (no humans AND no AI referrals). A still-running
+   // first rank check (rankPending) must NOT hide real traffic on an established site that simply added
+   // one new keyword; in that case keep the real headline and just note the rank check is running.
+   const gathering = d.humanVisitors <= 0 && d.aiReferredVisitors <= 0;
    if (gathering) {
       return `${d.domain}: tracking is live, the first numbers are coming in. Rankings populate after the next check; `
          + 'traffic shows as soon as the script sees visitors.';
@@ -537,7 +540,8 @@ const composeHeadline = (d: ReadyInput): string => {
    const ai = d.aiReferredVisitors > 0
       ? `${d.aiReferredVisitors} AI-referred visitor(s)`
       : 'no AI-referred visitors yet';
-   return `${d.domain} over ${d.period}: about ${d.humanVisitors} human visitor(s), ${ai}.`;
+   const rankClause = d.rankPending ? ' First rank check is running for new keywords.' : '';
+   return `${d.domain} over ${d.period}: about ${d.humanVisitors} human visitor(s), ${ai}.${rankClause}`;
 };
 
 /**

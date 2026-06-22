@@ -77,7 +77,7 @@ const getSummary = async (req: NextApiRequest, res: NextApiResponse<SummaryRespo
       // divide-by-zero and a spurious note on an empty window). The human count is the trustworthy one.
       const diverges = visitorsRaw > 0 && Math.abs(visitorsRaw - humanVisitors) / visitorsRaw > DIVERGENCE_THRESHOLD;
       const note = diverges
-         ? 'Raw total includes bots; humanVisitors is the datacenter-filtered real number.'
+         ? 'Raw provider total counts differently and includes bots; humanVisitors is the datacenter-filtered first-party number to trust.'
          : undefined;
 
       return res.status(200).json({ domain, period, summary, visitorsRaw, humanVisitors, note, error });

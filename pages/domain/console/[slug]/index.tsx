@@ -83,8 +83,9 @@ const DiscoverPage: NextPage = () => {
    }, [router.query.slug, domainsData]);
 
    const domainHasScAPI = useMemo(() => {
-      const domainSc = activDomain?.search_console ? JSON.parse(activDomain.search_console) : {};
-      return !!(domainSc?.client_email && domainSc?.private_key);
+      // The /api/domains list response ships a searchConsoleConnected boolean now (no raw
+      // credentials), so read it directly instead of JSON.parse(search_console).client_email.
+      return !!activDomain?.searchConsoleConnected;
    }, [activDomain]);
 
    return (
