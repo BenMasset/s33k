@@ -8,6 +8,10 @@ import { readLocalSCData } from './searchConsole';
  * @param {DomainType[]} domains - An array of objects of type DomainType.
  * @returns {DomainType[]} - An array of objects of type DomainType.
  */
+// ISOLATION INVARIANT: the per-domain Keyword.findAll below is UNSCOPED (by domain only). It is
+// leak-safe ONLY because callers pass the caller's OWN already-scoped domain set (e.g. domains.ts
+// getDomains uses Domain.findAll({ ...scopeWhere(account) }) first). Do NOT feed this a domain the
+// caller does not own, or it leaks another tenant's keywords.
 const getdomainStats = async (domains:DomainType[]): Promise<DomainType[]> => {
    const finalDomains: DomainType[] = [];
 

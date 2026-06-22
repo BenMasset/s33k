@@ -35,7 +35,12 @@ export const normalizeEmail = (email: string): string => email.trim().toLowerCas
 // permitted by the UNIQUE index, exactly like the prior plaintext column).
 export const emailHash = (email: string | null | undefined): string | null => {
    if (!email || !email.trim()) { return null; }
-   const secret = process.env.SECRET || '';
+   // Require a real SECRET: an empty key would silently degrade the blind index from keyed HMAC to a
+   // brute-forceable bare SHA-256 (defeating the anti-DB-dump property), with no signal. Throw instead,
+   // matching encryptEmail. Prod boot already refuses to start without a strong SECRET (entrypoint.sh),
+   // so this only guards a misconfigured dev/test environment.
+   const secret = process.env.SECRET;
+   if (!secret) { throw new Error('SECRET is required to hash account emails (blind index).'); }
    return crypto.createHmac('sha256', secret).update(normalizeEmail(email)).digest('hex');
 };
 

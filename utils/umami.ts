@@ -58,6 +58,11 @@ import { canonicalizeDomain } from './canonical-domain';
  * @param {string} domain - Site domain, e.g. "getmasset.com".
  * @returns {Promise<string | null>} The stored website id, or null.
  */
+// ISOLATION INVARIANT: this is an UNSCOPED by-domain lookup (no scopeWhere). It is leak-safe ONLY
+// because every caller is an analytics route that has already called resolveDomainAccess(account, domain)
+// to ownership-gate (403 otherwise), and the `domain` column is globally @Unique so this resolves the
+// one already-verified owner's row. Do NOT call this from a path that has not ownership-gated the domain
+// first, or it becomes a cross-tenant website-id oracle.
 const loadDomainWebsiteId = async (domain: string): Promise<string | null> => {
    try {
       // Canonicalize so this matches the ONE form Domain rows are registered under (and the form
