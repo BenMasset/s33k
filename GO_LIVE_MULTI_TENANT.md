@@ -1,102 +1,135 @@
-# Go-live runbook: taking s33k multi-tenant
+# Go-live runbook: taking s33k public (invite-only, trial + Stripe)
 
-The operational checklist for opening s33k to real invited users (signup + magic-link
-login). This is a CHECKLIST, not background reading. Work it top to bottom.
-
-The code is built, tested, and deployed. What remains is configuration + a smoke test.
+The operational checklist for opening s33k to real users. This is a CHECKLIST, not background
+reading. Work it top to bottom. Launch model (locked by Ben): INVITE-ONLY funnel. Every invited
+user gets a 14-day, 1-site, no-card trial, then hits a hard pay wall and subscribes via Stripe at
+$7/site/month. Public self-serve signup is BUILT but intentionally dormant (the s33k.io landing
+stays "request access"); flip it later by pointing the landing form at `/api/signup`.
 
 ---
 
-## Current prod state (verified 2026-06-20)
+## What changed this session (the launch-hardening, all committed on `main`, NOT yet deployed)
 
-| Item | State | Note |
+| Area | State | Where |
 |---|---|---|
-| `MULTI_TENANT` | **`true` (already on)** | The multi-tenant system + the `/api/auth/*` magic-link routes are LIVE right now, not dormant. The legacy `APIKEY` still resolves to admin, so admin/MCP access is unchanged. |
-| `Account.email` migration | **applied** | Boot is fail-loud; the app is Online serving, so the additive `email` column applied cleanly. |
-| `NEXT_PUBLIC_APP_URL` | **set** (`https://app.s33k.io`) | Magic-link and invite links are built from this, so they point at the right host. |
-| `RESEND_API_KEY` | **SET and WORKING (do not re-debug this)** | Verified 2026-06-20 by the Resend send log: s33k delivered real invite + site-share + send-test emails on 6/18 and 6/19 (e.g. "You have been invited to s33k" -> ben@getmasset.com, "A site (getmasset.com) was shared with you" -> tyler@getmasset.com, both `delivered`). The `railway variables` CLI shows the value column BLANK because it is a reference/shared var (the documented CLI display artifact), NOT because it is unset. The send path is live. |
-| Sending domain | **`invites.s33k.io` verified in Resend, sending enabled** | Default sender `s33k <noreply@invites.s33k.io>` resolves. No `RESEND_FROM_EMAIL` override needed. |
-| Railway plan | **single instance** | The current single instance is fine. Provisioning anything new (extra replicas, a Redis, etc.) is blocked until you upgrade. |
+| Tenant data isolation | An operator (you) CANNOT read any tenant's data via any app/API/MCP path with the flag on. Account login emails encrypted at rest (AES-256) with a keyed HMAC blind index. | `utils/scope.ts`, `utils/accountEmail.ts`, migration 027. Tyler: SHIP. |
+| Scale to ~1000 users | Shared-store (Postgres) rate limiter behind `RATE_LIMIT_BACKEND`; atomic transactional billing caps (no count-then-create race); `DB_POOL_MAX`; scale indexes (migration 030); bounded scrape concurrency; resumable paged cron drain (no keyword starvation); bulk ingest. | `utils/rate-limit*.ts`, `utils/caps-guard.ts`, `utils/scrape-queue.ts`, `pages/api/cron.ts`. Tyler: SHIP. |
+| Self-serve signup | Public `/api/signup` (email-verified magic link, non-enumerating, rate-limited, 404 when flag off). BUILT but the public landing does NOT point at it yet (invite-only choice). | `pages/api/signup.ts`, `/signup` page. |
+| Automatic Stripe lifecycle | trial -> wall -> checkout -> unlock -> cancel/relock, all webhook-driven and idempotent. In-LLM billing tools (`billing_status`, `start_checkout`, `open_billing_portal`). Dunning emails. | `pages/api/billing/*`, `mcp/src/tools.ts`. Tyler: FIX-THEN-SHIP, fixes applied. |
+| Branding + UX | De-SerpBeared UI; `/welcome` post-checkout page; discoverable login; `BACKUP.md`. | many. Tyler: SHIP. |
 
-Net: the email loop is CLOSED and proven. Multi-tenant invite/login is wired end to end. The only remaining gate before inviting friends is running the smoke test below once.
-
----
-
-## Pre-flight (do these before inviting a real user)
-
-1. ~~**Set `RESEND_API_KEY`**~~ **DONE.** Already set and proven working in prod (see the state table
-   above). Do not re-debug this; the blank `railway variables` value column is a CLI display artifact
-   for reference vars, not an unset key.
-2. ~~**Verify the sending domain in Resend.**~~ **DONE.** `invites.s33k.io` is verified with sending
-   enabled, so the default sender `s33k <noreply@invites.s33k.io>` works. No `RESEND_FROM_EMAIL`
-   override needed.
-3. **Stay on ONE instance.** Do NOT enable horizontal scaling / multiple replicas yet. The rate
-   limiters (per-IP and the per-email inbox-bomb cap on `/api/auth/request-link`) are in-process, so
-   N replicas means N times the intended ceiling. The per-email cap is the only inbox-flood defense,
-   so a single instance is required until the shared-store limiter (the standing debt below) is built.
-4. **Upgrade Railway only if you expect signup volume.** A handful of invited friends is fine on the
-   current box. Real onboarding load needs headroom (and you cannot add a Redis for the limiter fix
-   on the Free plan anyway).
+Gate at every round: lint clean, full jest green (now 160 suites / 1394 tests), next + mcp builds green, zero em dashes.
 
 ---
 
-## Go-live: smoke-test the whole loop with your OWN email first
+## Step 0: deploy the hardened build (NOTHING above is live yet)
 
-Run this end to end before sending a real invite. `APIKEY` below is the admin Bearer key
-(the legacy `process.env.APIKEY`).
+`main` is **+6 commits ahead of `origin/main`** and ahead of what is running on Railway. The hardening
+is committed locally only.
 
-1. **Send yourself an external invite** (as admin):
-   `POST /api/invite` with `{ "type": "external", "email": "<your-test-email>" }` and
-   `Authorization: Bearer <APIKEY>`. Expect `{ code, link, emailSent: true }`. Check the inbox: the
-   branded invite email should arrive (this confirms Resend works).
-2. **Accept it.** Open the `link` (or `/auth/login` style accept page). You get a NEW account on a
-   14-day trial, an admin API key shown ONCE, and the MCP connect command. Save that key.
-3. **Simulate a new device, request a magic link:**
-   `POST /api/auth/request-link` with `{ "email": "<your-test-email>" }` (no auth). Expect
-   `{ sent: true }`. The login email should arrive within seconds.
-4. **Click the link.** It opens `/auth/login?token=...`, auto-verifies, and shows a FRESH admin key
-   (the old one still works, gradual rotation). Logging in from a new device now works.
-5. **Prove isolation.** With the new tenant's key, list domains (`GET /api/domains`). It must return
-   ONLY that tenant's domains, NEVER the admin's (getmasset.com). If it sees admin data, STOP and do
-   not invite anyone.
-6. **Prove the non-leak.** `POST /api/auth/request-link` with an email that has NO account. It must
-   return the identical `{ sent: true }` and send nothing. Same response = no enumeration.
-7. **Confirm admin is unaffected.** The legacy `APIKEY` still has full admin access; the MCP banner
-   is healthy; getmasset.com data is intact.
-
-If all seven pass, you can send a real external invite.
+1. **Push `main` to origin FIRST.** Deploy is `railway up` from the working tree, but a later
+   *variable-change* redeploy rebuilds from the **pinned git origin**. If origin is stale, changing any
+   env var will silently REVERT all six hardening commits (documented footgun). So: `git push origin main`
+   before you touch any Railway variable.
+2. **Deploy:** from `~/Projects/s33k` (NOT a sibling dir), `railway up --service s33k`. This runs
+   migrations 027/029/030 on boot (fail-loud; the next boot is the migration checkpoint).
+3. Confirm the app is Online and `GET /api/summary` returns the new shape (has `humanVisitors`).
 
 ---
 
-## Verify (after a real user is on)
+## Step 1: set the env (single instance, billing on)
 
-- The invited user can connect their LLM over MCP with their key and see only their own site.
-- They can re-authenticate from a second machine via magic link.
-- `external_invite_quota` (default 5 per account) gates how many external accounts the admin can
-  invite. Raise the `account.external_invite_quota` column to grow it.
-- Billing is deferred: every new account is a 14-day no-card trial. No Stripe charge wires up yet.
+Set these on the `s33k` Railway service, then redeploy (origin already pushed per Step 0):
+
+| Var | Set to | Why |
+|---|---|---|
+| `MULTI_TENANT` | `true` | already on. Tenants + `/api/auth/*` + signup live. |
+| `NEXT_PUBLIC_APP_URL` | `https://app.s33k.io` | already set. Magic-link / checkout-redirect base (header-poison-proof). |
+| `RESEND_API_KEY` | already set + WORKING | invite/login/dunning email. Do NOT re-debug (blank in `railway variables --kv` is a reference-var CLI artifact). |
+| `STRIPE_SECRET_KEY` | your **test** key first (`sk_test_...`), then live | enables checkout/portal. Unset = pay wall returns 503 (graceful). |
+| `STRIPE_PRICE_PER_SITE` | the recurring $7/site Price id | the per-unit price bought with quantity = sites. |
+| `STRIPE_WEBHOOK_SECRET` | `whsec_...` from the Stripe webhook endpoint | verifies webhook signatures (forged = 400, mutate nothing). |
+| `RATE_LIMIT_BACKEND` | leave UNSET (`memory`) | correct for ONE instance. Only set `postgres` for multi-instance, AND only after verifying the Postgres `ON CONFLICT RETURNING` path against real PG (should-fix #1 below). |
+| `DB_POOL_MAX`, `SCRAPE_CONCURRENCY`, `CRON_PAGE_SIZE`, `LAST_USED_THROTTLE_MS` | leave unset | defaults (5 / 10 / 500 / 5min) are right at launch scale. |
+| `WAITLIST_ALLOWED_ORIGINS` | include `https://s33k.io,https://www.s33k.io` | CORS for the landing's request-access (and signup, if opened later). |
+
+Stay on ONE Railway instance until the shared-store limiter is verified on real PG (see should-fix #1).
 
 ---
 
-## Rollback (if something is wrong)
+## Step 2: configure Stripe (test mode first)
 
-Set `MULTI_TENANT=false` on the `s33k` service and redeploy. This returns the instance to
-byte-for-byte single-admin: the `/api/auth/*` routes 404, and per-account resolution stops (only the
-legacy `APIKEY` + admin work). CAVEAT: any per-account or share key you have already handed out
-(e.g. a teammate's read-only getmasset.com key) STOPS resolving while the flag is off. So only roll
-all the way back if you have not onboarded real tenants yet; otherwise fix forward.
+1. In Stripe (TEST mode): create ONE recurring Product/Price, $7 / site / month; copy the Price id ->
+   `STRIPE_PRICE_PER_SITE`.
+2. Add a webhook endpoint -> `https://app.s33k.io/api/billing/webhook`, subscribed to:
+   `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`,
+   `customer.subscription.deleted`, `invoice.payment_failed`, `invoice.payment_succeeded`,
+   `customer.subscription.trial_will_end`. Copy the signing secret -> `STRIPE_WEBHOOK_SECRET`.
+3. Enable the Stripe Billing Portal (Settings -> Billing -> Customer portal).
+4. Use the test key (`sk_test_...`) for the smoke test in Step 4; swap to live only after it passes.
 
 ---
 
-## Standing debt to schedule (not blocking V1)
+## Step 3: smoke-test the invite + login + isolation loop (your OWN email)
 
-- **Shared-store rate limiter.** The in-memory per-IP/per-email limiters live in ~5 places (the
-  hosted MCP route, waitlist, collect, and both `/api/auth/*` routes). They are per-process. Build a
-  single Postgres- or Redis-backed fixed-window limiter once and route all of them through it; only
-  then is horizontal scaling safe. Until then: one instance.
-- **Email-collision orphan.** If two external invites use the same email, the second account is
-  created WITHOUT an email (so it can never magic-link login; it can be re-invited). A working key
-  beats a 500, which is why it degrades this way. Surface a hint to that account in a later pass.
+`APIKEY` = the admin Bearer key (legacy `process.env.APIKEY`).
+
+1. **Invite yourself:** `POST /api/invite` `{ "type":"external", "email":"<you>" }`, `Authorization: Bearer <APIKEY>`. Expect `{ code, link, emailSent:true }`; the branded invite email arrives.
+2. **Accept** the link -> NEW account on a 14-day trial, admin key shown ONCE, MCP connect command. Save the key.
+3. **Magic-link from a "new device":** `POST /api/auth/request-link` `{ "email":"<you>" }` (no auth) -> `{ sent:true }`, login email arrives.
+4. **Click it** -> `/auth/login?token=...` auto-verifies, shows a FRESH key (old one still works).
+5. **Prove isolation:** with the new tenant key, `GET /api/domains` returns ONLY that tenant's domains, NEVER getmasset.com. If it sees admin data, STOP.
+6. **Prove non-leak:** `POST /api/auth/request-link` for an email with NO account -> identical `{ sent:true }`, nothing sent.
+7. **Admin unaffected:** legacy `APIKEY` still full admin; MCP banner healthy; getmasset.com intact.
+
+---
+
+## Step 4: smoke-test the FULL Stripe billing loop (test mode, your trial account)
+
+Do this with `STRIPE_SECRET_KEY=sk_test_...`. Use Stripe test card `4242 4242 4242 4242`.
+
+1. **In-LLM status:** from an MCP client on the trial account's key, call `billing_status` -> trialing, N days left, 1 site.
+2. **Force the wall:** either wait out the trial or set the account's `trial_ends_at` to the past in the DB (test only). Now a WRITE (`POST /api/keywords` / `onboard`) must 403 with the "trial ended / call billing_status then start_checkout" message; reads still work.
+3. **Checkout:** call `start_checkout { sites: 1 }` -> hosted Stripe URL. Pay with the test card. You land on `/welcome?billing=success`.
+4. **Auto-unlock:** the `checkout.session.completed` + `customer.subscription.*` webhooks flip the account to `active`. Re-run the write from step 2: it now succeeds. `billing_status` shows active, 1 paid site.
+5. **Add a site:** `start_checkout { sites: 2 }` (or change quantity in the portal) -> `customer.subscription.updated` -> `paid_sites` = 2, caps follow.
+6. **Payment fail -> relock:** in Stripe test, trigger a failed renewal (or send a test `invoice.payment_failed`). Account -> `past_due` = locked immediately (writes 403, scraping paused); the dunning email fires. Then a successful `invoice.payment_succeeded` -> `active` = auto-unlock.
+7. **Cancel -> relock:** cancel in the portal -> `customer.subscription.deleted` -> `canceled` = writes 403 again; reads still work.
+8. **Forged webhook:** POST a body with a bad/missing signature -> 400, account state UNCHANGED.
+
+If all eight pass on test mode, swap `STRIPE_SECRET_KEY` (and the webhook endpoint's secret) to LIVE and you can invite real users.
+
+---
+
+## Step 5: durability before inviting paying users
+
+- Enable Railway automated Postgres backups on the `s33k` Postgres service (daily, retain 7+ days; confirm one snapshot exists). See `BACKUP.md` section 1. No API, dashboard only.
+- Run the `BACKUP.md` restore drill once so backups are proven restorable, not just present.
+
+---
+
+## Rollback
+
+Set `MULTI_TENANT=false` on `s33k` and redeploy: byte-for-byte single-admin (the `/api/auth/*` and
+`/api/signup` routes 404, per-account resolution stops, only legacy `APIKEY`/admin work). CAVEAT: any
+per-account / share key already handed out STOPS resolving while off. So only full-rollback if no real
+tenant is onboarded; otherwise fix forward.
+
+---
+
+## Should-fix to schedule (not blocking invite-only, single-instance V1)
+
+- **#1 Verify the Postgres rate-limiter `ON CONFLICT ... RETURNING` path against real Postgres BEFORE
+  setting `RATE_LIMIT_BACKEND=postgres`.** The shared-store limiter is built and unit-tested on the
+  SQLite branch only; the PG path is unexercised (the same test-path-vs-prod-path trap that hid the
+  VARCHAR + UmamiProvider bugs). It is DORMANT on the `memory` default, which is correct for one
+  instance. Required only when scaling to multiple replicas.
+- **Equalize signup/request-link awaited work** to close the residual email-existence timing oracle
+  (low signal; the 3/hour-per-email + 10/min-per-IP caps make it impractical). Do it once for both routes.
+- **Concurrent-duplicate-signup orphan account** (a racing second signup on the same new email leaves a
+  null-email trialing account). DB litter, no money/data leak. Follow-up.
+- **past_due grace window** (currently sites lock the instant a payment fails). The eager lock is the
+  safe default; add an explicit active-through-grace predicate only if you want a dunning window.
 
 ---
 
@@ -104,12 +137,12 @@ all the way back if you have not onboarded real tenants yet; otherwise fix forwa
 
 | Action | Where |
 |---|---|
-| The flag | `MULTI_TENANT=true` on the `s33k` Railway service (already set) |
-| Email wire | `RESEND_API_KEY` (+ a verified `RESEND_FROM_EMAIL` domain) |
-| Link host | `NEXT_PUBLIC_APP_URL` (already set) |
+| The flag | `MULTI_TENANT=true` on the `s33k` Railway service |
+| Deploy | `git push origin main` THEN `railway up --service s33k` from `~/Projects/s33k` |
+| Stripe price / key / webhook | `STRIPE_PRICE_PER_SITE` / `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` |
 | Invite (admin) | `POST /api/invite { type, email }` |
-| Accept (public) | `POST /api/invite/accept { code }` |
 | Request login link (public) | `POST /api/auth/request-link { email }` |
-| Verify login link (public) | `POST /api/auth/verify-link { token }` |
-| Login page | `/auth/login` (and `/auth/login?token=...`) |
+| In-LLM billing | MCP tools `billing_status`, `start_checkout`, `open_billing_portal` |
+| Backups | `BACKUP.md` (Railway dashboard, daily, 7+ day retention) |
 | Isolation seam | `utils/authorize.ts` -> `resolveAccount` -> `scopeWhere` (see `CLAUDE.md` section B) |
+| Open self-serve later | point the s33k.io landing form at `/api/signup` (built, dormant) |
