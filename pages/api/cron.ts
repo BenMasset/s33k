@@ -14,6 +14,7 @@ import type Account from '../../database/models/account';
 import refreshAndUpdateKeywords from '../../utils/refresh';
 import { isAccountActive } from '../../utils/plans';
 import { failedRetryWhere } from '../../utils/scraper';
+import { sendTrialEnding } from '../../utils/sendTrialEnding';
 
 type CRONRefreshRes = {
    started: boolean
@@ -32,6 +33,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // normal full scrape cron. Both reuse the same Bearer auth and the same spend-brake below.
       if (req.query.mode === 'retry') {
          return cronRetryFailedKeywords(req, res, account);
+      }
+      // mode=dunning is the daily lifecycle sweep: mail the "your trial ends soon" notice to trialing
+      // accounts whose trial_ends_at is within the next few days. Best-effort, paged, never scrapes.
+      if (req.query.mode === 'dunning') {
+         return cronDunningSweep(req, res, account);
       }
       return cronRefreshkeywords(req, res, account);
    }
@@ -242,5 +248,87 @@ const cronRetryFailedKeywords = async (req: NextApiRequest, res: NextApiResponse
    } catch (error) {
       console.log('[ERROR] CRON Retrying Failed Keywords: ', error);
       return res.status(400).json({ started: false, error: 'CRON Error retrying keywords!' });
+   }
+};
+
+// How many days before trial end to start the "trial ending" notice. A trialing account is mailed
+// once its trial_ends_at falls inside this window (and before it expires). Env-overridable; default 3.
+const dunningWindowDays = (): number => {
+   const raw = parseInt(process.env.DUNNING_WINDOW_DAYS || '', 10);
+   return Number.isFinite(raw) && raw > 0 ? raw : 3;
+};
+
+// IDEMPOTENCY without a DB column (this agent must not edit the Account model): a per-process map of
+// accountId -> a coarse time bucket (UTC day) it was last notified in. The dunning sweep fires once a
+// day, so a same-bucket repeat (e.g. a manual re-POST on the same day, or two near-simultaneous fires)
+// is suppressed and a victim is not double-mailed. It resets on process restart, which at worst allows
+// ONE extra notice after a restart on the same day; that is acceptable for a best-effort lifecycle
+// nudge and is far cheaper than the alternative (a model migration owned by another agent). The day
+// bucket also means the SAME account naturally becomes eligible again the next day if it is still in
+// the window, so a 3-day window yields at most ~3 reminders per trial, not a per-tick flood.
+const notifiedBucketByAccount = new Map<number, string>();
+const dayBucket = (now = Date.now()): string => new Date(now).toISOString().slice(0, 10);
+
+// THE DUNNING SWEEP (POST /api/cron?mode=dunning). With MULTI_TENANT on AND the operator (admin)
+// caller, find trialing accounts whose trial_ends_at is within the next dunningWindowDays and still in
+// the future, and mail each the trial-ending notice (best-effort, never throws). Paged with
+// cronPageSize so a large account table is processed in bounded chunks, not loaded all at once. The
+// notify happens fire-and-forget (started:true returns immediately; the same non-blocking contract as
+// the scrape) so the outbound Resend calls cannot time the request out. Flag-off / non-admin: no-op
+// (no trialing accounts exist in single-tenant), returns started:true. cronScopeFor is reused only to
+// keep the operator-privilege audit pattern consistent; the account query itself is operator-wide by
+// nature (lifecycle email is an instance-admin action, like the SERP sweep).
+const cronDunningSweep = async (req: NextApiRequest, res: NextApiResponse<CRONRefreshRes>, account?: Account | null) => {
+   // Flag-off or a non-admin caller: there are no trialing tenants to notify in single-tenant, and a
+   // tenant key must not trigger an instance-wide lifecycle sweep. No-op, success shape unchanged.
+   if (!isMultiTenantEnabled() || !isAdminAccount(account)) {
+      return res.status(200).json({ started: true });
+   }
+   // Reuse the operator-wide audit pattern (best-effort, never blocks). cronScopeFor returns {} for the
+   // admin under the flag; the account query below is operator-wide by design (lifecycle is admin work).
+   await cronScopeFor(account, 'cron.dunning');
+
+   // Kick the paged notify off and return immediately, so a big account list / slow Resend cannot time
+   // the request out. drainDunning is best-effort throughout and swallows its own errors.
+   drainDunning();
+   return res.status(200).json({ started: true });
+};
+
+// Page through trialing accounts whose trial_ends_at is in (now, now + windowDays], mailing the
+// trial-ending notice once per account per UTC day. Bounded pages (cronPageSize) and a cursor on the
+// account primary key so a 1000+ account table is processed in chunks, never materialized at once.
+// Best-effort: every send is awaited only to bound concurrency to one page at a time, and a single bad
+// account never aborts the sweep (sendTrialEnding never throws; the loop is wrapped regardless).
+const drainDunning = async (): Promise<void> => {
+   try {
+      const now = Date.now();
+      const windowEnd = new Date(now + dunningWindowDays() * 24 * 60 * 60 * 1000);
+      const nowDate = new Date(now);
+      const bucket = dayBucket(now);
+      const pageSize = cronPageSize();
+      const maxPages = 10000;
+      let lastId = 0;
+      for (let page = 0; page < maxPages; page += 1) {
+         const where: Record<string, unknown> = {
+            subscription_status: 'trialing',
+            trial_ends_at: { [Op.gt]: nowDate, [Op.lte]: windowEnd },
+            ID: { [Op.gt]: lastId },
+         };
+         // eslint-disable-next-line no-await-in-loop
+         const accounts: Account[] = await AccountModel.findAll({ where, order: [['ID', 'ASC']], limit: pageSize });
+         if (accounts.length === 0) { break; }
+         lastId = accounts[accounts.length - 1].ID;
+         // Skip any account already notified in this UTC-day bucket so a same-day re-fire does not
+         // double-mail. The bucket advances daily, so a still-in-window account is re-eligible
+         // tomorrow (at most ~one notice per day across the window).
+         const toNotify = accounts.filter((acc) => notifiedBucketByAccount.get(acc.ID) !== bucket);
+         for (const acc of toNotify) {
+            notifiedBucketByAccount.set(acc.ID, bucket);
+            // eslint-disable-next-line no-await-in-loop
+            await sendTrialEnding(acc);
+         }
+      }
+   } catch (error) {
+      console.log('[ERROR] CRON dunning sweep: ', error);
    }
 };

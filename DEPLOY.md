@@ -196,7 +196,106 @@ If a refresh returns no positions, the most common cause is a missing or wrong `
 
 ---
 
-## 7. Day-2 operations
+## 7. Billing (public SaaS)
+
+This section is for running s33k as a paid, self-serve product (the hosted `app.s33k.io` model). It is OPTIONAL: a single-tenant install for your own sites does not need any of it. Billing only does anything with `MULTI_TENANT=true`; with the flag off every account is the always-active admin and these env vars are inert.
+
+The model is per-unit: $7 per site per month, each site includes 50 keywords, rank checks are weekly. A new account gets a 14-day no-credit-card trial (1 site / 50 keywords). When the trial ends the account hits a hard wall (reads stay open, writes return 403) until it subscribes. Subscribing unlocks; canceling or non-payment relocks. All of this is automatic.
+
+### 7a. Turn billing on
+
+```bash
+# Multi-tenant + billing only matter together. Off = single-admin install, billing inert.
+MULTI_TENANT=true
+```
+
+### 7b. Create the one Stripe Price and wire the keys
+
+1. In Stripe, create ONE recurring Price: $7.00 / month, billing period monthly, set to a usage type of "Licensed" (per-unit / per-quantity). There are NO tiers: the subscription quantity is the number of sites, so one Price is all you need. Copy its `price_...` id.
+2. Set the billing env vars (verify the exact names against `utils/stripe.ts`):
+
+```bash
+# STRIPE_SECRET_KEY: your Stripe secret API key (sk_live_... in production).
+STRIPE_SECRET_KEY=sk_live_xxx
+# STRIPE_PRICE_PER_SITE: the ONE recurring Price id from step 1. Checkout buys it with
+# quantity = the number of sites. (This is the env name utils/stripe.ts reads.)
+STRIPE_PRICE_PER_SITE=price_xxx
+```
+
+If `STRIPE_SECRET_KEY` or `STRIPE_PRICE_PER_SITE` is unset, the billing routes return a clean "billing not configured" error instead of crashing, so a half-configured instance is safe.
+
+### 7c. Add the Stripe webhook
+
+Subscriptions stay in sync through a single signature-verified webhook. In the Stripe dashboard, add an endpoint:
+
+- URL: `https://app.s33k.io/api/billing/webhook` (use your real public host).
+- Subscribe to these events:
+  - `checkout.session.completed`
+  - `customer.subscription.created`
+  - `customer.subscription.updated`
+  - `customer.subscription.deleted`
+  - `invoice.payment_failed`
+  - `invoice.payment_succeeded`
+  - `customer.subscription.trial_will_end`
+
+Copy the endpoint's signing secret (`whsec_...`) and set it:
+
+```bash
+# STRIPE_WEBHOOK_SECRET: the whsec_ signing secret for the endpoint above. The webhook
+# verifies every payload against this before applying any subscription change.
+STRIPE_WEBHOOK_SECRET=whsec_xxx
+```
+
+### 7d. Enable the Stripe Billing Portal
+
+In Stripe, enable the Customer Billing Portal (Settings -> Billing -> Customer portal). This is what `/api/billing/portal` opens so a subscriber can change quantity, update a card, or cancel without contacting you. The success and cancel return URLs are built from `resolveBaseUrl` (which uses `NEXT_PUBLIC_APP_URL`, already required in step 4), so no extra URL config is needed.
+
+### 7e. Email for signup, login, and trial-ending notices
+
+Self-serve signup, magic-link login, and the daily trial-ending notice all send through Resend:
+
+```bash
+# RESEND_API_KEY: enables all transactional email (signup, login link, trial-ending notice).
+RESEND_API_KEY=re_xxx
+# RESEND_FROM_EMAIL: the From address. Must be on a domain/subdomain verified in Resend
+# (defaults to "s33k <noreply@invites.s33k.io>"). A root-domain address bounces as unverified.
+RESEND_FROM_EMAIL=s33k <noreply@invites.s33k.io>
+```
+
+Without `RESEND_API_KEY`, the trial-ending notice silently no-ops (best-effort): no email goes out, nothing crashes. The daily dunning sweep fires `POST /api/cron?mode=dunning` from `cron.js` (default daily; tune with `DUNNING_INTERVAL`, window with `DUNNING_WINDOW_DAYS`, default 3 days before trial end).
+
+### 7f. Allow the signup origin
+
+```bash
+# WAITLIST_ALLOWED_ORIGINS: comma-separated list of origins allowed to POST the public
+# signup / waitlist endpoints. Include your signup page origin (e.g. https://app.s33k.io,
+# https://s33k.io). A request from an origin not on this list is rejected.
+WAITLIST_ALLOWED_ORIGINS=https://app.s33k.io,https://s33k.io
+```
+
+### 7g. Cross-instance rate limiting (only after migration 029 is verified)
+
+Leave `RATE_LIMIT_BACKEND` unset (per-process limiter) until you have:
+
+1. Run migration 029 (the `rate_limit` Postgres table), and
+2. Verified the Postgres `ON CONFLICT ... RETURNING` path works against your real Postgres (a documented Round-2 should-fix: the shared-store counter is exercised end-to-end, not just unit-tested).
+
+Then, and only then:
+
+```bash
+# RATE_LIMIT_BACKEND=postgres makes the per-email login brake and the public-endpoint
+# brakes hold ACROSS instances (so the cap is global, not per-process). Do NOT set this
+# before migration 029 is applied and the ON CONFLICT RETURNING path is verified.
+RATE_LIMIT_BACKEND=postgres
+```
+
+### 7h. Postgres backups (before public launch)
+
+Before you invite real, paying users, enable Railway Postgres automated backups on the s33k project's Postgres service. With public SaaS, the database holds every tenant's account, subscription state, and tracked data; the `/app/data` volume snapshot in section 8 covers a SQLite install but NOT the prod Postgres. Turn on the Postgres provider's automated backups (Railway Postgres -> Backups) and confirm at least one successful snapshot exists.
+
+---
+
+## 8. Day-2 operations
 
 - **Backups:** the whole state is the volume at `/app/data`. Snapshot it (Railway volume backup, or periodically `GET /api/domains` + `GET /api/keywords?domain=...` and store the JSON).
 - **Upgrades:** push to the connected branch; Railway rebuilds the image. The volume persists across the redeploy, so data is kept.

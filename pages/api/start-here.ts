@@ -54,13 +54,60 @@ import {
    analyticsTeaser, seoTeaser, aeoTeaser, TEASER_UNAVAILABLE,
    OnboardingResult, ReadyResult,
 } from '../../utils/start-here';
+import { isAccountActive } from '../../utils/plans';
+
+// The billing banner start_here surfaces ABOVE everything else when a trial is ending soon or the
+// account is locked. It is the highest-priority thing to say: a near-expiry or expired account must
+// see "subscribe to keep your sites running" before any report. Additive: absent on a healthy active
+// account, and never emitted in single-tenant (isAccountActive is always true with MULTI_TENANT off).
+type BillingBanner = {
+   state: 'trial-ending' | 'locked',
+   headline: string,
+   // The exact in-LLM steps to resolve it. Always billing_status then start_checkout.
+   nextStep: string,
+};
+
+// The number of days-left at or below which a trial counts as "ending soon" for the banner.
+const TRIAL_ENDING_SOON_DAYS = 3;
 
 type StartHereResponse =
-   | { mode: 'no-domain', message: string, error?: string | null }
-   | { mode: 'pick-domain', domains: string[], message: string, error?: string | null }
-   | (OnboardingResult & { error?: string | null })
-   | (ReadyResult & { error?: string | null })
-   | { error: string | null };
+   | { mode: 'no-domain', message: string, billing?: BillingBanner, error?: string | null }
+   | { mode: 'pick-domain', domains: string[], message: string, billing?: BillingBanner, error?: string | null }
+   | (OnboardingResult & { billing?: BillingBanner, error?: string | null })
+   | (ReadyResult & { billing?: BillingBanner, error?: string | null })
+   | { billing?: BillingBanner, error: string | null };
+
+// Compute the billing banner for the resolved account, or undefined when nothing needs saying.
+// LOCKED (inactive: expired trial / canceled / past_due) takes priority over trial-ending. A
+// trialing account with the trial ending in <= TRIAL_ENDING_SOON_DAYS days gets the "trial ending"
+// banner. With MULTI_TENANT off / the admin sentinel, isAccountActive is always true and the trial
+// columns are absent, so this returns undefined and the single-tenant path is byte-for-byte unchanged.
+const billingBannerFor = (account?: Account | null, now = Date.now()): BillingBanner | undefined => {
+   if (!account) { return undefined; }
+   const fixSteps = 'Call billing_status to see your status, then start_checkout to subscribe ($7/site/month).';
+   if (!isAccountActive(account)) {
+      return {
+         state: 'locked',
+         headline: 'Your free trial has ended, subscribe to keep your sites running.',
+         nextStep: fixSteps,
+      };
+   }
+   if (account.subscription_status === 'trialing' && account.trial_ends_at) {
+      const endsMs = new Date(account.trial_ends_at).getTime();
+      if (Number.isFinite(endsMs)) {
+         const daysLeft = Math.ceil((endsMs - now) / 86400e3);
+         if (daysLeft <= TRIAL_ENDING_SOON_DAYS) {
+            const n = Math.max(daysLeft, 0);
+            return {
+               state: 'trial-ending',
+               headline: `Your free trial ends in ${n} day${n === 1 ? '' : 's'}.`,
+               nextStep: fixSteps,
+            };
+         }
+      }
+   }
+   return undefined;
+};
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<StartHereResponse>) {
    await ensureSynced();
@@ -74,6 +121,14 @@ const getStartHere = async (req: NextApiRequest, res: NextApiResponse<StartHereR
    const requested = typeof req.query.domain === 'string' ? req.query.domain.trim() : '';
    const period = (typeof req.query.period === 'string' && req.query.period) ? req.query.period : '30d';
 
+   // Highest-priority thing to surface: the billing banner. Computed once from the resolved account
+   // and spread into every response below (additive; undefined on a healthy active / single-tenant
+   // account, so it never appears there). Reads are never gated; this only annotates.
+   const billing = billingBannerFor(account);
+   const withBilling = <T extends object>(payload: T): T & { billing?: BillingBanner } => (
+      billing ? { ...payload, billing } : payload
+   );
+
    try {
       // ---- Step 1: resolve WHICH domain to start on. --------------------------
       let domain = requested;
@@ -84,20 +139,20 @@ const getStartHere = async (req: NextApiRequest, res: NextApiResponse<StartHereR
             .map((d) => String((d.get({ plain: true }) as { domain?: string }).domain || ''))
             .filter(Boolean);
          if (names.length === 0) {
-            return res.status(200).json({
-               mode: 'no-domain',
+            return res.status(200).json(withBilling({
+               mode: 'no-domain' as const,
                message: 'You are not tracking any sites yet. Add a domain first (ask "start tracking <yourdomain.com>", '
                   + 'the onboard tool), then call start_here again.',
                error: null,
-            });
+            }));
          }
          if (names.length > 1) {
-            return res.status(200).json({
-               mode: 'pick-domain',
+            return res.status(200).json(withBilling({
+               mode: 'pick-domain' as const,
                domains: names,
                message: `You track ${names.length} domains. Call start_here again with one of these.`,
                error: null,
-            });
+            }));
          }
          [domain] = names;
       }
@@ -149,7 +204,7 @@ const getStartHere = async (req: NextApiRequest, res: NextApiResponse<StartHereR
                   + 'shows the shape: the YOUR_SITE_ID placeholder is replaced with your real site id once it is added.',
          };
          const onboarding = buildOnboarding(domain, setup, install);
-         return res.status(200).json({ ...onboarding, error: null });
+         return res.status(200).json(withBilling({ ...onboarding, error: null }));
       }
 
       // ---- Step 3 + 4: ready. Compose the dashboard for the headline + top action. ----
@@ -308,7 +363,7 @@ const getStartHere = async (req: NextApiRequest, res: NextApiResponse<StartHereR
          rankPending: anyRankPending,
          goalCount,
       });
-      return res.status(200).json({ ...ready, error: null });
+      return res.status(200).json(withBilling({ ...ready, error: null }));
    } catch (error) {
       // Last-resort guard. The per-pillar catches mean we should never get here; if we do, still
       // return a usable ready payload (curated reports/see/ask, teasers degraded) rather than a 500,
@@ -322,6 +377,6 @@ const getStartHere = async (req: NextApiRequest, res: NextApiResponse<StartHereR
          topAction: 'Ask dashboard for the full overview, or retry shortly.',
          teasers: { analytics: TEASER_UNAVAILABLE, seo: TEASER_UNAVAILABLE, aeo: TEASER_UNAVAILABLE },
       });
-      return res.status(200).json({ ...fallback, error: 'Error Building Start Here for this Domain.' });
+      return res.status(200).json(withBilling({ ...fallback, error: 'Error Building Start Here for this Domain.' }));
    }
 };

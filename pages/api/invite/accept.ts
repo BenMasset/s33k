@@ -7,8 +7,8 @@ import ensureAdminAccount from '../../../utils/ensureAdminAccount';
 import { generateApiKey, hashApiKey, apiKeyPrefix } from '../../../utils/resolveAccount';
 import { resolveBaseUrl } from '../../../utils/baseUrl';
 import { clientIp } from '../../../utils/collect-guards';
-import { encryptEmail, emailHash } from '../../../utils/accountEmail';
 import { rateLimitAsync } from '../../../utils/rate-limit';
+import { createTrialingAccount } from '../../../utils/provisionAccount';
 
 // PUBLIC invite-accept endpoint. This route takes NO API key: the invite code IS the
 // credential. It is the one place outside the account-management routes that mints a real
@@ -40,11 +40,6 @@ import { rateLimitAsync } from '../../../utils/rate-limit';
 // (and lazily flipped to status 'expired' on the next touch). No new column needed: we derive
 // expiry from the timestamps-managed createdAt.
 const INVITE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-
-// The 14-day no-credit-card trial length, applied when acceptExternal creates a NEW account. This
-// is the ONE place a trial starts (only external invites create accounts). See utils/plans.ts for
-// the cap level granted during the trial and the gating that kicks in once it expires.
-const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
 
 // The single generic rejection. Used for invalid, missing, used, expired, and revoked codes so
 // the response is indistinguishable across all of them: no existence is ever leaked.
@@ -175,38 +170,20 @@ const shareHint = (domain: string): string => 'Paste the command above into Clau
    + `for ${domain} only: you can view its rankings, analytics, and AI visibility, but not make changes and not `
    + 'see any other site.';
 
-// The fields every brand-new external account starts with, minus email. Shared by createAccount so
-// the with-email and the email-collision-retry paths produce identical accounts otherwise.
-const newAccountBase = (name: string, fallbackEmail: string | null) => ({
-   name: name || fallbackEmail || 'New Account',
-   plan: 'free',
-   status: 'active',
-   subscription_status: 'trialing',
-   trial_ends_at: new Date(Date.now() + TRIAL_DURATION_MS),
-   stripe_customer_id: null,
-});
-
-// Create the new external account, stamping email from the invite so the account is later findable
-// by magic-link login. The email is ENCRYPTED AT REST: we store the cryptr ciphertext in `email` and
-// the deterministic HMAC blind index in `email_hash` (utils/accountEmail). The UNIQUE index now sits
-// on email_hash, so dedupe is by hash. If email_hash's UNIQUE index rejects the create (some account
-// already holds this email), retry ONCE without any email so the invite (already claimed = single-use)
-// is not wasted: the user still gets a working account + key, just no login-email of its own. Any
-// non-uniqueness error propagates to the caller's catch, which returns the generic 'Error Accepting
-// Invite.' rather than a 500. fallbackEmail (for the display name) uses the plaintext, not the cipher.
-const createAccount = async (name: string, email: string | null): Promise<Account> => {
-   const cleanEmail = email && email.trim() ? email.trim().toLowerCase() : null;
-   const encrypted = encryptEmail(cleanEmail);
-   const hash = emailHash(cleanEmail);
+// Apply the optional account display name from the accept body. createTrialingAccount sets a default
+// name (the email, or 'New Account'); invite-accept additionally lets the recipient pass a name. We
+// set it post-create when one was supplied so the shared mint stays the single source of the account
+// shape and only this caller-specific touch lives here. Best-effort: a save failure must not undo a
+// successful mint, so a name-save error is swallowed (the account + key already exist).
+const applyAccountName = async (account: Account, name: string): Promise<void> => {
+   if (!name || typeof account.save !== 'function') { return; }
    try {
-      return await Account.create({ ...newAccountBase(name, cleanEmail), email: encrypted, email_hash: hash });
+      // Use the Sequelize instance setter (not a direct property assignment) so the field is staged
+      // on the model the same way and we do not reassign the function parameter (no-param-reassign).
+      account.set('name', name);
+      await account.save();
    } catch (error) {
-      const errName = (error as { name?: string })?.name || '';
-      if (cleanEmail && errName === 'SequelizeUniqueConstraintError') {
-         // Email already owned by another account: mint the account without an email of its own.
-         return Account.create({ ...newAccountBase(name, cleanEmail), email: null, email_hash: null });
-      }
-      throw error;
+      console.log('[ERROR] Setting account name on accept: ', error);
    }
 };
 
@@ -232,7 +209,14 @@ const acceptExternal = async (req: NextApiRequest, res: NextApiResponse<AcceptRe
    // and mints a working key. The new account simply has no email of its own, so the pre-existing
    // account that owns that email keeps the magic-link path (login is keyed to whoever holds the
    // email first). Better a usable key with no login-email than a 500 on a consumed invite.
-   const account = await createAccount(name, invite.email);
+   // Mint the trialing account via the SHARED core so invite-accept and public signup produce
+   // byte-identical accounts (email encrypted at rest + blind-index hash, 14-day trial, the
+   // unique-collision retry). The invite is already claimed (single-use preserved), so we MUST NOT
+   // fail the user on a collision: createTrialingAccount retries WITHOUT the email in that case, so
+   // the signup still succeeds with a working key (the account simply has no login-email of its own).
+   // We stamp from invite.email (never the request body), then apply the optional display name.
+   const account = await createTrialingAccount(invite.email || '');
+   await applyAccountName(account, name);
    const fullKey = generateApiKey();
    await ApiKey.create({
       account_id: account.ID,

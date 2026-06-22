@@ -3,6 +3,7 @@ import type Stripe from 'stripe';
 import { ensureSynced } from '../../../database/database';
 import Account from '../../../database/models/account';
 import { getStripe, isStripeConfigured } from '../../../utils/stripe';
+import { sendPaymentFailed } from '../../../utils/sendPaymentFailed';
 
 // POST /api/billing/webhook -> PUBLIC, signature-verified Stripe webhook.
 //
@@ -156,11 +157,44 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
             if (account) { await account.update({ subscription_status: 'canceled' }); }
             break;
          }
+         case 'invoice.payment_succeeded': {
+            // A payment landed. If the account was past_due (or otherwise not active), the recovered
+            // payment must flip it back to 'active' to AUTO-UNLOCK. Re-fetch the subscription so we
+            // apply the real current state (status + quantity + period end) rather than guessing.
+            // Idempotent: if the account is already 'active', applySubscription sets the same values.
+            const invoice = event.data.object as Stripe.Invoice;
+            const customerId = typeof invoice.customer === 'string' ? invoice.customer : null;
+            const account = await resolveAccount(customerId, null);
+            if (account && account.subscription_status !== 'active') {
+               const subId = (invoice as unknown as { subscription?: string | null }).subscription;
+               if (subId && typeof subId === 'string') {
+                  const sub = await stripe.subscriptions.retrieve(subId);
+                  await applySubscription(account, sub, customerId);
+               } else {
+                  // No subscription id on the invoice to re-fetch: at minimum mark active so the
+                  // recovered payment still unlocks the account.
+                  await account.update({ subscription_status: 'active' });
+               }
+            }
+            break;
+         }
          case 'invoice.payment_failed': {
             const invoice = event.data.object as Stripe.Invoice;
             const customerId = typeof invoice.customer === 'string' ? invoice.customer : null;
             const account = await resolveAccount(customerId, null);
-            if (account) { await account.update({ subscription_status: 'past_due' }); }
+            if (account) {
+               await account.update({ subscription_status: 'past_due' });
+               // Tell the user to update their card. BEST-EFFORT: sendPaymentFailed never throws, but
+               // we also do not await it into the failure path. A send hiccup must NOT turn a
+               // successful status flip into a 400 + Stripe retry storm.
+               await sendPaymentFailed(account);
+            }
+            break;
+         }
+         case 'customer.subscription.trial_will_end': {
+            // Stripe fires this ~3 days before a trial ends. We do NOT send the trial-ending email
+            // here: that email is CRON-DRIVEN (owned by the trial-sweep job) to keep it single-source
+            // and avoid a double-send. Acknowledge 200 so Stripe stops retrying.
             break;
          }
          default:

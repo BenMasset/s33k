@@ -89,23 +89,24 @@ const connectScopedClient = async (scopedDomain: string) => {
 const callText = (result: any): string => (result?.content?.[0]?.text ?? '');
 
 describe('hosted MCP handshake: a connected client can list the tools', () => {
-   it('initialize + tools/list exposes the DEFAULT customer surface (72 tools, no admin tools)', async () => {
-      // This connection has no S33K_MCP_ADMIN, so it gets the customer surface: the 72 tools a
+   it('initialize + tools/list exposes the DEFAULT customer surface (75 tools, no admin tools)', async () => {
+      // This connection has no S33K_MCP_ADMIN, so it gets the customer surface: the 75 tools a
       // marketer reads/manages for their own site, INCLUDING the self-serve create_domain + onboard
       // (adding your own site is the first thing every user does, so it must be on the default
       // surface). The 10 true app-management tools are absent here, which is exactly right (a customer
       // never needs invites, waitlist, domain sharing, account deletion, or feature-request admin).
       // Exposing create_domain/onboard is safe: the API enforces that a read-only share key is
       // GET-only, so a scoped key SEES them but cannot execute them (covered by the member-readonly
-      // and scoped-key tests). The full 82-tool admin surface is opt-in via S33K_MCP_ADMIN=true.
+      // and scoped-key tests). The full 85-tool admin surface is opt-in via S33K_MCP_ADMIN=true.
       const { client } = await connectScopedClient('getmasset.com');
       const listed = await client.listTools();
       const names = listed.tools.map((t) => t.name);
       // The handshake worked and the customer tools the stdio server exposes by default are present,
-      // including the self-serve onboarding tools.
-      expect(names.length).toBe(72);
+      // including the self-serve onboarding tools and the three self-serve billing tools.
+      expect(names.length).toBe(75);
       expect(names).toEqual(expect.arrayContaining([
          'start_here', 'traffic_summary', 'add_keyword', 'list_domains', 'seo_report', 'create_domain', 'onboard',
+         'billing_status', 'start_checkout', 'open_billing_portal',
       ]));
       // The true admin-management tools are NOT present on the default surface.
       const adminTools = [

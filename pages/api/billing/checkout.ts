@@ -78,6 +78,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       }
 
       const baseUrl = resolveBaseUrl(req);
+
+      // Model A: honor the remaining app-side trial in Stripe. If the account is still trialing
+      // (trial_ends_at is a valid FUTURE timestamp), pass that same instant as the subscription's
+      // trial_end so a user who subscribes mid-trial keeps their free days and is NOT charged
+      // immediately. Stripe REJECTS a trial_end in the past, so we only set it when it is strictly in
+      // the future; otherwise we omit it entirely and the subscription starts paid right away.
+      const subscriptionData: Record<string, unknown> = { metadata: { s33k_account_id: String(row.ID) } };
+      const trialEndsAt = row.trial_ends_at ? new Date(row.trial_ends_at).getTime() : NaN;
+      if (Number.isFinite(trialEndsAt) && trialEndsAt > Date.now()) {
+         subscriptionData.trial_end = Math.floor(trialEndsAt / 1000);
+      }
+
       const session = await stripe.checkout.sessions.create({
          mode: 'subscription',
          customer: customerId,
@@ -89,7 +101,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
          // Carry the account id on the session + subscription so the webhook can resolve the account
          // even before the customer id has propagated locally.
          client_reference_id: String(row.ID),
-         subscription_data: { metadata: { s33k_account_id: String(row.ID) } },
+         subscription_data: subscriptionData,
       });
 
       if (!session.url) {

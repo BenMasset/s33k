@@ -1,15 +1,12 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { ensureSynced } from '../../../database/database';
 import Account from '../../../database/models/account';
-import Invite from '../../../database/models/invite';
 import ensureAdminAccount from '../../../utils/ensureAdminAccount';
-import { generateInviteCode } from '../../../utils/resolveAccount';
-import { resolveBaseUrl } from '../../../utils/baseUrl';
-import { sendMagicLinkEmail } from '../../../utils/send-invite';
 import { isMultiTenantEnabled } from '../../../utils/scope';
 import { clientIp } from '../../../utils/collect-guards';
 import { emailHash } from '../../../utils/accountEmail';
 import { rateLimitAsync } from '../../../utils/rate-limit';
+import { sendLoginLink, LOGIN_TOKEN_TTL_MS as SHARED_LOGIN_TOKEN_TTL_MS } from '../../../utils/sendLoginLink';
 
 // PUBLIC passwordless-login REQUEST endpoint. A returning user who has an account but no key on
 // THIS device POSTs their email; if the email maps to an account we mail a one-time, 15-minute
@@ -70,9 +67,10 @@ const looksLikeEmail = (value: string): boolean => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.
 // The single non-leak success response: returned whether or not the email maps to an account.
 const SENT_OK = { sent: true } as const;
 
-// 15-minute TTL for a login token. Far shorter than the 30-day invite TTL: a login link should be
-// usable promptly and then dead. The verify endpoint re-checks this same window.
-export const LOGIN_TOKEN_TTL_MS = 15 * 60 * 1000;
+// 15-minute TTL for a login token. The value now lives in utils/sendLoginLink (the shared issue
+// core); re-exported here so verify-link.ts keeps importing it from this module unchanged, and so
+// the TTL has a SINGLE source the issuer and the verifier share and cannot drift.
+export const LOGIN_TOKEN_TTL_MS = SHARED_LOGIN_TOKEN_TTL_MS;
 
 type RequestLinkRes = {
    sent?: boolean,
@@ -129,32 +127,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       const account = await Account.findOne({ where: { email_hash: emailHash(email) } });
 
       if (account && account.status === 'active') {
-         // Create a single-use, 15-minute login token. It is an Invite row of type 'login' so it
-         // reuses the proven single-use + claim-before-mint machinery, but the verify endpoint's
-         // type guard ensures a 'login' token is ONLY redeemable there, never at invite/accept.
-         const code = generateInviteCode();
-         await Invite.create({
-            code,
-            // The login token is self-issued by the user requesting it; there is no inviter. We
-            // stamp the account's own id so the row is attributable and FK-consistent.
-            inviter_account_id: account.ID,
-            type: 'login',
-            email,
-            target_account_id: account.ID,
-            status: 'pending',
-         });
-
-         const loginLink = `${resolveBaseUrl(req)}/auth/login?token=${code}`;
-         // Best-effort send, FIRED AND NOT AWAITED. Awaiting the outbound Resend HTTPS call before
-         // responding would make the account-exists path measurably slower than the no-account path
-         // (a real network round-trip), which is a timing oracle for email existence that defeats the
-         // uniform { sent: true } body. We kick the send off and respond immediately, so request
-         // latency is the same whether or not the account exists. The token row is already persisted
-         // (awaited above), so the link works the moment the email arrives. A missing RESEND_API_KEY
-         // or a failed send never throws (best-effort helper); we still log failures for operators.
-         sendMagicLinkEmail({ to: email, loginLink }).catch((e) => {
-            console.log('[ERROR] Sending magic link: ', e);
-         });
+         // Mint the single-use, 15-minute login token + fire the magic-link email via the SHARED
+         // issue core (utils/sendLoginLink), the same one public signup uses, so the two send an
+         // identical login link. The token is an Invite of type 'login' (reuses the single-use +
+         // claim-before-mint machinery, type-guarded to verify-link); the send is fired-not-awaited
+         // inside sendLoginLink as the timing-oracle fix, so the account-exists path is no slower
+         // than the no-account path. Never throws (best-effort send), so the uniform response holds.
+         await sendLoginLink(req, account, email);
       }
 
       // Identical response whether or not the account existed. No existence leak.

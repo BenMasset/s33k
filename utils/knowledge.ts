@@ -856,6 +856,41 @@ const capabilities: CapabilityEntry[] = [
       whenToUse: 'Use when someone asks "how do I add the tracking code on <platform>" or needs the snippet again after onboarding.',
       examplePrompt: 'How do I add the s33k tracking code on Webflow?',
    },
+   // --- Billing (customer self-serve: trial, subscribe, manage) ---
+   {
+      id: 'billing_status',
+      toolName: 'billing_status',
+      category: 'account',
+      title: 'Billing status: trial countdown and subscription state',
+      description: 'Answers "is my trial active, how many days left, how many sites am I paying for". Returns your subscription state '
+         + '(trialing, active, or locked), the trial countdown in days left, paid_sites (the number of sites you pay for at $7/site/month), '
+         + 'whether your account isActive, and your effective caps (sites, keywords, weekly rank-check cadence).',
+      whenToUse: 'Use first to check where you stand on billing: whether your free trial is still active, how many days are left, or how many '
+         + 'sites you are paying for. Then start_checkout to subscribe or change site count, or open_billing_portal to manage your card or cancel.',
+      examplePrompt: 'Is my trial still active and how many days do I have left?',
+   },
+   {
+      id: 'start_checkout',
+      toolName: 'start_checkout',
+      category: 'account',
+      title: 'Start checkout: subscribe or change your site count',
+      description: 'Returns a hosted-checkout link to open in a browser, where you enter your card and subscribe (or change how many sites you '
+         + 'pay for) at $7 per site per month, each site including 50 tracked keywords. Subscribing unlocks a locked or expired-trial account. '
+         + 'Pass sites to set the quantity (defaults to 1).',
+      whenToUse: 'Use to start a paid subscription when your free trial is ending or has ended, or to add more sites. Run billing_status first '
+         + 'to see your current state.',
+      examplePrompt: 'I want to subscribe for 2 sites.',
+   },
+   {
+      id: 'open_billing_portal',
+      toolName: 'open_billing_portal',
+      category: 'account',
+      title: 'Open billing portal: manage card or cancel',
+      description: 'Returns a link to your billing portal, where you can update your card, change your plan, view invoices, or cancel. Requires '
+         + 'an existing subscription (run start_checkout first if you have never subscribed).',
+      whenToUse: 'Use to manage an existing subscription: update the card on file, see invoices, or cancel.',
+      examplePrompt: 'I need to update my card on file.',
+   },
    // --- Account / invites / waitlist ---
    {
       id: 'invite_external',

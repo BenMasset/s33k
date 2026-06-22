@@ -13,7 +13,11 @@ import { EventEmitter } from 'events';
  * stubbed. The Account model is mocked. The raw request body is delivered via a stream emitter.
  */
 
-jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
+jest.mock('../../database/database', () => ({
+   __esModule: true,
+   default: { sync: jest.fn(async () => undefined) },
+   ensureSynced: jest.fn(async () => undefined),
+}));
 jest.mock('sequelize', () => ({ __esModule: true, Op: { in: Symbol('in') } }));
 jest.mock('../../database/models/account', () => ({ __esModule: true, default: { findOne: jest.fn() } }));
 
@@ -28,6 +32,12 @@ jest.mock('../../utils/stripe', () => ({
    })),
    // Per-unit: a single price, no price->tier reverse map. priceIdPerSite is the only accessor.
    priceIdPerSite: jest.fn(() => 'price_per_site'),
+}));
+
+const mockSendPaymentFailed = jest.fn(async () => undefined);
+jest.mock('../../utils/sendPaymentFailed', () => ({
+   __esModule: true,
+   sendPaymentFailed: (...args: unknown[]) => mockSendPaymentFailed(...args),
 }));
 
 // eslint-disable-next-line import/first
@@ -116,5 +126,156 @@ describe('POST /api/billing/webhook: valid checkout.session.completed', () => {
       expect(applied.stripe_customer_id).toBe('cus_123');
       expect(applied.paid_sites).toBe(3);
       expect(applied.subscription_status).toBe('active');
+   });
+});
+
+describe('POST /api/billing/webhook: lifecycle coverage', () => {
+   it('customer.subscription.deleted -> sets canceled', async () => {
+      const update = jest.fn(async () => undefined);
+      const account = { ID: 9, stripe_customer_id: 'cus_9', subscription_status: 'active', update };
+      mockAccount.findOne.mockResolvedValue(account);
+      mockConstructEvent.mockReturnValue({
+         type: 'customer.subscription.deleted',
+         data: { object: { customer: 'cus_9', metadata: { s33k_account_id: '9' } } },
+      });
+      const res = makeRes();
+
+      await webhookHandler(makeReq({ signature: 'good', body: '{"id":"evt_del"}' }), res);
+
+      expect(res.statusCode).toBe(200);
+      expect(update).toHaveBeenCalledWith({ subscription_status: 'canceled' });
+   });
+
+   it('invoice.payment_failed -> sets past_due AND fires sendPaymentFailed', async () => {
+      const update = jest.fn(async () => undefined);
+      const account = { ID: 11, stripe_customer_id: 'cus_11', subscription_status: 'active', update };
+      mockAccount.findOne.mockResolvedValue(account);
+      mockConstructEvent.mockReturnValue({
+         type: 'invoice.payment_failed',
+         data: { object: { customer: 'cus_11' } },
+      });
+      const res = makeRes();
+
+      await webhookHandler(makeReq({ signature: 'good', body: '{"id":"evt_fail"}' }), res);
+
+      expect(res.statusCode).toBe(200);
+      expect(update).toHaveBeenCalledWith({ subscription_status: 'past_due' });
+      expect(mockSendPaymentFailed).toHaveBeenCalledTimes(1);
+      expect(mockSendPaymentFailed).toHaveBeenCalledWith(account);
+   });
+
+   it('invoice.payment_succeeded after past_due -> re-fetches subscription and re-applies active', async () => {
+      const update = jest.fn(async () => undefined);
+      const account = { ID: 12, stripe_customer_id: 'cus_12', subscription_status: 'past_due', update };
+      mockAccount.findOne.mockResolvedValue(account);
+      mockConstructEvent.mockReturnValue({
+         type: 'invoice.payment_succeeded',
+         data: { object: { customer: 'cus_12', subscription: 'sub_12' } },
+      });
+      mockRetrieve.mockResolvedValue({
+         status: 'active',
+         current_period_end: 1_900_000_000,
+         items: { data: [{ quantity: 2, price: { id: 'price_per_site' } }] },
+      });
+      const res = makeRes();
+
+      await webhookHandler(makeReq({ signature: 'good', body: '{"id":"evt_ok"}' }), res);
+
+      expect(res.statusCode).toBe(200);
+      expect(mockRetrieve).toHaveBeenCalledWith('sub_12');
+      const applied = update.mock.calls[0][0] as Record<string, unknown>;
+      expect(applied.subscription_status).toBe('active');
+      expect(applied.paid_sites).toBe(2);
+   });
+
+   it('invoice.payment_succeeded when ALREADY active -> no-op (no re-fetch, no update)', async () => {
+      const update = jest.fn(async () => undefined);
+      const account = { ID: 13, stripe_customer_id: 'cus_13', subscription_status: 'active', update };
+      mockAccount.findOne.mockResolvedValue(account);
+      mockConstructEvent.mockReturnValue({
+         type: 'invoice.payment_succeeded',
+         data: { object: { customer: 'cus_13', subscription: 'sub_13' } },
+      });
+      const res = makeRes();
+
+      await webhookHandler(makeReq({ signature: 'good', body: '{"id":"evt_noop"}' }), res);
+
+      expect(res.statusCode).toBe(200);
+      expect(mockRetrieve).not.toHaveBeenCalled();
+      expect(update).not.toHaveBeenCalled();
+   });
+
+   it('customer.subscription.updated quantity change -> paid_sites updated', async () => {
+      const update = jest.fn(async () => undefined);
+      const account = { ID: 14, stripe_customer_id: 'cus_14', subscription_status: 'active', update };
+      mockAccount.findOne.mockResolvedValue(account);
+      mockConstructEvent.mockReturnValue({
+         type: 'customer.subscription.updated',
+         data: {
+            object: {
+               customer: 'cus_14',
+               status: 'active',
+               current_period_end: 1_950_000_000,
+               metadata: { s33k_account_id: '14' },
+               items: { data: [{ quantity: 5, price: { id: 'price_per_site' } }] },
+            },
+         },
+      });
+      const res = makeRes();
+
+      await webhookHandler(makeReq({ signature: 'good', body: '{"id":"evt_upd"}' }), res);
+
+      expect(res.statusCode).toBe(200);
+      const applied = update.mock.calls[0][0] as Record<string, unknown>;
+      expect(applied.paid_sites).toBe(5);
+      expect(applied.subscription_status).toBe('active');
+   });
+
+   it('customer.subscription.trial_will_end -> 200, no mutation (email is cron-driven)', async () => {
+      const update = jest.fn(async () => undefined);
+      const account = { ID: 15, stripe_customer_id: 'cus_15', subscription_status: 'trialing', update };
+      mockAccount.findOne.mockResolvedValue(account);
+      mockConstructEvent.mockReturnValue({
+         type: 'customer.subscription.trial_will_end',
+         data: { object: { customer: 'cus_15', metadata: { s33k_account_id: '15' } } },
+      });
+      const res = makeRes();
+
+      await webhookHandler(makeReq({ signature: 'good', body: '{"id":"evt_twe"}' }), res);
+
+      expect(res.statusCode).toBe(200);
+      expect(update).not.toHaveBeenCalled();
+      expect(mockSendPaymentFailed).not.toHaveBeenCalled();
+   });
+
+   it('idempotent replay of customer.subscription.updated -> same state', async () => {
+      const update = jest.fn(async () => undefined);
+      const account = { ID: 16, stripe_customer_id: 'cus_16', subscription_status: 'active', update };
+      mockAccount.findOne.mockResolvedValue(account);
+      const evt = {
+         type: 'customer.subscription.updated',
+         data: {
+            object: {
+               customer: 'cus_16',
+               status: 'active',
+               current_period_end: 1_960_000_000,
+               metadata: { s33k_account_id: '16' },
+               items: { data: [{ quantity: 4, price: { id: 'price_per_site' } }] },
+            },
+         },
+      };
+      mockConstructEvent.mockReturnValue(evt);
+
+      const res1 = makeRes();
+      await webhookHandler(makeReq({ signature: 'good', body: '{"id":"evt_rep"}' }), res1);
+      const res2 = makeRes();
+      await webhookHandler(makeReq({ signature: 'good', body: '{"id":"evt_rep"}' }), res2);
+
+      expect(res1.statusCode).toBe(200);
+      expect(res2.statusCode).toBe(200);
+      const first = update.mock.calls[0][0] as Record<string, unknown>;
+      const second = update.mock.calls[1][0] as Record<string, unknown>;
+      expect(second).toEqual(first);
+      expect(first.paid_sites).toBe(4);
    });
 });

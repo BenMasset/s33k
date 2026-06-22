@@ -21,6 +21,7 @@ import {
 } from '../../utils/dashboard';
 import { selectSuggestedQuestions, SuggestedQuestion } from '../../utils/suggested-questions';
 import { renderDashboard } from '../../utils/dashboard-render';
+import { isAccountActive } from '../../utils/plans';
 
 /*
  * ============================================================================
@@ -45,6 +46,12 @@ import { renderDashboard } from '../../utils/dashboard-render';
  * ============================================================================
  */
 
+// A non-blocking billing-lock annotation. When the account is inactive (expired trial / canceled /
+// past_due) we annotate the overview so the user's LLM can surface "subscribe to keep your sites
+// running" alongside the data. READS are NOT capped: the dashboard still returns the full overview;
+// this is purely an additive flag. action is the in-LLM tool to call to fix it.
+type BillingLock = { locked: true, message: string, action: 'start_checkout' };
+
 type DashboardApiResponse = {
    domain?: string,
    period?: string,
@@ -52,7 +59,22 @@ type DashboardApiResponse = {
    suggestedQuestions?: SuggestedQuestion[],
    rendered?: string,
    note?: string,
+   billing?: BillingLock,
    error?: string | null,
+};
+
+// Build the billing-lock annotation for an inactive account, or undefined when the account is
+// active (so the field is simply absent on a healthy account, never a noisy locked:false). With
+// MULTI_TENANT off / the admin sentinel, isAccountActive is always true, so this is never emitted
+// in single-tenant: the flag-off path stays byte-for-byte unchanged.
+const billingLockFor = (account?: Account | null): BillingLock | undefined => {
+   if (isAccountActive(account)) { return undefined; }
+   return {
+      locked: true,
+      message: 'Your free trial has ended or your subscription is inactive. Reads still work, but tracking is paused. '
+         + 'Call billing_status then start_checkout to subscribe and resume.',
+      action: 'start_checkout',
+   };
 };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<DashboardApiResponse>) {
@@ -75,6 +97,10 @@ const getDashboard = async (req: NextApiRequest, res: NextApiResponse<DashboardA
    // unique, so everything below (all keyed by the domain string) is gated behind this one check.
    const owned = await resolveDomainAccess(account, domain);
    if (!owned) { return res.status(403).json({ error: 'Domain not found for this account' }); }
+
+   // Non-blocking billing annotation, computed once and spread into every response below. Reads are
+   // NEVER capped here; an inactive account still gets the full overview, just flagged.
+   const billing = billingLockFor(account);
 
    try {
       const provider = getAnalyticsProvider();
@@ -164,7 +190,7 @@ const getDashboard = async (req: NextApiRequest, res: NextApiResponse<DashboardA
          + 'suggestedQuestions below and your AI will run it for you.';
 
       return res.status(200).json({
-         domain, period, dashboard, suggestedQuestions, rendered, note, error: null,
+         domain, period, dashboard, suggestedQuestions, rendered, note, ...(billing ? { billing } : {}), error: null,
       });
    } catch (error) {
       // Last-resort guard. The per-pillar catches mean we should never get here; if a join itself
@@ -189,6 +215,7 @@ const getDashboard = async (req: NextApiRequest, res: NextApiResponse<DashboardA
          suggestedQuestions: questions,
          rendered: renderDashboard(empty, questions),
          note: 'Could not load full data for this domain this period; showing a starter overview. Retry shortly.',
+         ...(billing ? { billing } : {}),
          error: 'Error Building Dashboard for this Domain.',
       });
    }

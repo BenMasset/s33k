@@ -86,6 +86,7 @@ const EXPECTED_TOOLS = [
    'ai_referrals',
    'ai_visibility',
    'alerts',
+   'billing_status',
    'briefing',
    'daily_brief',
    'campaign_report',
@@ -130,6 +131,7 @@ const EXPECTED_TOOLS = [
    'list_waitlist',
    'live_view',
    'onboard',
+   'open_billing_portal',
    'page_engagement',
    'page_scoreboard',
    'period_compare',
@@ -150,6 +152,7 @@ const EXPECTED_TOOLS = [
    'seo_report',
    'setup_status',
    'share_domain',
+   'start_checkout',
    'start_here',
    'site_audit',
    'striking_distance',
@@ -501,6 +504,19 @@ async function main() {
       { domain: READ_DOMAIN },
       ['not onboarded', 'onboard', 'not found', 'no analytics', 'umami', 'website id'],
    );
+
+   // 3e. Billing tools (customer self-serve). These route to /api/billing/*. billing_status is a
+   // pure GET that always returns the caller's billing state (200), so it is a hard PASS. The two
+   // checkout/portal POSTs depend on Stripe being configured + an existing customer; against a base
+   // URL where Stripe is not wired (or the admin sentinel has no Stripe customer) they correctly
+   // return a "billing not configured" / "subscribe first" body. That is the tool ROUTING correctly,
+   // so it is a soft PASS: we assert the tool is callable and reaches the right route, not that a
+   // live Stripe session was minted (no live Stripe call in the smoke).
+   console.log('\n[3e] Billing tools (customer self-serve, Stripe-optional)');
+   await callAndAssert(client, 'billing_status', {});
+   const BILLING_SOFT = ['billing is not configured', 'billing price', 'subscribe first', 'no billing account', 'could not'];
+   await callSoft(client, 'start_checkout', { sites: 1 }, BILLING_SOFT);
+   await callSoft(client, 'open_billing_portal', {}, BILLING_SOFT);
 
    // 4. Mutating tools, exercised SAFELY against a throwaway temp domain.
    console.log('\n[4] Mutating tools (throwaway domain ' + TEMP_DOMAIN + ')');

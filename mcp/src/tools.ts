@@ -158,6 +158,87 @@ server.registerTool(
    },
 );
 
+// ---------------------------------------------------------------------------
+// billing_status  (customer surface: trial countdown + subscription state)
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'billing_status',
+   {
+      title: 'Billing status: is my trial active, how many days left, how many sites am I paying for',
+      description:
+         'Answers "is my trial active, how many days left, how many sites am I paying for". Returns your subscription state '
+         + '(trialing, active, or locked), the trial countdown in days left, paid_sites (the number of sites you are paying '
+         + 'for at $7/site/month), whether your account isActive, and your effective caps (sites, keywords, rank-check '
+         + 'cadence). Use this first to check where you stand, then start_checkout to subscribe or change your site count, '
+         + 'or open_billing_portal to manage your card or cancel.',
+      inputSchema: {},
+   },
+   async () => {
+      try {
+         const data = await s33kFetch('/api/billing/status');
+         return jsonResult(data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// start_checkout  (customer surface: get a link to subscribe / change sites)
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'start_checkout',
+   {
+      title: 'Start checkout: get a link to start or change your paid subscription ($7/site/month)',
+      description:
+         'Get a link to start or change your paid subscription ($7/site/month). Returns a hosted-checkout URL to open in a '
+         + 'browser, where you enter your card and subscribe (or change how many sites you pay for). The model is per-unit: '
+         + 'one price per site, each site includes 50 tracked keywords. Subscribing unlocks a locked / expired-trial account. '
+         + 'Pass sites to set the quantity (defaults to 1). Use billing_status first to see your current state, and '
+         + 'open_billing_portal to manage or cancel an existing subscription.',
+      inputSchema: {
+         sites: z
+            .number()
+            .int()
+            .optional()
+            .describe('How many sites to subscribe for (each is $7/month and includes 50 keywords). Defaults to 1.'),
+      },
+   },
+   async ({ sites }) => {
+      try {
+         const body: Record<string, unknown> = {};
+         if (typeof sites === 'number') { body.sites = sites; }
+         const data = await s33kFetch('/api/billing/checkout', { method: 'POST', body });
+         return jsonResult(data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
+// ---------------------------------------------------------------------------
+// open_billing_portal  (customer surface: manage card / cancel)
+// ---------------------------------------------------------------------------
+server.registerTool(
+   'open_billing_portal',
+   {
+      title: 'Open billing portal: manage your card or cancel',
+      description:
+         'Get a link to your billing portal, where you can update your card, change your plan, view invoices, or cancel. '
+         + 'Returns a portal URL to open in a browser. Requires an existing subscription (run start_checkout first if you '
+         + 'have never subscribed). Use billing_status to check your current state.',
+      inputSchema: {},
+   },
+   async () => {
+      try {
+         const data = await s33kFetch('/api/billing/portal', { method: 'POST' });
+         return jsonResult(data);
+      } catch (err) {
+         return errorResult(err);
+      }
+   },
+);
+
 server.registerTool(
    'list_domains',
    {
@@ -3169,8 +3250,9 @@ for (const resource of KNOWLEDGE_RESOURCES) {
    );
 }
 
-   // 72 customer tools are always registered (incl. the self-serve create_domain + onboard); the 10
-   // remaining admin tools add on only under S33K_MCP_ADMIN. Report the count actually registered for
-   // this mode (72 customer-only, or the full 82 with admin).
-   return { tools: 72 + adminToolsRegistered, resources: KNOWLEDGE_RESOURCES.length };
+   // 75 customer tools are always registered (incl. the self-serve create_domain + onboard and the
+   // three billing tools billing_status / start_checkout / open_billing_portal); the remaining admin
+   // tools add on only under S33K_MCP_ADMIN. Report the count actually registered for this mode
+   // (75 customer-only, or the full set with admin).
+   return { tools: 75 + adminToolsRegistered, resources: KNOWLEDGE_RESOURCES.length };
 }

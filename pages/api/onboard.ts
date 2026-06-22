@@ -154,9 +154,14 @@ const onboardDomain = async (req: NextApiRequest, res: NextApiResponse<OnboardRe
             }
             if (capError instanceof CapExceeded) {
                const locked = !isAccountActive(account);
-               const message = locked
+               // Append the in-LLM fix path so the user can resolve it without leaving their AI client.
+               // Caps-guard logic above is untouched; only this user-facing string changed.
+               const fixHint = ' Your trial has ended or you have reached your plan limit. '
+                  + 'Call billing_status then start_checkout to subscribe or add sites.';
+               const message = (locked
                   ? 'Your trial has ended or your subscription is inactive. Subscribe to add sites and resume tracking.'
-                  : `Site limit reached for your plan (max ${capError.limit}; ${capError.existing} already tracked). Upgrade to add more.`;
+                  : `Site limit reached for your plan (max ${capError.limit}; ${capError.existing} already tracked). Upgrade to add more.`)
+                  + fixHint;
                return res.status(403).json({ error: message });
             }
             throw capError;
