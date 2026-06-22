@@ -12,6 +12,8 @@ import { canonicalizeDomain } from '../../utils/canonical-domain';
 import type Account from '../../database/models/account';
 import { checkSerchConsoleIntegration, removeLocalSCData } from '../../utils/searchConsole';
 import { removeFromRetryQueue } from '../../utils/scraper';
+import { resolveCaps, isAccountActive } from '../../utils/plans';
+import { rateLimit } from '../../utils/rate-limit';
 
 type DomainsGetRes = {
    domains: DomainType[]
@@ -61,11 +63,26 @@ export const getDomains = async (req: NextApiRequest, res: NextApiResponse<Domai
    try {
       const allDomains: Domain[] = await Domain.findAll({ where: { ...scopeWhere(account) } });
       const formattedDomains: DomainType[] = allDomains.map((el) => {
-         const domainItem:DomainType = el.get({ plain: true });
+         const domainItem: any = el.get({ plain: true });
+         // FIELD HYGIENE for the customer surface (the same response the UI and the hosted MCP read):
+         //   1. Never emit credential-shaped fields. The raw Search Console blob carries cryptr-
+         //      encrypted client_email / private_key (and an oauth_refresh_token); we strip ALL of them
+         //      and expose only a `searchConsoleConnected` boolean plus the non-secret config the SC
+         //      settings modal needs to prefill (property_type, url). A consumer should never see a
+         //      key-shaped value here, even an encrypted one.
+         //   2. Rename the internal `umami_website_id` column to a neutral `siteId`, so the customer
+         //      surface never names the analytics backend. The DB column read is unchanged; only the
+         //      response key is reshaped.
          const scData = domainItem?.search_console ? JSON.parse(domainItem.search_console) : {};
-         const { client_email, private_key } = scData;
-         const searchConsoleData = scData ? { ...scData, client_email: client_email ? 'true' : '', private_key: private_key ? 'true' : '' } : {};
-         return { ...domainItem, search_console: JSON.stringify(searchConsoleData) };
+         const searchConsoleConnected = !!(scData?.client_email && scData?.private_key) || !!scData?.oauth_refresh_token;
+         const safeSearchConsole = { property_type: scData?.property_type || 'domain', url: scData?.url || '' };
+         const { search_console, umami_website_id, ...rest } = domainItem;
+         return {
+            ...rest,
+            siteId: umami_website_id ? String(umami_website_id) : null,
+            searchConsoleConnected,
+            search_console: JSON.stringify(safeSearchConsole),
+         } as DomainType;
       });
       const theDomains: DomainType[] = withStats ? await getdomainStats(formattedDomains) : formattedDomains;
       return res.status(200).json({ domains: theDomains });
@@ -77,6 +94,15 @@ export const getDomains = async (req: NextApiRequest, res: NextApiResponse<Domai
 const addDomain = async (req: NextApiRequest, res: NextApiResponse<DomainsAddResponse>, account?: Account | null) => {
    const { domains } = req.body;
    if (domains && Array.isArray(domains) && domains.length > 0) {
+      // PER-KEY WRITE BRAKE: bound how fast one account/key can create sites, so a leaked or runaway
+      // key cannot fan out unbounded site creation (each new site queues cost-bearing work downstream).
+      // Keyed on the resolved account id (the admin sentinel under MULTI_TENANT off shares one key,
+      // which is fine: it is the single operator). Mirrors the onboard / hosted-MCP rate brake.
+      const brake = rateLimit(`write:${ownerIdFor(account)}`, { limit: 60, windowMs: 60000 });
+      if (!brake.allowed) {
+         res.setHeader('Retry-After', Math.ceil(brake.retryAfterMs / 1000));
+         return res.status(429).json({ domains: null, error: 'Too many requests. Please slow down and retry shortly.' });
+      }
       const owner_id = ownerIdFor(account);
 
       // Store the CANONICAL domain form, never the raw trimmed string (third adversarial review).
@@ -104,6 +130,23 @@ const addDomain = async (req: NextApiRequest, res: NextApiResponse<DomainsAddRes
                owner_id,
             });
          }
+      }
+
+      // BILLING SITE CAP (the COGS / plan guard, mirror of the keyword cap in pages/api/keywords.ts).
+      // resolveCaps returns the account's effective site ceiling: TRIAL caps while trialing (1 site),
+      // the subscribed quantity when active (paid_sites), and a LOCKED 0 once the trial expires / the
+      // sub is canceled or past_due. With MULTI_TENANT off (or for the admin sentinel) the account is
+      // always active and gets unlimited caps, so this is a NO-OP in single-tenant. We count this
+      // account's EXISTING sites (scopeWhere) plus the number being added; if it would exceed the cap
+      // we 403, naming the limit. An inactive (locked) account has a 0 cap, so any add is rejected here.
+      const caps = resolveCaps(account);
+      const existingSites = await Domain.count({ where: { ...scopeWhere(account) } });
+      if (existingSites + domainsToAdd.length > caps.sites) {
+         const locked = !isAccountActive(account);
+         const message = locked
+            ? 'Your trial has ended or your subscription is inactive. Subscribe to add a site and resume tracking.'
+            : `Site limit reached for your plan (max ${caps.sites}; ${existingSites} already tracked). Upgrade to add more.`;
+         return res.status(403).json({ domains: null, error: message });
       }
 
       // Duplicate check on the CANONICAL form. Registering a canonical-equal variant of an existing

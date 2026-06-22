@@ -427,8 +427,11 @@ const getBriefing = async (req: NextApiRequest, res: NextApiResponse<BriefingRes
          const seoNote = flags.opportunityPages
             ? `${opportunities.length} SEO opportunity page(s) waiting`
             : 'no urgent SEO gaps';
+         // Headline is a tight one-line state-of-site only; the action lives in
+         // recommendations[] (mirrors daily_brief separating headline from topAction), so
+         // the narrating LLM is not handed the same sentence twice.
          headline = `${domain} over ${period}: about ${humanCount} human visitor(s)${botNote}, ${aiNote}, `
-            + `${seoNote}. Top action: ${recommendations[0]}`;
+            + `${seoNote}.`;
       }
 
       return res.status(200).json({

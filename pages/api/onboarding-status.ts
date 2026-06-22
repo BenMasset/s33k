@@ -51,17 +51,24 @@ const getStatus = async (req: NextApiRequest, res: NextApiResponse<Resp>, accoun
       const owned = await resolveDomainAccess(account, domain);
       // Recent events = the tracking script is live and sending. 7-day window.
       const weekAgo = new Date(Date.now() - 7 * 86400e3).toJSON();
-      const [keywordCount, recentEvents, goalCount] = await Promise.all([
+      const [keywordCount, keywordsPending, recentEvents, goalCount] = await Promise.all([
          owned ? Keyword.count({ where: { domain, ...scope } }) : Promise.resolve(0),
+         // Rank-pending keywords: first Google check not landed yet (keyword.updating === true).
+         owned ? Keyword.count({ where: { domain, updating: true, ...scope } }) : Promise.resolve(0),
          owned ? S33kEvent.count({ where: { domain, created: { [Op.gte]: weekAgo }, ...scope } }) : Promise.resolve(0),
          owned ? Goal.count({ where: { domain, ...scope } }) : Promise.resolve(0),
       ]);
+
+      // All tracked keywords are still rank-pending: tracking is set up, but the first Google check
+      // has not landed, so the track_keywords step should say "queued, first check running" rather
+      // than imply done-with-no-results.
+      const keywordsRankPending = keywordCount > 0 && keywordsPending >= keywordCount;
 
       // The five setup steps + percentComplete + nextStep are computed by the SHARED
       // computeSetupState (utils/start-here.ts), the single source of truth, so setup_status and
       // start_here can never disagree about where a user is in setup.
       const { steps, percentComplete, nextStep } = computeSetupState({
-         owned: Boolean(owned), keywordCount, recentEvents, goalCount, domain,
+         owned: Boolean(owned), keywordCount, recentEvents, goalCount, domain, keywordsRankPending,
       });
 
       // Always point at the dashboard as the place to start. When setup is complete this is the

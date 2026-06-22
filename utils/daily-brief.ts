@@ -57,6 +57,29 @@ export type DailyBriefInput = {
    aeoRoi: AeoRoi | null,
    /** The dashboard headline (topOpportunity + topAction), or null when unavailable. */
    dashboardHeadline: DailyBriefDashboardHeadline | null,
+   /**
+    * The first-data setup signal, computed by the route from already-loaded keywords +
+    * sessions + summary. When present, the domain is still GATHERING its first numbers
+    * (no pageviews yet OR a tracked keyword's first rank check has not landed OR there is
+    * no prior-window baseline to compare against), so the brief leads with encouraging
+    * "tracking is live, first numbers are coming in" copy instead of a flat quiet/zero
+    * statement. Absent (undefined) = the normal change-detection path is unchanged.
+    */
+   setup?: DailyBriefSetup,
+};
+
+/**
+ * What the route observed about the domain's first-data state, so the composer can write
+ * a precise, encouraging setup-aware action without doing any DB work itself. All three
+ * flags are computed in the route from data it already loaded.
+ */
+export type DailyBriefSetup = {
+   /** No keyword is tracked yet. The next step is to add keywords. */
+   noKeywords: boolean,
+   /** No pageviews have been recorded yet (recentEvents === 0). The next step is to install the script / wait. */
+   noTraffic: boolean,
+   /** At least one tracked keyword's first Google check has not landed yet (rank-pending). The next step is to wait. */
+   rankPending: boolean,
 };
 
 // --- Public output shape -----------------------------------------------------
@@ -79,6 +102,13 @@ export type DailyBrief = {
    headline: string,
    /** True when no material change AND no enrichable opportunity was found. */
    quiet: boolean,
+   /**
+    * 'gathering' while the domain is still collecting its first data (first rank check
+    * running, or no visitors seen yet, or no prior window to compare). In that state the
+    * headline + topAction are encouraging setup copy, NOT a flat quiet/zero. Undefined
+    * once real data has landed (the normal change-detection path).
+    */
+   dataState?: 'gathering',
    /** 2-4 most important changes this period vs the prior equal window. May be empty on a quiet period. */
    whatChanged: DailyBriefChange[],
    /**
@@ -116,6 +146,32 @@ const topAeoOpportunity = (roi: AeoRoi | null): RoiOpportunity | null => {
 };
 
 /**
+ * The setup-aware top action for a domain still gathering its first data. Ordered by what
+ * the user can DO: add keywords first (the SEO pillar is empty), then install the script
+ * (no visitors seen), then just wait (the checks are running and will land on their own).
+ * Never names an internal host or provider; never claims a flat zero.
+ * @param {DailyBriefSetup} setup - The route-computed first-data flags.
+ * @returns {string}
+ */
+const gatheringAction = (setup: DailyBriefSetup): string => {
+   const steps: string[] = [];
+   if (setup.noKeywords) {
+      steps.push('Add the keywords you want to rank for (ideally each mapped to a target page) so rank tracking can begin.');
+   }
+   if (setup.noTraffic) {
+      steps.push('Add the s33k tracking script to your site (we show you exactly where) so visits start flowing in.');
+   }
+   if (setup.rankPending && !setup.noKeywords) {
+      steps.push('Your first rank check is running; positions populate right after the next scrape, so no action is needed there yet.');
+   }
+   if (steps.length === 0) {
+      // Gathering for a reason already covered by the headline (e.g. no prior window to compare yet).
+      return 'Tracking is live and your first numbers are coming in. Check back tomorrow for your first real brief.';
+   }
+   return steps.join(' ');
+};
+
+/**
  * Compose the single, prioritized daily brief from already-shaped signals.
  *
  * Pure and never throws on empty input. The headline and topAction always carry a
@@ -128,8 +184,26 @@ const topAeoOpportunity = (roi: AeoRoi | null): RoiOpportunity | null => {
  */
 export const composeDailyBrief = (input: DailyBriefInput): DailyBrief => {
    const {
-      domain, period, analyst, aeoRoi, dashboardHeadline,
+      domain, period, analyst, aeoRoi, dashboardHeadline, setup,
    } = input;
+
+   // ---- GATHERING: the domain is still collecting its first data. --------------------
+   // Lead with encouraging "tracking is live, first numbers are coming in" copy instead of a
+   // flat quiet/zero. The route sets this only when there is genuinely nothing to report yet
+   // (no pageviews, a rank-pending first check, or no prior window to compare), so this branch
+   // never hides a real change. quiet stays false: a gathering domain is not a quiet one.
+   if (setup) {
+      return {
+         domain,
+         period,
+         headline: `First check is running for ${domain}. Rankings populate after the next scrape and traffic flows in `
+            + 'as soon as the script sees visitors. Your first real brief lands within a day.',
+         quiet: false,
+         whatChanged: [],
+         topAction: gatheringAction(setup),
+         dataState: 'gathering',
+      };
+   }
 
    // The changes, already prioritized by the analyst (severity then pillar). Take the
    // top few so the brief stays a standup. Each becomes a compact, render-ready bullet.

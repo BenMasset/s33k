@@ -525,7 +525,7 @@ server.registerTool(
    {
       title: 'Traffic summary',
       description:
-         'Get site-wide traffic totals for a domain over a window: pageviews, unique visitors, visits, bounce rate (percent), average visit duration (seconds), and pages per visit. Use this for the one-line health check of a site before drilling into traffic_breakdown, traffic_timeseries, or page_scoreboard.',
+         'Get site-wide traffic totals for a domain over a window: pageviews, unique visitors, visits, bounce rate (percent), average visit duration (seconds), and pages per visit. The visitors total here is the RAW provider total and INCLUDES bots; for the real human number use start_here / dashboard / human_traffic (datacenter-filtered). This tool also returns visitorsRaw and humanVisitors side by side, plus a note when they diverge by more than 25 percent. Use this for the one-line health check of a site before drilling into traffic_breakdown, traffic_timeseries, or page_scoreboard. For a guided overview call start_here first.',
       inputSchema: {
          domain: z.string().describe('The domain to summarize, e.g. "getmasset.com".'),
          period: z
@@ -539,7 +539,13 @@ server.registerTool(
          const query: Record<string, string> = { domain };
          if (period) { query.period = period; }
          const data = await s33kFetch('/api/summary', { query });
-         return jsonResult({ summary: data.summary, error: data.error });
+         return jsonResult({
+            summary: data.summary,
+            visitorsRaw: data.visitorsRaw,
+            humanVisitors: data.humanVisitors,
+            note: data.note,
+            error: data.error,
+         });
       } catch (err) {
          return errorResult(err);
       }
@@ -1671,7 +1677,7 @@ server.registerTool(
    {
       title: 'Traffic breakdown',
       description:
-         'Break a domain\'s traffic down by a single dimension. Use this to answer where visitors come from or what they use. The country, device, browser, and os dimensions are always available; region, city, language, and screen are extended dimensions that may not be available on every s33k instance. Each row has a name, page views, and unique visitors.',
+         'Break a domain\'s traffic down by a single dimension. Use this to answer where visitors come from or what they use. The country, device, browser, and os dimensions are always available; region, city, language, and screen are extended dimensions that may not be available on every s33k instance. Each row has a name, page views, and unique visitors. These per-row visitor counts are the RAW provider total and INCLUDE bots; for the real human number use start_here / dashboard / human_traffic (datacenter-filtered).',
       inputSchema: {
          domain: z.string().describe('The domain to break down, e.g. "getmasset.com".'),
          dimension: z
@@ -1703,7 +1709,7 @@ server.registerTool(
    {
       title: 'Traffic time series',
       description:
-         'Get a daily (or unit-grouped) time series of pageviews and visitors for a domain over a window. Use this to spot trends, spikes, and drops over time, or to compare two periods. Each point has a date label, pageviews, and visitors.',
+         'Get a daily (or unit-grouped) time series of pageviews and visitors for a domain over a window. Use this to spot trends, spikes, and drops over time, or to compare two periods. Each point has a date label, pageviews, and visitors. These visitor counts are the RAW provider total and INCLUDE bots; for the real human number use start_here / dashboard / human_traffic (datacenter-filtered).',
       inputSchema: {
          domain: z.string().describe('The domain to chart, e.g. "getmasset.com".'),
          period: z
@@ -2349,7 +2355,7 @@ server.registerTool(
    {
       title: 'Onboard a domain',
       description:
-         'Give me a domain and I set up everything for it in one call, the fastest way to go from nothing to live data. s33k will: create the domain, crawl a few of its pages and heuristically discover candidate target keywords (no LLM needed), add up to 20 of them and immediately queue background Google rank scrapes (rankings appear shortly, so rankingsPending comes back true), provision a dedicated analytics website for the domain, and return the tracking snippet plus copy-paste install guides for common platforms (raw HTML, Google Tag Manager, WordPress, Webflow, Shopify, Squarespace, Wix, Next.js/React). Pass a bare domain like "getmasset.com", not a full URL. Use this as the first thing you do for a brand new site. Degrades gracefully: if analytics provisioning is unavailable, siteId comes back null with a note while the domain, keywords, and rankings are still set up. Returns { domain, discoveredKeywords, addedKeywords, rankingsPending, siteId, installSnippet, installGuides, note }.',
+         'Give me a domain and I set up everything for it in one call, the fastest way to go from nothing to live data. s33k will: create the domain, crawl a few of its pages and heuristically discover candidate target keywords (no LLM needed), add up to 20 of them and immediately queue background Google rank scrapes (rankings appear shortly, so rankingsPending comes back true), provision a dedicated analytics website for the domain, and return the tracking snippet plus copy-paste install guides for common platforms (raw HTML, Google Tag Manager, WordPress, Webflow, Shopify, Squarespace, Wix, Next.js/React). Pass a bare domain like "getmasset.com", not a full URL. Use this as the first thing you do for a brand new site. The first Google rank check runs in the background right after this returns (rankingsPending true only when keywords were added AND a SERP source is configured), so re-check with list_keywords or start_here shortly; rankings then refresh weekly, and a timingNote in the response says the same. Degrades gracefully: if analytics is not set up yet, siteId comes back null, analyticsReady is false, the installSnippet/installGuides are omitted (a blank snippet cannot attribute anything), and a note explains why, while the domain, keywords, and rankings are still set up. Returns { domain, discoveredKeywords, addedKeywords, rankingsPending, siteId, analyticsReady, installSnippet, installGuides, firstRunHint, nextStepMessage, timingNote, note }.',
       inputSchema: {
          domain: z.string().describe('The bare domain to onboard, e.g. "getmasset.com". No protocol, no path.'),
       },

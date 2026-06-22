@@ -126,24 +126,27 @@ const getStartHere = async (req: NextApiRequest, res: NextApiResponse<StartHereR
       // overwhelm start_here exists to avoid; but "here is how you put s33k on your site" belongs
       // inline, because installing the tracking script is the gating step for the analytics pillar.
       if (!setup.complete) {
-         // Resolve the per-domain tracking website id the same way onboarding/install-instructions
-         // do: the owned Domain's umami_website_id, falling back to the legacy env so getmasset.com
-         // still yields a usable snippet. getInstallGuides is pure (no IO); never throws here.
-         // NOTE (deliberate, safe): for a NOT-owned domain this returns the snippet built from the
-         // legacy env website id only (a public tracking tag), never another tenant's per-domain id
-         // (the `owned && owned.umami_website_id` guard ensures that). install-instructions 403s here
-         // instead; start_here intentionally never walls, so it degrades to the env tag. No leak.
-         const websiteId = (owned && owned.umami_website_id)
-            ? String(owned.umami_website_id)
-            : (process.env.UMAMI_WEBSITE_ID || '');
-         const guides = getInstallGuides(domain, websiteId);
+         // NO-LEAK ownership gate (matches install_instructions): the per-domain tracking website id
+         // is minted on a domain the caller OWNS, so we ONLY emit a real snippet when this caller owns
+         // the domain AND it has a provisioned umami_website_id. We NEVER fall back to a shared env
+         // website id, because that id belongs to whatever domain provisioned it (e.g. getmasset.com),
+         // and emitting it here for a not-owned/not-yet-added domain would hand the caller another
+         // site's real tracking tag. When there is no owned id we render a clearly-fake YOUR_SITE_ID
+         // placeholder so the snippet still shows its SHAPE, and the note tells the user to add their
+         // site first so s33k can mint their own. start_here still never walls (it returns the
+         // onboarding 200), it just refuses to print someone else's id.
+         const ownedWebsiteId = (owned && owned.umami_website_id) ? String(owned.umami_website_id) : '';
+         const guides = getInstallGuides(domain, ownedWebsiteId || 'YOUR_SITE_ID');
          const install: InstallPayload = {
             snippet: guides.snippet,
             scriptUrl: guides.scriptUrl,
             websiteId: guides.websiteId,
             platforms: guides.platforms.map((p) => ({ platform: p.platform, steps: p.steps })),
-            note: 'Paste this one line into your site head. It is the gating step for the Analytics and AI-search '
-               + 'pillars. Ask install_instructions for steps on any specific platform.',
+            note: ownedWebsiteId
+               ? 'Paste this one line into your site head. It is the gating step for the Analytics and AI-search '
+                  + 'pillars. Ask install_instructions for steps on any specific platform.'
+               : 'Add your site first (run onboard) and s33k will mint your own tracking snippet here. The line above '
+                  + 'shows the shape: the YOUR_SITE_ID placeholder is replaced with your real site id once it is added.',
          };
          const onboarding = buildOnboarding(domain, setup, install);
          return res.status(200).json({ ...onboarding, error: null });
@@ -178,6 +181,14 @@ const getStartHere = async (req: NextApiRequest, res: NextApiResponse<StartHereR
       ).map((k) => ({
          keyword: k.keyword, position: k.position, url: k.url, target_page: k.target_page, history: k.history,
       }));
+      // RANK-PENDING signal: a freshly-tracked keyword is created updating:true and stays so until its
+      // first Google check lands. parseKeywords drops the column, so read `updating` off the raw rows
+      // here. Any pending keyword means the SEO teaser must say "first check running", never "0 on
+      // page one" (a rank-pending keyword is being checked, not absent from the top 100).
+      const anyRankPending = (keywordRows as Keyword[]).some((k) => {
+         const p = k.get({ plain: true }) as { updating?: boolean };
+         return Boolean(p.updating);
+      });
       const sessions = sessionize((eventRows as S33kEvent[]).map((r) => r.get({ plain: true }) as EventLike));
       const goals: DashboardGoal[] = (goalRows as Goal[]).map((g) => {
          const p = g.get({ plain: true }) as Record<string, unknown>;
@@ -253,7 +264,9 @@ const getStartHere = async (req: NextApiRequest, res: NextApiResponse<StartHereR
                history: typeof k.history === 'string' ? k.history : JSON.stringify(k.history || {}),
             }));
             const striking = findStrikingDistance(strikingInput, 4, 30);
-            return seoTeaser({ keywordsTracked: keywords.length, onPageOne, strikingDistance: striking.length });
+            return seoTeaser({
+               keywordsTracked: keywords.length, onPageOne, strikingDistance: striking.length, rankPending: anyRankPending,
+            });
          })(),
          // AEO teaser: AI visitors + AI share of referred traffic + top engine, from the dashboard's
          // already-computed AI-engine split and the referral totals.
@@ -289,6 +302,11 @@ const getStartHere = async (req: NextApiRequest, res: NextApiResponse<StartHereR
          topAction: dashboard.headline.topAction,
          teasers,
          extraQuestions,
+         // GATHERING-state signals: a rank check still running, plus whether any conversion goal exists,
+         // so the headline can lead with momentum and whatYouCanSee only promises conversion reporting
+         // once a goal is defined. recentEvents already gated us into ready mode, so traffic is flowing.
+         rankPending: anyRankPending,
+         goalCount,
       });
       return res.status(200).json({ ...ready, error: null });
    } catch (error) {

@@ -146,6 +146,49 @@ describe('composeDailyBrief: honest quiet period', () => {
    });
 });
 
+describe('composeDailyBrief: gathering (first-data) state', () => {
+   it('leads with an encouraging "first check is running" headline and never a flat quiet/zero', () => {
+      const brief = composeDailyBrief(baseInput({
+         setup: { noKeywords: false, noTraffic: true, rankPending: true },
+      }));
+      // A gathering domain is NOT a quiet one.
+      expect(brief.quiet).toBe(false);
+      expect(brief.dataState).toBe('gathering');
+      expect(brief.headline).toMatch(/First check is running for getmasset.com/);
+      expect(brief.headline).toMatch(/first real brief lands within a day/i);
+      // It must not present a flat quiet/zero line.
+      expect(brief.headline).not.toMatch(/Quiet period/);
+      expect(brief.whatChanged).toEqual([]);
+   });
+
+   it('writes a setup-aware top action (add keywords / install script), not the calm keep-fresh line', () => {
+      const brief = composeDailyBrief(baseInput({
+         setup: { noKeywords: true, noTraffic: true, rankPending: false },
+      }));
+      expect(brief.dataState).toBe('gathering');
+      expect(brief.topAction).toMatch(/Add the keywords/i);
+      expect(brief.topAction).toMatch(/tracking script/i);
+      // NOT the normal-quiet fallback action.
+      expect(brief.topAction).not.toMatch(/No urgent action this period/);
+   });
+
+   it('points a rank-pending domain at waiting for the first check, no fake "not in top 100"', () => {
+      const brief = composeDailyBrief(baseInput({
+         setup: { noKeywords: false, noTraffic: false, rankPending: true },
+      }));
+      expect(brief.dataState).toBe('gathering');
+      expect(brief.topAction).toMatch(/first rank check is running/i);
+      expect(brief.topAction).not.toMatch(/not in top 100/i);
+      expect(brief.topAction).not.toMatch(/not on page one/i);
+   });
+
+   it('ignores the setup signal once real data has landed (normal change path)', () => {
+      const brief = composeDailyBrief(baseInput({ analyst: analystWithChanges() }));
+      expect(brief.dataState).toBeUndefined();
+      expect(brief.headline).toMatch(/"masset" climbed/);
+   });
+});
+
 describe('daily-brief renderers', () => {
    it('renderDailyBriefText returns a non-empty monospace block with the headline and top action', () => {
       const brief = composeDailyBrief(baseInput({ analyst: analystWithChanges() }));

@@ -305,7 +305,7 @@ const capabilities: CapabilityEntry[] = [
       toolName: 'traffic_summary',
       category: 'analytics',
       title: 'Traffic summary',
-      description: 'Site-wide traffic totals for a domain: pageviews, visitors, visits, bounce rate, average duration, and pages per visit.',
+      description: 'Site-wide traffic totals for a domain: pageviews, visitors, visits, bounce rate, average duration, and pages per visit. The visitors total is the RAW provider total and INCLUDES bots; for the real human number use start_here / dashboard / human_traffic (datacenter-filtered). Also returns visitorsRaw and humanVisitors with a note when they diverge.',
       whenToUse: 'Use for the one-line health check before drilling into breakdown, timeseries, or the scoreboard.',
       examplePrompt: 'Give me the traffic summary for getmasset.com over the last 30 days.',
    },
@@ -647,7 +647,9 @@ const capabilities: CapabilityEntry[] = [
       title: 'Comprehensive prebuilt SEO snapshot in one call',
       description: 'A prebuilt SEO report that bundles the whole picture for a domain into one structured response, so a marketer does not have to '
          + 'chain separate SEO tools. Pure query over tracked keywords: no crawl, no analytics provider, no LLM. Returns four sections. summary: total '
-         + 'tracked keywords and how many sit in the top 3, top 10, page one, and not in the top 100 (the rank-distribution headline). strikingDistance: '
+         + 'tracked keywords and how many sit in the top 3, top 10, page one, and not in the top 100 (the rank-distribution headline). summary also '
+         + 'reports rankingsPending: keywords whose first Google check is still running (counted as pending, NOT as "not in the top 100"); when any are '
+         + 'pending the note leads with that, and if most checks are failing for a config or quota reason the note says the SERP source needs setup. strikingDistance: '
          + 'the quick-win keywords ranking just off page one (positions 4 to 30 by default, configurable via min/max), each with its position delta over '
          + 'history, reusing the same logic as striking_distance. topMovers: the biggest rank improvements and the biggest drops over each keyword\'s '
          + 'tracked history (improvements most-improved first, drops biggest-fall first), capped by moversLimit (default 5). rankingPages: tracked '
@@ -836,9 +838,10 @@ const capabilities: CapabilityEntry[] = [
       toolName: 'onboard',
       category: 'onboarding',
       title: 'Onboard a domain',
-      description: 'One call from nothing to live data: creates the domain, discovers keywords, adds up to 20 and queues rank scrapes, provisions an '
-         + 'analytics website, and returns the tracking snippet plus install guides. It also returns a firstRunHint that hands the user off to the '
-         + 'dashboard, so right after onboarding they can ask "show me my dashboard" or "show me an overview" to see everything in one place.',
+      description: 'One call from nothing to live data: creates the domain, discovers keywords, adds up to 20 and queues a background Google rank check, '
+         + 'and (when analytics is set up) returns the tracking snippet plus install guides with analyticsReady true. It also returns a timingNote '
+         + '(when to re-check rankings) and a firstRunHint that hands the user off to the dashboard, so right after onboarding they can ask '
+         + '"show me my dashboard" or "show me an overview" to see everything in one place.',
       whenToUse: 'Use as the first thing you do for a brand new site. The only input is the bare domain. After it returns, point the user at the '
          + 'dashboard tool ("show me my dashboard") so they start from the full overview instead of a blank slate.',
       examplePrompt: 'Set up everything in s33k for example.com, then show me my dashboard.',
@@ -1079,6 +1082,19 @@ const setup = {
       + '<base-url>/api/mcp --header "Authorization: Bearer <key>"). The hosted path is how a scoped share key is shared: '
       + 'it is automatically read-only and single-domain because the same server-side auth enforces it per connection. '
       + 'Full steps live in README.md, DEPLOY.md, and mcp/README.md in the repository.',
+   connectClients: 'Per-client connect instructions (the hosted HTTP endpoint is <base-url>/api/mcp, here https://app.s33k.io/api/mcp; '
+      + 'replace <key> with your own s33k API key). '
+      + 'CLAUDE CODE (CLI): run `claude mcp add --transport http s33k https://app.s33k.io/api/mcp --header "Authorization: Bearer <key>"`. '
+      + 'CLAUDE DESKTOP: it cannot consume a remote HTTP MCP URL directly, so bridge it with mcp-remote in claude_desktop_config.json '
+      + 'under mcpServers, e.g. { "mcpServers": { "s33k": { "command": "npx", "args": ["-y", "mcp-remote", '
+      + '"https://app.s33k.io/api/mcp", "--header", "Authorization:Bearer <key>"] } } }. KNOWN GOTCHA: the Authorization header value must '
+      + 'arrive as ONE argument. The space between "Bearer" and the key can get split into two args, which breaks auth, so pass the header '
+      + 'as a single unsplit token (write it "Authorization:Bearer <key>" with no space, or otherwise keep "Bearer <key>" together as one value). '
+      + 'CURSOR: add an entry to ~/.cursor/mcp.json (or the project-level .cursor/mcp.json) with the s33k server, the URL '
+      + 'https://app.s33k.io/api/mcp, and an Authorization: Bearer <key> header, e.g. { "mcpServers": { "s33k": { "url": '
+      + '"https://app.s33k.io/api/mcp", "headers": { "Authorization": "Bearer <key>" } } } }. '
+      + 'CHATGPT OR ANY OTHER MCP CLIENT: point it at the URL https://app.s33k.io/api/mcp and send the Authorization: Bearer <key> header. '
+      + 'Same hosted endpoint and same Bearer key for every client; only the config file or command differs.',
    fiveMinutesToValue: 'The bar is install-to-real-data in about five minutes. The fastest path is the onboard capability: '
       + 'give s33k one bare domain and it creates the domain, discovers keywords, queues live Google rank scrapes, '
       + 'provisions an analytics website, and hands back the tracking snippet. Rankings appear shortly after onboarding '

@@ -321,9 +321,37 @@ export const composeDailyBriefForDomain = async (
       aeoRoi = buildAeoRoi(humanSessions, goalDef, roiKeywords, goalValue);
    }
 
+   // ===== GATHERING STATE: is this domain still collecting its first data? =============
+   // A fresh domain has nothing honest to report yet. Lead with encouraging "tracking is
+   // live, first numbers are coming in" copy instead of a flat quiet/zero. We are in the
+   // gathering state when ANY of these hold (all computed from data already loaded above):
+   //   - a tracked keyword's first Google check has not landed (updating === true);
+   //   - no pageviews have been recorded yet (recentEvents === 0: no window summary pageviews
+   //     AND no first-party sessions);
+   //   - there is no prior-window baseline to compare against (prior traffic + prior ranks
+   //     are all empty), so change detection cannot say anything meaningful.
+   const noKeywords = keywords.length === 0;
+   const rankPending = keywords.some((kw) => kw.updating === true);
+   const recentEvents = (currentTraffic.pageviews || 0) + sessions.length;
+   const noTraffic = recentEvents === 0;
+   const priorPositions = priorKeywords.some((k) => typeof k.position === 'number' && (k.position as number) > 0);
+   const noPriorWindow = (priorTraffic.pageviews || 0) === 0 && (priorTraffic.visitors || 0) === 0 && !priorPositions;
+   // A real detected change ALWAYS wins: if the analyst found something moved (e.g. a rank drop on a
+   // no-traffic-yet domain), report it rather than burying it under gathering copy. Gathering is only
+   // for the case where there is genuinely nothing to report yet.
+   const hasMaterialChange = (analyst.alerts || []).length > 0 || Boolean(analyst.topPriority);
+   const gathering = !hasMaterialChange && (rankPending || noTraffic || noPriorWindow);
+
    // ===== JOIN: compose the single prioritized brief. ==================================
+   // The setup signal is passed ONLY in the gathering state; otherwise the composer runs the
+   // normal change-detection path byte-for-byte unchanged.
    return composeDailyBrief({
-      domain, period, analyst, aeoRoi, dashboardHeadline,
+      domain,
+      period,
+      analyst,
+      aeoRoi,
+      dashboardHeadline,
+      setup: gathering ? { noKeywords, noTraffic, rankPending } : undefined,
    });
 };
 

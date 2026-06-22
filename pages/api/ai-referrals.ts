@@ -21,6 +21,7 @@ type AiReferralsResponse = {
       aiSharePct: number,
    },
    allSources?: ReferralSource[],
+   note?: string,
    error?: string | null,
 }
 
@@ -50,6 +51,22 @@ const getAiReferrals = async (req: NextApiRequest, res: NextApiResponse<AiReferr
       }
 
       const { sources, error } = await getAnalyticsProvider().getReferralSources(domain, period);
+
+      // When the analytics provider is unreachable, return a clean empty shape + a friendly
+      // note rather than leaking the raw provider error string (which can carry an internal
+      // host) into a user-facing field. Same 200 contract, just nothing to show yet.
+      if (error) {
+         return res.status(200).json({
+            domain,
+            period,
+            aiSources: [],
+            byEngine: [],
+            totals: { aiVisitors: 0, allVisitors: 0, aiSharePct: 0 },
+            allSources: [],
+            note: 'AI referral data is temporarily unavailable; try again shortly.',
+            error: null,
+         });
+      }
 
       // Visitor count per source, used for AI share and per-engine totals.
       const visitorsOf = (s: ReferralSource): number => Number(s.unique_visitors ?? 0);
@@ -83,7 +100,7 @@ const getAiReferrals = async (req: NextApiRequest, res: NextApiResponse<AiReferr
          byEngine,
          totals: { aiVisitors, allVisitors, aiSharePct },
          allSources,
-         error,
+         error: null,
       });
    } catch (error) {
       console.log('[ERROR] Building AI Referrals for ', domain, error);

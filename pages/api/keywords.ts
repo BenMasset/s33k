@@ -9,6 +9,7 @@ import { scopeWhere, ownerIdFor } from '../../utils/scope';
 import { canonicalizeDomain } from '../../utils/canonical-domain';
 import { MAX_KEYWORDS_PER_REQUEST, MAX_KEYWORDS_PER_DOMAIN } from '../../utils/limits';
 import { resolveCaps, isAccountActive } from '../../utils/plans';
+import { rateLimit } from '../../utils/rate-limit';
 import type Account from '../../database/models/account';
 import parseKeywords from '../../utils/parseKeywords';
 import { integrateKeywordSCData, readLocalSCData } from '../../utils/searchConsole';
@@ -90,6 +91,16 @@ const getKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGet
 const addKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGetResponse>, account?: Account | null) => {
    const { keywords } = req.body;
    if (keywords && Array.isArray(keywords) && keywords.length > 0) {
+      // PER-KEY WRITE BRAKE: bound how fast one account/key can create keywords, so a leaked or
+      // runaway key cannot fan out unbounded cost-bearing SERP scrapes. Keyed on the resolved account
+      // id (the admin sentinel under MULTI_TENANT off shares one key, which is fine: single operator).
+      // Mirrors the addDomain / onboard / hosted-MCP rate brake. Runs before the per-request cap so a
+      // flood takes the cheaper rejection.
+      const brake = rateLimit(`write:${ownerIdFor(account)}`, { limit: 60, windowMs: 60000 });
+      if (!brake.allowed) {
+         res.setHeader('Retry-After', Math.ceil(brake.retryAfterMs / 1000));
+         return res.status(429).json({ error: 'Too many requests. Please slow down and retry shortly.' });
+      }
       // Per-request cap. Bounds one bulk insert and the scrape burst it queues.
       if (keywords.length > MAX_KEYWORDS_PER_REQUEST) {
          return res.status(400).json({ error: `Too many keywords in one request (max ${MAX_KEYWORDS_PER_REQUEST}).` });

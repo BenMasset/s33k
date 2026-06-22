@@ -157,6 +157,16 @@ describe('briefing composer graceful degradation', () => {
       expect(captured.body.generatedFor).toEqual({ domain: 'getmasset.com', period: '30d' });
    });
 
+   it('headline is a tight state-of-site line and no longer carries the "Top action:" suffix', async () => {
+      const { req, res, captured } = makeReqRes({ domain: 'getmasset.com' });
+      await handler(req, res);
+
+      expect(captured.status).toBe(200);
+      // The action now lives only in recommendations[], not duplicated into the headline.
+      expect(captured.body.headline).not.toMatch(/Top action:/i);
+      expect(captured.body.recommendations.length).toBeGreaterThan(0);
+   });
+
    it('degrades only the traffic section (still 200) when getSummary rejects', async () => {
       mockedGetProvider.mockReturnValue(providerStub(new Set(['getSummary'])));
       const { req, res, captured } = makeReqRes({ domain: 'getmasset.com' });

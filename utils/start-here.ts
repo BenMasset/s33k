@@ -37,6 +37,11 @@ export type SetupSignals = {
    // The domain, used only to phrase the "add your site" step. Optional: start_here always has one
    // by the time it computes setup, and setup_status passes its domain so the wording is unchanged.
    domain?: string,
+   // True when keywords are tracked but EVERY one is still rank-pending (first Google check running).
+   // Optional and additive: callers that do not pass it keep the prior "N keyword(s) tracked." wording,
+   // so done/percentComplete and the existing parity tests are unchanged. Only the track_keywords
+   // step DETAIL changes, to "queued, first check running" instead of implying done-with-no-results.
+   keywordsRankPending?: boolean,
 };
 
 /** One checklist step: matches onboarding-status's Step shape. */
@@ -72,8 +77,18 @@ export const computeSetupState = (s: SetupSignals): SetupState => {
          key: 'track_keywords',
          title: 'Track keywords',
          done: s.keywordCount > 0,
-         detail: s.keywordCount > 0 ? `${s.keywordCount} keyword(s) tracked.`
-            : 'Track the terms you want to rank for so s33k can watch your Google position.',
+         // When keywords exist but all are rank-pending, say the first check is running rather than
+         // implying the tracking is done with no positions to show. Done state is unchanged (tracking
+         // IS set up); only the wording reflects that the first Google check has not landed yet.
+         detail: (() => {
+            if (s.keywordCount <= 0) {
+               return 'Track the terms you want to rank for so s33k can watch your Google position.';
+            }
+            if (s.keywordsRankPending) {
+               return `${s.keywordCount} keyword(s) queued, first Google rank check running.`;
+            }
+            return `${s.keywordCount} keyword(s) tracked.`;
+         })(),
          nextTool: 'add_keyword (or onboard auto-discovers up to 20)',
       },
       {
@@ -333,22 +348,31 @@ export const analyticsTeaser = (a: AnalyticsTeaserInput): string => {
    return `${a.visitors} visitor(s) over ${a.period}, ${src}.`;
 };
 
-/** The SEO teaser inputs: tracked count + on-page-one count + striking-distance count. */
+/** The SEO teaser inputs: tracked count + on-page-one count + striking-distance count + rank-pending flag. */
 export type SeoTeaserInput = {
    keywordsTracked: number,
    onPageOne: number,
    strikingDistance: number,
+   // True when any tracked keyword's first Google rank check has not landed yet (keyword.updating).
+   // When set we must say "first check running", never imply a rank-pending keyword is off page one.
+   rankPending?: boolean,
 };
 
 /**
  * Compose the SEO teaser: keywords tracked, how many on page one, and how many
- * quick wins sit in striking distance.
+ * quick wins sit in striking distance. When a first rank check is still running
+ * (rankPending), lead with that instead of a "0 on page one" that would wrongly
+ * read as "not in the top 100" while the check is in flight.
  * @param {SeoTeaserInput} s - The loaded SEO numbers.
  * @returns {string}
  */
 export const seoTeaser = (s: SeoTeaserInput): string => {
    if (s.keywordsTracked <= 0) {
       return 'No keywords tracked yet. Add the terms you want to rank for so s33k can watch your Google position.';
+   }
+   if (s.rankPending) {
+      return `${s.keywordsTracked} keyword(s) tracked, first Google rank check in progress. `
+         + 'Positions populate right after the next check.';
    }
    return `${s.keywordsTracked} keyword(s) tracked, ${s.onPageOne} on page one, `
       + `${s.strikingDistance} quick win(s) in striking distance.`;
@@ -425,15 +449,20 @@ export const buildReportCards = (teasers: ReportTeasers): ReportCard[] => [
 /**
  * The curated "data surfaces you now have" list. Short phrases, not tools: the
  * point is to make the breadth legible, not to dump the tool catalog. Returned
- * fresh each call.
+ * fresh each call. Only promises conversion reporting once a conversion goal
+ * exists (goalCount > 0); otherwise it points the user at defining one, so the
+ * list never claims a surface the user has not unlocked yet.
+ * @param {number} [goalCount] - Number of conversion goals defined for the domain.
  * @returns {string[]}
  */
-export const whatYouCanSee = (): string[] => [
+export const whatYouCanSee = (goalCount = 0): string[] => [
    'Google rank for every keyword you track',
    'Traffic and where it comes from, cookieless',
    'Real human vs bot split',
    'Which AI engines send visitors and which pages they land on',
-   'Conversions and revenue by source, including AI',
+   goalCount > 0
+      ? 'Conversions and revenue by source, including AI'
+      : 'Define a conversion goal to unlock conversion reporting (suggest_goals, then create_goal)',
    'Entry (landing) pages and their first-touch source',
    'Competitor share of voice for your keywords',
 ];
@@ -465,6 +494,10 @@ export type ReadyInput = {
    teasers: ReportTeasers,
    /** Extra contextual questions from the dashboard, folded into questionsYouCanAsk. */
    extraQuestions?: string[],
+   /** True when a first Google rank check is still running (keyword.updating). Drives the gathering headline. */
+   rankPending?: boolean,
+   /** Number of conversion goals defined, so whatYouCanSee only promises conversion reporting once one exists. */
+   goalCount?: number,
 };
 
 /** The ready-mode payload start_here returns when a domain is fully set up. */
@@ -485,10 +518,22 @@ export type ReadyResult = {
  * Mirrors the dashboard headline's spirit (human visitors, AI-referred visitors)
  * but as a single sentence start_here can lead with.
  *
+ * GATHERING-aware: when nothing has landed yet (no human visitors AND no
+ * AI-referred visitors, or a rank check is still running), a flat "about 0
+ * human visitor(s)" reads like a failure on a brand-new site that is in fact
+ * working fine. Lead with momentum in that case ("tracking is live, the first
+ * numbers are coming in"). Once any real number lands (N > 0), show the real
+ * headline.
+ *
  * @param {ReadyInput} d - The live numbers for the domain.
  * @returns {string}
  */
 const composeHeadline = (d: ReadyInput): string => {
+   const gathering = (d.humanVisitors <= 0 && d.aiReferredVisitors <= 0) || Boolean(d.rankPending);
+   if (gathering) {
+      return `${d.domain}: tracking is live, the first numbers are coming in. Rankings populate after the next check; `
+         + 'traffic shows as soon as the script sees visitors.';
+   }
    const ai = d.aiReferredVisitors > 0
       ? `${d.aiReferredVisitors} AI-referred visitor(s)`
       : 'no AI-referred visitors yet';
@@ -573,7 +618,7 @@ export const buildReady = (d: ReadyInput): ReadyResult => {
    const topAction = d.topAction
       || 'No urgent gap this period. Ask dashboard for the full overview, or widen the window (period=90d).';
    const reports = buildReportCards(d.teasers);
-   const canSee = whatYouCanSee();
+   const canSee = whatYouCanSee(d.goalCount || 0);
    const canAsk = mergeQuestions(d.extraQuestions || []);
    const nextSteps = readyNextSteps();
    const rendered = renderReady(headline, reports, canSee, canAsk, topAction);

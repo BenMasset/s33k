@@ -34,7 +34,7 @@ jest.mock('sequelize', () => ({ __esModule: true, Op: { in: Symbol('in'), gte: S
 jest.mock('../../database/models/domain', () => ({
    __esModule: true,
    default: {
-      findAll: jest.fn(), findOne: jest.fn(), destroy: jest.fn(), bulkCreate: jest.fn(),
+      findAll: jest.fn(), findOne: jest.fn(), destroy: jest.fn(), bulkCreate: jest.fn(), count: jest.fn(),
    },
 }));
 jest.mock('../../database/models/keyword', () => ({
@@ -95,10 +95,11 @@ const mockAuthorize = authorizeFn as unknown as jest.Mock;
 const ORIGINAL_ENV = { ...process.env };
 
 const ADMIN = { ID: ADMIN_ACCOUNT_ID, name: 'Admin', plan: 'admin', status: 'active' };
-// Trialing-with-a-future-trial so the billing keyword cap (resolveCaps) treats the tenant as active
+// An ACTIVE subscriber with headroom so neither the keyword cap nor the site cap (resolveCaps) trips
 // here; this suite is about owner-stamping / scoping, not the billing gate (that has its own test).
+// A multi-domain create needs > 1 site of allowance, which trialing (1 site) would not give.
 const TENANT = {
-   ID: 2, name: 'Tenant A', plan: 'free', status: 'active', subscription_status: 'trialing', trial_ends_at: new Date(Date.now() + 9e8),
+   ID: 2, name: 'Tenant A', plan: 'free', status: 'active', subscription_status: 'active', paid_sites: 5,
 };
 
 const asCaller = (account: unknown) => { mockAuthorize.mockResolvedValue({ authorized: true, account, error: undefined }); };
@@ -125,6 +126,9 @@ beforeEach(() => {
    jest.clearAllMocks();
    process.env = { ...ORIGINAL_ENV };
    process.env.MULTI_TENANT = 'true';
+   // The site-cap counts existing sites before a POST /api/domains create; default to 0 so the cap
+   // is a no-op for these owner-stamping/scoping tests (the billing gate has its own dedicated suite).
+   mockDomain.count.mockResolvedValue(0);
 });
 
 afterEach(() => { process.env = { ...ORIGINAL_ENV }; });

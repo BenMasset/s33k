@@ -36,6 +36,8 @@ import { getAppSettings } from './settings';
 import { discoverKeywords } from '../../utils/keyword-discovery';
 import { createUmamiWebsite } from '../../utils/umami-provision';
 import { getInstallGuides, InstallGuides } from '../../utils/install-guides';
+import { resolveCaps, isAccountActive } from '../../utils/plans';
+import { rateLimit } from '../../utils/rate-limit';
 
 // Default cap on how many discovered keywords are added during onboarding. Keeps the
 // starting set focused and bounds the per-onboard SERP cost. The user can prune or extend.
@@ -52,10 +54,12 @@ type OnboardResponse = {
    addedKeywords?: KeywordType[],
    rankingsPending?: boolean,
    siteId?: string | null,
+   analyticsReady?: boolean,
    installSnippet?: string,
    installGuides?: InstallGuides,
    firstRunHint?: FirstRunHint,
    nextStepMessage?: string,
+   timingNote?: string | null,
    note?: string | null,
    error?: string | null,
 };
@@ -83,6 +87,16 @@ const onboardDomain = async (req: NextApiRequest, res: NextApiResponse<OnboardRe
       return res.status(400).json({ error: 'A domain is required, e.g. "getmasset.com".' });
    }
 
+   // PER-KEY WRITE BRAKE: onboarding is a cost-bearing write (it creates a domain, queues SERP
+   // scrapes, and provisions analytics). Mirror the hosted-MCP per-key brake so one leaked/runaway
+   // key cannot fan out unbounded onboards. Keyed by the resolved account id, so it is per-tenant
+   // and the single-tenant / flag-off admin shares one (its own) bucket. 429 + Retry-After when hit.
+   const brake = rateLimit(`write:${ownerIdFor(account) ?? 'admin'}`, { limit: 60, windowMs: 60000 });
+   if (!brake.allowed) {
+      res.setHeader('Retry-After', Math.ceil(brake.retryAfterMs / 1000));
+      return res.status(429).json({ error: 'Too many onboard requests. Please wait a moment and try again.' });
+   }
+
    try {
       // 1. Create the domain if the caller does not already own it (scoped + owner-stamped).
       const owner_id = ownerIdFor(account);
@@ -91,6 +105,21 @@ const onboardDomain = async (req: NextApiRequest, res: NextApiResponse<OnboardRe
       // shared viewer onboard/provision/mutate the owner's domain.
       let domainRow: Domain | null = await resolveDomainAccess(account, domain, { write: true });
       if (!domainRow) {
+         // SITE CAP (the COGS / billing protection, mirrors pages/api/keywords.ts addKeywords). Only
+         // enforced when CREATING a NEW domain row; reusing an already-owned row is never capped. An
+         // inactive (expired-trial / canceled / past_due) account is locked out of new sites with an
+         // upgrade message; an active account is held to its plan's site count. resolveCaps returns the
+         // very-high UNLIMITED caps when MULTI_TENANT is off / for the admin sentinel, so this is a
+         // no-op in single-tenant (same as the keyword cap). scopeWhere is {} in that case too.
+         const caps = resolveCaps(account);
+         const existingSites = await Domain.count({ where: { ...scopeWhere(account) } });
+         if (existingSites + 1 > caps.sites) {
+            const locked = !isAccountActive(account);
+            const message = locked
+               ? 'Your trial has ended or your subscription is inactive. Subscribe to add sites and resume tracking.'
+               : `Site limit reached for your plan (max ${caps.sites}; ${existingSites} already tracked). Upgrade to add more.`;
+            return res.status(403).json({ error: message });
+         }
          // Before creating, reject a canonical name already owned by ANY account (the column is
          // globally @Unique). Without this, a tenant onboarding a canonical-equal variant of an
          // existing domain would hit a raw unique-constraint 400; checking explicitly returns a
@@ -133,6 +162,13 @@ const onboardDomain = async (req: NextApiRequest, res: NextApiResponse<OnboardRe
       // 3. Add the selected keywords exactly like pages/api/keywords.ts addKeywords does,
       //    then queue the background SERP scrape (rankings appear shortly).
       let addedKeywords: KeywordType[] = [];
+      // rankingsPending answers "is a first Google rank check actually coming?". It is true only when
+      // we both added keywords AND a SERP source is configured to check them. If no scraper is wired,
+      // the keywords are still tracked but no live position will ever land, so this stays false and a
+      // note explains why (a flat "checking now" would be a false promise).
+      let rankingsPending = false;
+      let scraperNote: string | null = null;
+      let emptyKeywordsNote: string | null = null;
       if (selected.length > 0) {
          const keywordsToAdd: any = selected.map((item) => ({
             keyword: item.keyword,
@@ -154,8 +190,23 @@ const onboardDomain = async (req: NextApiRequest, res: NextApiResponse<OnboardRe
          const newKeywords: Keyword[] = await Keyword.bulkCreate(keywordsToAdd);
          addedKeywords = parseKeywords(newKeywords.map((el) => el.get({ plain: true })));
          const settings = await getAppSettings();
+         // Is a SERP source actually configured? getAppSettings already folds the env fallbacks
+         // (SCRAPER_TYPE, SERPER_API_KEY / SCAPING_API) into scraper_type / scaping_api, so checking
+         // the resolved settings here covers both the UI-configured and the env-configured instance.
+         const scraperConfigured = Boolean(settings.scraper_type && settings.scraper_type !== 'none' && settings.scaping_api);
          // Fire-and-forget background scrape, same as addKeywords (do not await).
          refreshAndUpdateKeywords(newKeywords, settings);
+         if (scraperConfigured) {
+            rankingsPending = true;
+         } else {
+            scraperNote = 'Rank tracking is not configured on this instance yet, so live Google positions will not appear '
+               + 'until a SERP source is connected.';
+         }
+      } else if (!discovery.error) {
+         // The crawl succeeded but produced no candidate keywords (a JS-rendered or sparse site).
+         // Tell the user plainly and point them at the manual paths instead of silently adding nothing.
+         emptyKeywordsNote = `We could not auto-detect keywords from ${domain} (pages may be JS-rendered or sparse). `
+            + 'Add a few with add_keyword, or connect Google Search Console.';
       }
 
       // 4. Provision a per-domain analytics site and stamp the id. Degrade gracefully.
@@ -169,14 +220,23 @@ const onboardDomain = async (req: NextApiRequest, res: NextApiResponse<OnboardRe
             siteId = provisioned.websiteId;
             await domainRow.update({ umami_website_id: siteId });
          } else {
-            note = `Analytics website was not provisioned: ${provisioned.error || 'unknown error'}. `
-               + 'The domain, keywords, and rankings are set up; add analytics later by re-running onboarding once Umami is reachable.';
+            note = 'Analytics was not set up for this domain yet. '
+               + 'The domain, keywords, and rankings are set up; re-run onboarding later to finish analytics setup.';
          }
       }
 
-      // 5. Build the tracking snippet + per-platform install guides (empty id is allowed,
-      //    so the customer still sees the shape even if provisioning was deferred).
-      const installGuides = getInstallGuides(domain, siteId || '');
+      // 5. Build the tracking snippet + per-platform install guides ONLY when analytics is ready.
+      //    analyticsReady is false when no site id was provisioned (deferred or failed). A snippet
+      //    with an empty website id cannot attribute a single pageview, so handing one out would just
+      //    set the user up to "install" something that silently collects nothing. When it is not
+      //    ready we omit the snippet/guides and explain why (start_here / install can gate on the flag).
+      const analyticsReady = Boolean(siteId);
+      const installGuides = analyticsReady ? getInstallGuides(domain, siteId as string) : undefined;
+      const installSnippet = installGuides ? installGuides.snippet : undefined;
+      if (!analyticsReady && !note) {
+         note = 'Analytics is not set up for this domain yet, so there is no tracking snippet to install. '
+            + 'Re-run onboarding once analytics provisioning is available, then add the snippet.';
+      }
 
       // 6. Hand the user off to the dashboard so they never face a blank slate after setup.
       const firstRunHint: FirstRunHint = {
@@ -185,20 +245,36 @@ const onboardDomain = async (req: NextApiRequest, res: NextApiResponse<OnboardRe
             + 'and you can always ask plain-language questions like "what should I do next?" or "how is my SEO?".',
          nextTool: 'dashboard',
       };
-      const nextStepMessage = `${domain} is onboarded. Install the tracking snippet, then ask "show me my dashboard" for the full overview. `
-         + 'You can ask plain-language questions any time.';
+      const nextStepMessage = analyticsReady
+         ? `${domain} is onboarded. Install the tracking snippet, then ask "show me my dashboard" for the full overview. `
+            + 'You can ask plain-language questions any time.'
+         : `${domain} is onboarded. Ask "show me my dashboard" for the full overview, and ask plain-language questions any time.`;
+
+      // A first Google rank check is queued in the background only when we actually have a pending
+      // scrape. Tell the user when to look again rather than letting them stare at empty rankings.
+      const timingNote = rankingsPending
+         ? 'First Google rank check runs in the background now; re-check with list_keywords or start_here shortly. '
+            + 'Rankings refresh weekly after.'
+         : null;
+
+      // Combine ALL warnings rather than letting one silently win (note-precedence fix). discovery.error
+      // (crawl failed), the analytics-not-provisioned note, the no-scraper note, and the empty-keywords
+      // note can each be independently true; join the ones that fired so none is lost.
+      const notes = [note, discovery.error, scraperNote, emptyKeywordsNote].filter(Boolean);
 
       return res.status(201).json({
          domain,
          discoveredKeywords: selected.map((item) => item.keyword),
          addedKeywords,
-         rankingsPending: addedKeywords.length > 0,
+         rankingsPending,
          siteId,
-         installSnippet: installGuides.snippet,
+         analyticsReady,
+         installSnippet,
          installGuides,
          firstRunHint,
          nextStepMessage,
-         note: note || discovery.error || null,
+         timingNote,
+         note: notes.length ? notes.join(' ') : null,
       });
    } catch (error) {
       console.log('[ERROR] Onboarding domain ', domain, error);

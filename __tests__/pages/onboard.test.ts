@@ -25,7 +25,7 @@ jest.mock('../../database/database', () => ({ __esModule: true, default: { sync:
 
 jest.mock('../../database/models/domain', () => ({
    __esModule: true,
-   default: { findOne: jest.fn(), create: jest.fn() },
+   default: { findOne: jest.fn(), create: jest.fn(), count: jest.fn() },
 }));
 jest.mock('../../database/models/keyword', () => ({
    __esModule: true,
@@ -34,7 +34,7 @@ jest.mock('../../database/models/keyword', () => ({
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('../../utils/refresh', () => ({ __esModule: true, default: jest.fn(async () => undefined) }));
 jest.mock('../../utils/parseKeywords', () => ({ __esModule: true, default: jest.fn((rows: unknown[]) => rows) }));
-jest.mock('../../pages/api/settings', () => ({ __esModule: true, getAppSettings: jest.fn(async () => ({})) }));
+jest.mock('../../pages/api/settings', () => ({ __esModule: true, getAppSettings: jest.fn(async () => ({ scraper_type: 'serper', scaping_api: 'k' })) }));
 jest.mock('../../utils/keyword-discovery', () => ({ __esModule: true, discoverKeywords: jest.fn() }));
 jest.mock('../../utils/umami-provision', () => ({ __esModule: true, createUmamiWebsite: jest.fn() }));
 
@@ -56,8 +56,13 @@ import refreshFn from '../../utils/refresh';
 import { discoverKeywords } from '../../utils/keyword-discovery';
 // eslint-disable-next-line import/first
 import { createUmamiWebsite } from '../../utils/umami-provision';
+// eslint-disable-next-line import/first
+import { getAppSettings } from '../../pages/api/settings';
+// eslint-disable-next-line import/first
+import { __resetGenericRateLimit } from '../../utils/rate-limit';
 
-const mockDomain = DomainModel as unknown as { findOne: jest.Mock, create: jest.Mock };
+const mockSettings = getAppSettings as unknown as jest.Mock;
+const mockDomain = DomainModel as unknown as { findOne: jest.Mock, create: jest.Mock, count: jest.Mock };
 const mockKeyword = KeywordModel as unknown as { bulkCreate: jest.Mock };
 const mockAuthorize = authorizeFn as unknown as jest.Mock;
 const mockRefresh = refreshFn as unknown as jest.Mock;
@@ -67,7 +72,13 @@ const mockProvision = createUmamiWebsite as unknown as jest.Mock;
 const ORIGINAL_ENV = { ...process.env };
 
 const ADMIN = { ID: ADMIN_ACCOUNT_ID, name: 'Admin', plan: 'admin', status: 'active' };
-const TENANT = { ID: 2, name: 'Tenant A', plan: 'free', status: 'active' };
+// A real tenant the site cap actually applies to under MULTI_TENANT: an ACTIVE subscriber, so
+// resolveCaps gives it a real (non-locked) site allowance and a first-site onboard succeeds. (A bare
+// tenant with no subscription_status resolves to LOCKED caps = 0 sites, which the cap correctly blocks.)
+const TENANT = { ID: 2, name: 'Tenant A', plan: 'free', status: 'active', subscription_status: 'active', paid_sites: 5 };
+// Trial-window bounds for the cap tests (expired vs not-yet-expired).
+const past = Date.now() - 7 * 864e5;
+const future = Date.now() + 7 * 864e5;
 
 const asCaller = (account: unknown) => { mockAuthorize.mockResolvedValue({ authorized: true, account, error: undefined }); };
 
@@ -98,11 +109,14 @@ const makeRes = () => {
 
 beforeEach(() => {
    jest.clearAllMocks();
+   __resetGenericRateLimit();
    process.env = { ...ORIGINAL_ENV };
    process.env.UMAMI_BASE_URL = 'https://analytics.example.com';
    asCaller(ADMIN);
    mockDiscover.mockResolvedValue({ domain: 'getmasset.com', candidates: [] });
    mockProvision.mockResolvedValue({ websiteId: 'web-new', error: null });
+   mockDomain.count.mockResolvedValue(0);
+   mockSettings.mockResolvedValue({ scraper_type: 'serper', scaping_api: 'k' });
 });
 
 afterEach(() => { process.env = { ...ORIGINAL_ENV }; });
@@ -267,7 +281,7 @@ describe('POST /api/onboard canonicalization + cross-owner collision (cross-tena
 });
 
 describe('POST /api/onboard graceful degradation', () => {
-   it('returns 201 with umamiWebsiteId null and a note when Umami provisioning fails', async () => {
+   it('returns 201 with siteId null, analyticsReady false, and NO snippet when Umami provisioning fails', async () => {
       mockDomain.findOne.mockResolvedValue(null);
       mockDomain.create.mockResolvedValue(domainRow({ ID: 30, domain: 'noanalytics.com' }));
       mockDiscover.mockResolvedValue({
@@ -284,12 +298,13 @@ describe('POST /api/onboard graceful degradation', () => {
       // The domain, keywords, and rankings still come back.
       expect(res.payload.domain).toBe('noanalytics.com');
       expect(res.payload.rankingsPending).toBe(true);
-      // Analytics is null with an explanatory note; install guides still return (empty id).
+      // Analytics is null with an explanatory note; NO unattributable snippet is handed out.
       expect(res.payload.siteId).toBeNull();
+      expect(res.payload.analyticsReady).toBe(false);
       expect(res.payload).not.toHaveProperty('umamiWebsiteId');
-      expect(res.payload.note).toMatch(/not provisioned/i);
-      expect(res.payload.installGuides.platforms.length).toBeGreaterThan(0);
-      expect(res.payload.installSnippet).toContain('data-website-id=""');
+      expect(res.payload.note).toMatch(/not set up/i);
+      expect(res.payload.installGuides).toBeUndefined();
+      expect(res.payload.installSnippet).toBeUndefined();
    });
 
    it('surfaces a discovery error as the note when no keyword candidates are found', async () => {
@@ -305,6 +320,174 @@ describe('POST /api/onboard graceful degradation', () => {
       expect(res.payload.rankingsPending).toBe(false);
       expect(mockKeyword.bulkCreate).not.toHaveBeenCalled();
       expect(res.payload.note).toMatch(/could not reach/i);
+   });
+});
+
+describe('POST /api/onboard site cap (billing, MULTI_TENANT on)', () => {
+   it('blocks a NEW site for an inactive (expired-trial) account with a 403 upgrade message', async () => {
+      process.env.MULTI_TENANT = 'true';
+      asCaller({ ID: 5, subscription_status: 'trialing', trial_ends_at: past });
+      mockDomain.findOne.mockResolvedValue(null);
+      mockDomain.count.mockResolvedValue(0);
+
+      const res = makeRes();
+      await onboardHandler(makeReq({ body: { domain: 'expired.com' } }), res);
+
+      expect(res.statusCode).toBe(403);
+      expect((res.payload as { error?: string }).error).toMatch(/inactive|subscribe/i);
+      expect(mockDomain.create).not.toHaveBeenCalled();
+   });
+
+   it('blocks a trialing account that already has its 1 allowed site', async () => {
+      process.env.MULTI_TENANT = 'true';
+      asCaller({ ID: 6, subscription_status: 'trialing', trial_ends_at: future });
+      mockDomain.findOne.mockResolvedValue(null);
+      mockDomain.count.mockResolvedValue(1); // trial caps sites at 1
+
+      const res = makeRes();
+      await onboardHandler(makeReq({ body: { domain: 'second.com' } }), res);
+
+      expect(res.statusCode).toBe(403);
+      expect((res.payload as { error?: string }).error).toMatch(/site limit reached/i);
+      expect(mockDomain.create).not.toHaveBeenCalled();
+   });
+
+   it('allows an active account up to its paid_sites site count', async () => {
+      process.env.MULTI_TENANT = 'true';
+      asCaller({ ID: 7, subscription_status: 'active', paid_sites: 3 });
+      mockDomain.findOne.mockResolvedValue(null);
+      mockDomain.count.mockResolvedValue(2); // 2 existing + 1 new = 3 <= cap
+      mockDomain.create.mockResolvedValue(domainRow({ ID: 70, domain: 'paid.com' }));
+      mockDiscover.mockResolvedValue({ domain: 'paid.com', candidates: [] });
+
+      const res = makeRes();
+      await onboardHandler(makeReq({ body: { domain: 'paid.com' } }), res);
+
+      expect(res.statusCode).toBe(201);
+      expect(mockDomain.create).toHaveBeenCalledTimes(1);
+   });
+
+   it('blocks an active account that is already at its paid_sites cap', async () => {
+      process.env.MULTI_TENANT = 'true';
+      asCaller({ ID: 8, subscription_status: 'active', paid_sites: 2 });
+      mockDomain.findOne.mockResolvedValue(null);
+      mockDomain.count.mockResolvedValue(2); // 2 + 1 > 2
+
+      const res = makeRes();
+      await onboardHandler(makeReq({ body: { domain: 'overcap.com' } }), res);
+
+      expect(res.statusCode).toBe(403);
+      expect((res.payload as { error?: string }).error).toMatch(/site limit reached.*max 2/i);
+      expect(mockDomain.create).not.toHaveBeenCalled();
+   });
+
+   it('is a no-op for the admin sentinel (MULTI_TENANT on, admin = unlimited)', async () => {
+      process.env.MULTI_TENANT = 'true';
+      asCaller(ADMIN);
+      mockDomain.findOne.mockResolvedValue(null);
+      // Over every real trial/paid plan cap, but under the unlimited admin/flag-off ceiling
+      // (UNLIMITED_CAPS sites = 100000), so this proves the admin bypasses the small plan caps
+      // rather than accidentally tripping the unlimited ceiling itself.
+      mockDomain.count.mockResolvedValue(50);
+      mockDomain.create.mockResolvedValue(domainRow({ ID: 80, domain: 'admin-unl.com' }));
+      mockDiscover.mockResolvedValue({ domain: 'admin-unl.com', candidates: [] });
+
+      const res = makeRes();
+      await onboardHandler(makeReq({ body: { domain: 'admin-unl.com' } }), res);
+
+      expect(res.statusCode).toBe(201);
+      expect(mockDomain.create).toHaveBeenCalledTimes(1);
+   });
+
+   it('is a no-op when MULTI_TENANT is off (single-tenant = unlimited)', async () => {
+      delete process.env.MULTI_TENANT;
+      asCaller(TENANT);
+      mockDomain.findOne.mockResolvedValue(null);
+      // Over every real plan cap but under the unlimited ceiling (100000): with the flag off the
+      // account is always unlimited, so this proves flag-off bypasses the small plan caps.
+      mockDomain.count.mockResolvedValue(50);
+      mockDomain.create.mockResolvedValue(domainRow({ ID: 81, domain: 'single.com' }));
+      mockDiscover.mockResolvedValue({ domain: 'single.com', candidates: [] });
+
+      const res = makeRes();
+      await onboardHandler(makeReq({ body: { domain: 'single.com' } }), res);
+
+      expect(res.statusCode).toBe(201);
+      expect(mockDomain.create).toHaveBeenCalledTimes(1);
+   });
+
+   it('never caps when reusing an already-owned domain row', async () => {
+      process.env.MULTI_TENANT = 'true';
+      asCaller({ ID: 9, subscription_status: 'active', paid_sites: 1 });
+      // Caller already owns the row; count is over cap but reuse must not be blocked.
+      mockDomain.findOne.mockResolvedValue(domainRow({ ID: 90, domain: 'owned.com', umami_website_id: 'w-owned' }));
+      mockDomain.count.mockResolvedValue(50);
+      mockDiscover.mockResolvedValue({ domain: 'owned.com', candidates: [] });
+
+      const res = makeRes();
+      await onboardHandler(makeReq({ body: { domain: 'owned.com' } }), res);
+
+      expect(res.statusCode).toBe(201);
+      expect(mockDomain.create).not.toHaveBeenCalled();
+   });
+});
+
+describe('POST /api/onboard note + timing behavior', () => {
+   it('combines BOTH the scraper-missing and empty-keywords warnings (note-precedence fix)', async () => {
+      mockDomain.findOne.mockResolvedValue(null);
+      mockDomain.create.mockResolvedValue(domainRow({ ID: 60, domain: 'twoissues.com' }));
+      // Crawl succeeds but finds no keywords -> empty-keywords note. (The scraper-missing note is
+      // exercised separately below; both cannot fire at once since one needs keywords and one does not,
+      // so this case asserts the empty-keywords note plus the analytics note are joined.)
+      mockDiscover.mockResolvedValue({ domain: 'twoissues.com', candidates: [] });
+      mockProvision.mockResolvedValue({ websiteId: null, error: 'Umami auth failed.' });
+
+      const res = makeRes();
+      await onboardHandler(makeReq({ body: { domain: 'twoissues.com' } }), res);
+
+      expect(res.statusCode).toBe(201);
+      const note = (res.payload as { note?: string }).note || '';
+      // Analytics-not-provisioned note AND the auto-detect-failed note are BOTH present (joined).
+      expect(note).toMatch(/not set up|not provisioned/i);
+      expect(note).toMatch(/could not auto-detect/i);
+   });
+
+   it('sets the scraper-missing note and rankingsPending false when no SERP source is configured', async () => {
+      mockDomain.findOne.mockResolvedValue(null);
+      mockDomain.create.mockResolvedValue(domainRow({ ID: 61, domain: 'noscraper.com' }));
+      mockDiscover.mockResolvedValue({
+         domain: 'noscraper.com',
+         candidates: [{ page: 'https://noscraper.com/', suggestedKeywords: ['a keyword'] }],
+      });
+      mockKeyword.bulkCreate.mockImplementation(async (rows: any[]) => rows.map((k) => keywordRow(k)));
+      mockSettings.mockResolvedValue({ scraper_type: 'none', scaping_api: '' });
+
+      const res = makeRes();
+      await onboardHandler(makeReq({ body: { domain: 'noscraper.com' } }), res);
+
+      expect(res.statusCode).toBe(201);
+      expect(res.payload.rankingsPending).toBe(false);
+      expect(res.payload.timingNote).toBeNull();
+      expect((res.payload as { note?: string }).note).toMatch(/rank tracking is not configured/i);
+      // Keywords were still added even with no scraper.
+      expect(mockKeyword.bulkCreate).toHaveBeenCalledTimes(1);
+   });
+
+   it('returns a timing note and rankingsPending true when keywords are added with a SERP source', async () => {
+      mockDomain.findOne.mockResolvedValue(null);
+      mockDomain.create.mockResolvedValue(domainRow({ ID: 62, domain: 'timed.com' }));
+      mockDiscover.mockResolvedValue({
+         domain: 'timed.com',
+         candidates: [{ page: 'https://timed.com/', suggestedKeywords: ['a keyword'] }],
+      });
+      mockKeyword.bulkCreate.mockImplementation(async (rows: any[]) => rows.map((k) => keywordRow(k)));
+
+      const res = makeRes();
+      await onboardHandler(makeReq({ body: { domain: 'timed.com' } }), res);
+
+      expect(res.statusCode).toBe(201);
+      expect(res.payload.rankingsPending).toBe(true);
+      expect(res.payload.timingNote).toMatch(/first google rank check/i);
    });
 });
 

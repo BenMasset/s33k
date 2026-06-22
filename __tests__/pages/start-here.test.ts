@@ -284,6 +284,44 @@ describe('GET /api/start-here', () => {
       expect(res.payload.percentComplete).toBe(0);
    });
 
+   it('NO-LEAK: never emits a real env tracking website id for a not-owned domain; uses YOUR_SITE_ID placeholder', async () => {
+      // A shared env website id (would belong to whatever domain provisioned it). It must NEVER reach
+      // a caller for a domain they do not own; start_here renders a clearly-fake placeholder instead.
+      const SENTINEL = 'env-secret-website-id-04075da4';
+      const prev = process.env.UMAMI_WEBSITE_ID;
+      process.env.UMAMI_WEBSITE_ID = SENTINEL;
+      try {
+         mockDomain.findOne.mockResolvedValue(null); // not owned -> no per-domain umami_website_id
+         const res = makeRes();
+         await handler(makeReq({ domain: 'someoneelse.com' }), res);
+         expect(res.statusCode).toBe(200);
+         expect(res.payload.mode).toBe('setup');
+         // The whole serialized response must not contain the env id anywhere (snippet, websiteId, note).
+         const serialized = JSON.stringify(res.payload);
+         expect(serialized).not.toContain(SENTINEL);
+         // The snippet shows its SHAPE with the fake placeholder, and the note tells the user to add their site.
+         expect(res.payload.install.websiteId).toBe('YOUR_SITE_ID');
+         expect(res.payload.install.snippet).toContain('YOUR_SITE_ID');
+         expect(res.payload.install.note.toLowerCase()).toContain('add your site first');
+      } finally {
+         if (prev === undefined) { delete process.env.UMAMI_WEBSITE_ID; } else { process.env.UMAMI_WEBSITE_ID = prev; }
+      }
+   });
+
+   it('emits the real per-domain website id in the snippet when the caller OWNS the domain (incomplete setup)', async () => {
+      // Owned domain WITH a provisioned per-domain id, but tracking not live yet -> setup mode.
+      mockDomain.findOne.mockResolvedValue(row({ ID: 1, domain: 'getmasset.com', umami_website_id: 'real-owned-id-123' }));
+      mockKeyword.count.mockResolvedValue(2);
+      mockEvent.count.mockResolvedValue(0);
+      const res = makeRes();
+      await handler(makeReq({ domain: 'getmasset.com' }), res);
+      expect(res.statusCode).toBe(200);
+      expect(res.payload.mode).toBe('setup');
+      expect(res.payload.install.websiteId).toBe('real-owned-id-123');
+      expect(res.payload.install.snippet).toContain('real-owned-id-123');
+      expect(res.payload.install.snippet).not.toContain('YOUR_SITE_ID');
+   });
+
    it('405s on a non-GET method', async () => {
       const res = makeRes();
       await handler(makeReq({ domain: 'getmasset.com' }, 'POST'), res);

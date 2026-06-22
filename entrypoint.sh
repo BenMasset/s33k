@@ -39,6 +39,17 @@ if [ "$NODE_ENV" = "production" ]; then
     echo "[SECURITY] Refusing to start: PASSWORD is unset or set to a demo/placeholder value. Set a strong admin password." >&2
     fail=1
   fi
+  # Audit area 1 (host-header poisoning): NEXT_PUBLIC_APP_URL is the only header-INDEPENDENT source
+  # for the public base URL that gets baked into emailed invite/login/share links and the minted
+  # mcpConfig.S33K_BASE_URL (which carries a client's Bearer key). If it is unset in production, the
+  # base URL would otherwise be derived from attacker-controllable Host / X-Forwarded-Host headers.
+  # resolveBaseUrl() now fails closed at runtime, but refuse to boot here too so the misconfig is a
+  # clear startup error, not a runtime 500 when the first link is minted. Same posture as the
+  # strong-credentials block above and the fail-loud migration below.
+  if [ -z "$NEXT_PUBLIC_APP_URL" ]; then
+    echo "[SECURITY] Refusing to start: NEXT_PUBLIC_APP_URL is unset. Set it to your real public URL (e.g. https://your-app.example.com, see DEPLOY.md) so user-facing links are not built from forgeable request headers." >&2
+    fail=1
+  fi
   if [ "$fail" = "1" ]; then
     echo "[SECURITY] Set strong APIKEY, SECRET, and PASSWORD env vars (see DEPLOY.md) and redeploy." >&2
     exit 1

@@ -19,7 +19,7 @@ jest.mock('sequelize', () => ({ __esModule: true, Op: { in: Symbol('in') } }));
 
 jest.mock('../../database/models/domain', () => ({
    __esModule: true,
-   default: { findAll: jest.fn(), bulkCreate: jest.fn() },
+   default: { findAll: jest.fn(), bulkCreate: jest.fn(), count: jest.fn() },
 }));
 jest.mock('../../database/models/keyword', () => ({ __esModule: true, default: { findAll: jest.fn(), destroy: jest.fn() } }));
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
@@ -42,7 +42,7 @@ import DomainModel from '../../database/models/domain';
 // eslint-disable-next-line import/first
 import authorizeFn from '../../utils/authorize';
 
-const mockDomain = DomainModel as unknown as { findAll: jest.Mock, bulkCreate: jest.Mock };
+const mockDomain = DomainModel as unknown as { findAll: jest.Mock, bulkCreate: jest.Mock, count: jest.Mock };
 const mockAuthorize = authorizeFn as unknown as jest.Mock;
 
 const ORIGINAL_ENV = { ...process.env };
@@ -67,6 +67,9 @@ beforeEach(() => {
    process.env = { ...ORIGINAL_ENV };
    asCaller(ADMIN);
    mockDomain.findAll.mockResolvedValue([]);
+   // The new billing site-cap calls Domain.count. As ADMIN (MULTI_TENANT off) caps are unlimited, so
+   // the count value is irrelevant to these canonicalization tests; it just must be a resolvable number.
+   mockDomain.count.mockResolvedValue(0);
    mockDomain.bulkCreate.mockImplementation(async (rows: any[]) => rows.map((r) => ({ get: () => r, ...r })));
 });
 

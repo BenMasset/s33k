@@ -190,13 +190,19 @@ describe('daily-brief route: happy path', () => {
       expect(captured.body.period).toBe('7d');
    });
 
-   it('returns an honest quiet brief when nothing changed and there is no opportunity', async () => {
+   it('returns an encouraging gathering brief for a brand-new domain with no keywords and no traffic', async () => {
+      // No keywords + no events + no prior window = still gathering first data. The brief must
+      // lead with "first check is running / first numbers coming in" copy, NOT a flat quiet/zero,
+      // and steer the user to the setup steps (add keywords, install the script).
       const { req, res, captured } = makeReqRes({ domain: 'getmasset.com', period: '7d' });
       await handler(req, res);
       expect(captured.status).toBe(200);
-      expect(captured.body.brief.quiet).toBe(true);
+      expect(captured.body.brief.dataState).toBe('gathering');
+      expect(captured.body.brief.quiet).toBe(false);
       expect(captured.body.brief.whatChanged).toEqual([]);
-      expect(captured.body.brief.headline).toMatch(/Quiet period/);
+      expect(captured.body.brief.headline).toMatch(/First check is running/);
+      expect(captured.body.brief.headline).not.toMatch(/Quiet period/);
+      expect(captured.body.brief.topAction).toMatch(/Add the keywords|tracking script/i);
    });
 });
 
@@ -212,8 +218,12 @@ describe('daily-brief route: graceful degradation (never 500)', () => {
 
       expect(captured.status).toBe(200);
       expect(captured.body.brief).toBeDefined();
-      // Nothing measurable -> a quiet, honest brief, never a fabricated change.
-      expect(captured.body.brief.quiet).toBe(true);
+      // Nothing measurable -> never a 500 and never a fabricated change. With no keywords, no
+      // events, and no prior window the route reads this as the gathering (first-data) state and
+      // returns an encouraging "first numbers are coming in" brief rather than a flat quiet/zero.
+      expect(captured.body.brief.whatChanged).toEqual([]);
+      expect(captured.body.brief.dataState).toBe('gathering');
+      expect(captured.body.brief.quiet).toBe(false);
       expect(typeof captured.body.rendered).toBe('string');
    });
 });

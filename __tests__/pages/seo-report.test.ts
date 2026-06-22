@@ -28,13 +28,28 @@ const mockAuthorize = authorizeFn as unknown as jest.Mock;
 
 // A Keyword row exposes get({ plain: true }); we spread the data too so either access path works.
 const row = (data: Record<string, unknown>) => ({ get: () => data, ...data });
+// updating defaults false (rank check has landed) and lastUpdateError defaults 'false' (no error),
+// matching how a settled keyword row looks. Tests override these to exercise the pending / failing
+// scraper paths. lastUpdateError mirrors refresh.ts: 'false' or a JSON blob { date, error, scraper }.
 const kw = (
    keyword: string,
    position: number,
    url: string,
    history: Record<string, number>,
    target_page = '',
-) => row({ keyword, position, url: JSON.stringify([url]), history: JSON.stringify(history), target_page });
+   extra: Record<string, unknown> = {},
+) => row({
+   keyword,
+   position,
+   url: JSON.stringify([url]),
+   history: JSON.stringify(history),
+   target_page,
+   updating: false,
+   lastUpdateError: 'false',
+   ...extra,
+});
+// Build a lastUpdateError blob exactly as refresh.ts writes it on a failed scrape.
+const errBlob = (message: string) => JSON.stringify({ date: '2026-06-20T00:00:00.000Z', error: message, scraper: 'serper' });
 
 const makeReq = (query: Record<string, string>): NextApiRequest =>
    ({ method: 'GET', query, body: {}, headers: {} } as unknown as NextApiRequest);
@@ -115,6 +130,47 @@ describe('GET /api/seo-report', () => {
       await handler(makeReq({ domain: 'getmasset.com', min: '4', max: '10' }), res);
       const terms = res.payload.strikingDistance.map((k: any) => k.keyword);
       expect(terms).toEqual(['ai-ready dam']); // position 18 now falls outside max=10
+   });
+
+   it('treats rank-pending keywords (updating) as pending, not as "not in the top 100"', async () => {
+      mockKeyword.findAll.mockResolvedValue([
+         // a settled, ranking keyword
+         kw('masset', 2, 'https://getmasset.com/', { '2026-06-16': 2 }, '/dam'),
+         // two FRESH keywords: first Google check has not landed yet (updating true, position 0).
+         kw('ai-ready dam', 0, 'https://getmasset.com/dam', {}, '/dam', { updating: true }),
+         kw('dam mcp server', 0, 'https://getmasset.com/mcp', {}, '/mcp', { updating: true }),
+      ]);
+      const res = makeRes();
+      await handler(makeReq({ domain: 'getmasset.com' }), res);
+      expect(res.statusCode).toBe(200);
+      const s = res.payload.summary;
+      // The two updating keywords are counted as pending, NOT as notInTop100 (which stays 0 here).
+      expect(s.rankingsPending).toBe(2);
+      expect(s.notInTop100).toBe(0);
+      expect(s.totalKeywords).toBe(3);
+      // The note LEADS with the pending state and does not call them "not in the top 100".
+      expect(res.payload.note).toContain('First rank check is running for 2 keyword(s)');
+      expect(res.payload.note.indexOf('First rank check is running')).toBe(0);
+   });
+
+   it('surfaces ONE honest note when most keywords fail with a scraper config / quota / auth error', async () => {
+      mockKeyword.findAll.mockResolvedValue([
+         // 3 of 4 settled keywords failed their check for SERP-source reasons (no client, quota, auth).
+         kw('masset', 0, 'https://getmasset.com/', {}, '', { lastUpdateError: errBlob('No scraper client available') }),
+         kw('ai-ready dam', 0, 'https://getmasset.com/dam', {}, '', { lastUpdateError: errBlob('Serper API quota exceeded') }),
+         kw('dam mcp server', 0, 'https://getmasset.com/mcp', {}, '', { lastUpdateError: errBlob('[401] Unauthorized: invalid api key') }),
+         // one healthy ranking keyword, so the failures are the majority but not all.
+         kw('serp tracking mcp', 5, 'https://getmasset.com/mcp', { '2026-06-16': 5 }, '/mcp'),
+      ]);
+      const res = makeRes();
+      await handler(makeReq({ domain: 'getmasset.com' }), res);
+      expect(res.statusCode).toBe(200);
+      // Leads with the honest "SERP source is unconfigured or over quota" note, not a wall of "not ranked".
+      expect(res.payload.note).toContain('Rank checks are failing: the SERP source is unconfigured or over quota');
+      expect(res.payload.note).toContain('3 of 4 tracked keyword(s) could not be checked');
+      // The note must NOT leak the provider name in user-facing text.
+      expect(res.payload.note.toLowerCase()).not.toContain('serper');
+      expect(res.payload.note.toLowerCase()).not.toContain('umami');
    });
 
    it('returns an empty-state note when no keywords are tracked', async () => {

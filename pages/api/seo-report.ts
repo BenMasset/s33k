@@ -62,11 +62,17 @@ type SeoSummary = {
    totalKeywords: number,
    // Rank buckets. These are NOT mutually exclusive on purpose: top3 keywords are also in top10 and
    // pageOne, mirroring how a marketer reads "I have N in the top 3, N in the top 10". notInTop100
-   // is the disjoint tail (position 0 == not found in the top 100 results).
+   // is the disjoint tail (position 0 == not found in the top 100 results) EXCLUDING rank-pending
+   // keywords whose first Google check has not landed yet (see rankingsPending below).
    inTop3: number,
    inTop10: number,
    onPageOne: number,
    notInTop100: number,
+   // Keywords whose first rank check has not landed yet (updating === true). A freshly added keyword
+   // is created updating:true with position 0, so it would otherwise be miscounted as "not in the top
+   // 100". It is NOT a real "not ranked": the first check is still running. Counted here instead and
+   // excluded from notInTop100 so a brand-new domain never reads as "0 ranked, N not in top 100".
+   rankingsPending: number,
 };
 
 type SeoReportResponse = {
@@ -113,6 +119,41 @@ const historyPositions = (raw: string): Array<[string, number]> => {
    }
 };
 
+// refresh.ts stamps lastUpdateError as the string 'false' (default / cleared on success) or a JSON
+// blob { date, error, scraper } on a failed scrape. Return the human error message inside the blob,
+// or '' when the keyword has no error. These are the only two written forms; '' and '{}' are treated
+// as no-error for safety (mirrors the NON_ERROR_SENTINELS in utils/scraper.ts).
+const lastUpdateErrorMessage = (raw: unknown): string => {
+   const s = String(raw || '').trim();
+   if (!s || s === 'false' || s === '{}') { return ''; }
+   try {
+      const parsed = JSON.parse(s);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+         return String((parsed as Record<string, unknown>).error || '').trim();
+      }
+      // A bare non-JSON string is itself the error message (legacy / defensive).
+      return s;
+   } catch {
+      return s;
+   }
+};
+
+// Does a scrape error message indicate the SERP SOURCE is unconfigured, over quota, or unauthorized
+// (a whole-instance problem), rather than a normal "this one keyword is not ranking"? These are the
+// strings worth surfacing as ONE honest note instead of a wall of position-0 "not ranked" keywords.
+// Matches: no scraper client (unconfigured), quota / rate-limit / 429, and auth (401 / 403 / invalid
+// key) signals from any scraper (Serper and friends). Substring + case-insensitive on purpose so a
+// provider wording change does not silently stop matching.
+const isScraperConfigError = (message: string): boolean => {
+   const m = message.toLowerCase();
+   if (!m) { return false; }
+   return m.includes('no scraper client')
+      || m.includes('quota') || m.includes('rate limit') || m.includes('rate-limit') || m.includes('429')
+      || m.includes('unauthorized') || m.includes('401') || m.includes('403')
+      || m.includes('invalid api key') || m.includes('invalid key') || m.includes('api key')
+      || m.includes('forbidden') || m.includes('not authorized') || m.includes('authentication');
+};
+
 // Clamp a striking-window bound to a sane Google-rank range (1..100). Mirrors striking-distance.ts.
 const parseBound = (raw: unknown, fallback: number): number => {
    const n = parseInt(String(raw), 10);
@@ -157,23 +198,37 @@ const getSeoReport = async (req: NextApiRequest, res: NextApiResponse<SeoReportR
       // on top of the columns striking-distance needs, and reuse the raw rows for summary + movers.
       const keywordRows = await Keyword.findAll({
          where: { domain, ...scopeWhere(account) },
-         attributes: ['keyword', 'position', 'url', 'history', 'target_page'],
+         attributes: ['keyword', 'position', 'url', 'history', 'target_page', 'updating', 'lastUpdateError'],
       });
       const plain = keywordRows.map((k) => k.get({ plain: true }) as Record<string, unknown>);
 
       // --- summary: the rank-distribution headline over every tracked keyword. ---
       const totalKeywords = plain.length;
-      let inTop3 = 0; let inTop10 = 0; let onPageOne = 0; let notInTop100 = 0;
+      let inTop3 = 0; let inTop10 = 0; let onPageOne = 0; let notInTop100 = 0; let rankingsPending = 0;
+      // How many tracked keywords carry a scraper-config error (unconfigured / quota / auth). When
+      // most of the set is failing this way, we surface ONE honest note instead of treating every
+      // position-0 row as "not ranked" (it is the SERP source that is broken, not the rankings).
+      let scraperConfigErrors = 0;
       for (const p of plain) {
          const pos = Number(p.position) || 0;
-         if (pos === 0) {
-            notInTop100 += 1; // position 0 == not found in the top 100
+         // A keyword is RANK-PENDING when its first Google check has not landed yet (updating===true).
+         // Fresh keywords are created updating:true with position 0, so without this guard they would
+         // be miscounted as "not in the top 100". Count them as pending and exclude from notInTop100.
+         const pending = p.updating === true;
+         const errMessage = lastUpdateErrorMessage(p.lastUpdateError);
+         if (errMessage && isScraperConfigError(errMessage)) {
+            scraperConfigErrors += 1;
+         }
+         if (pending) {
+            rankingsPending += 1; // first check still running, not a real "not ranked"
+         } else if (pos === 0) {
+            notInTop100 += 1; // position 0 == not found in the top 100 (and the check has landed)
          } else {
             if (pos <= 3) { inTop3 += 1; }
             if (pos <= 10) { inTop10 += 1; onPageOne += 1; } // page one is the top 10 results
          }
       }
-      const summary: SeoSummary = { totalKeywords, inTop3, inTop10, onPageOne, notInTop100 };
+      const summary: SeoSummary = { totalKeywords, inTop3, inTop10, onPageOne, notInTop100, rankingsPending };
 
       // --- strikingDistance: REUSE the shared util, no duplicated quick-win logic. ---
       const strikingInput: StrikingInput[] = plain.map((p) => ({
@@ -235,11 +290,29 @@ const getSeoReport = async (req: NextApiRequest, res: NextApiResponse<SeoReportR
          // Pages with the most tracked keywords first; the busiest pages are usually the priority.
          .sort((a, b) => b.keywordCount - a.keywordCount);
 
-      const note = totalKeywords === 0
-         ? `No keywords are tracked for ${domain} yet. Add keywords so the SEO report has rank data to summarize.`
-         : `${totalKeywords} tracked keyword(s): ${onPageOne} on page one (${inTop3} in the top 3), `
+      // "Most" tracked keywords failing with a config error means the SERP source itself is the
+      // problem, so lead with that honest note rather than a wall of position-0 "not ranked".
+      const scraperFailing = totalKeywords > 0 && scraperConfigErrors > totalKeywords / 2;
+
+      let note: string;
+      if (totalKeywords === 0) {
+         note = `No keywords are tracked for ${domain} yet. Add keywords so the SEO report has rank data to summarize.`;
+      } else if (scraperFailing) {
+         // Honest, single explanation. Do NOT name the provider in this user-facing string.
+         note = 'Rank checks are failing: the SERP source is unconfigured or over quota. '
+            + `${scraperConfigErrors} of ${totalKeywords} tracked keyword(s) could not be checked, so their positions are not reliable. `
+            + 'Configure or refill the SERP source, then re-ask.';
+      } else if (rankingsPending > 0) {
+         // Lead with the pending state so a brand-new domain never reads as "0 ranked, N not in top 100".
+         note = `First rank check is running for ${rankingsPending} keyword(s); results usually within minutes, re-ask shortly. `
+            + `${onPageOne} on page one (${inTop3} in the top 3), ${strikingDistance.length} in striking distance `
+            + `(positions ${min} to ${max}), ${notInTop100} not in the top 100. `
+            + 'Work strikingDistance first, then read topMovers for what changed and rankingPages for per-page coverage.';
+      } else {
+         note = `${totalKeywords} tracked keyword(s): ${onPageOne} on page one (${inTop3} in the top 3), `
             + `${strikingDistance.length} in striking distance (positions ${min} to ${max}), ${notInTop100} not in the top 100. `
             + 'Work strikingDistance first, then read topMovers for what changed and rankingPages for per-page coverage.';
+      }
 
       const payload: SeoReportResponse = {
          domain,
