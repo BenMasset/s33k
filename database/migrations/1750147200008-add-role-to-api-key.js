@@ -23,17 +23,19 @@ module.exports = {
    up: async (arg) => {
       const queryInterface = resolveQueryInterface(arg);
       return queryInterface.sequelize.transaction(async (t) => {
+         let apiKeyTableDefinition = null;
          try {
-            const apiKeyTableDefinition = await queryInterface.describeTable('api_key');
-            if (apiKeyTableDefinition && !apiKeyTableDefinition.role) {
-               await queryInterface.addColumn('api_key', 'role', {
-                  type: DataTypes.STRING,
-                  allowNull: true,
-                  defaultValue: 'admin',
-               }, { transaction: t });
-            }
-         } catch (error) {
-            console.log('error :', error);
+            apiKeyTableDefinition = await queryInterface.describeTable('api_key');
+         } catch (describeError) {
+            apiKeyTableDefinition = null;
+         }
+         if (!apiKeyTableDefinition) { return; }
+         if (!apiKeyTableDefinition.role) {
+            await queryInterface.addColumn('api_key', 'role', {
+               type: DataTypes.STRING,
+               allowNull: true,
+               defaultValue: 'admin',
+            }, { transaction: t });
          }
       });
    },

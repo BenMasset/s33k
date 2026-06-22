@@ -27,65 +27,61 @@ module.exports = {
    up: async (arg) => {
       const queryInterface = resolveQueryInterface(arg);
       return queryInterface.sequelize.transaction(async (t) => {
+         // Idempotent: only create the table if it does not already exist.
+         let exists = false;
          try {
-            // Idempotent: only create the table if it does not already exist.
-            let exists = false;
-            try {
-               await queryInterface.describeTable('feature_request');
-               exists = true;
-            } catch (describeError) {
-               exists = false;
-            }
-            if (!exists) {
-               await queryInterface.createTable('feature_request', {
-                  ID: {
-                     type: DataTypes.INTEGER,
-                     allowNull: false,
-                     primaryKey: true,
-                     autoIncrement: true,
-                  },
-                  account_id: {
-                     type: DataTypes.INTEGER,
-                     allowNull: false,
-                  },
-                  owner_id: {
-                     type: DataTypes.INTEGER,
-                     allowNull: true,
-                  },
-                  request: {
-                     type: DataTypes.TEXT,
-                     allowNull: false,
-                  },
-                  context: {
-                     type: DataTypes.TEXT,
-                     allowNull: true,
-                  },
-                  status: {
-                     type: DataTypes.STRING,
-                     allowNull: false,
-                     defaultValue: 'open',
-                  },
-                  matched_capability: {
-                     type: DataTypes.STRING,
-                     allowNull: true,
-                  },
-                  createdAt: {
-                     type: DataTypes.DATE,
-                     allowNull: true,
-                  },
-                  updatedAt: {
-                     type: DataTypes.DATE,
-                     allowNull: true,
-                  },
-               }, { transaction: t });
+            await queryInterface.describeTable('feature_request');
+            exists = true;
+         } catch (describeError) {
+            exists = false;
+         }
+         if (!exists) {
+            await queryInterface.createTable('feature_request', {
+               ID: {
+                  type: DataTypes.INTEGER,
+                  allowNull: false,
+                  primaryKey: true,
+                  autoIncrement: true,
+               },
+               account_id: {
+                  type: DataTypes.INTEGER,
+                  allowNull: false,
+               },
+               owner_id: {
+                  type: DataTypes.INTEGER,
+                  allowNull: true,
+               },
+               request: {
+                  type: DataTypes.TEXT,
+                  allowNull: false,
+               },
+               context: {
+                  type: DataTypes.TEXT,
+                  allowNull: true,
+               },
+               status: {
+                  type: DataTypes.STRING,
+                  allowNull: false,
+                  defaultValue: 'open',
+               },
+               matched_capability: {
+                  type: DataTypes.STRING,
+                  allowNull: true,
+               },
+               createdAt: {
+                  type: DataTypes.DATE,
+                  allowNull: true,
+               },
+               updatedAt: {
+                  type: DataTypes.DATE,
+                  allowNull: true,
+               },
+            }, { transaction: t });
 
-               // Index the columns the read surface scopes and filters/sorts on.
-               await queryInterface.addIndex('feature_request', ['account_id'], { transaction: t });
-               await queryInterface.addIndex('feature_request', ['owner_id'], { transaction: t });
-               await queryInterface.addIndex('feature_request', ['status'], { transaction: t });
-            }
-         } catch (error) {
-            console.log('error :', error);
+            // Index the columns the read surface scopes and filters/sorts on.
+            await queryInterface.addIndex('feature_request', ['account_id'], { transaction: t });
+            await queryInterface.addIndex('feature_request', ['owner_id'], { transaction: t });
+            await queryInterface.addIndex('feature_request', ['status'], { transaction: t });
          }
       });
    },

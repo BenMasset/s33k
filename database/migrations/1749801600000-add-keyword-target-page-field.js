@@ -23,40 +23,46 @@ module.exports = {
    up: async (arg) => {
       const queryInterface = resolveQueryInterface(arg);
       return queryInterface.sequelize.transaction(async (t) => {
+         // Idempotent: the keyword table may not exist yet on a brand-new DB built straight from
+         // models; only touch it when it is present and the column is absent.
+         let keywordTableDefinition = null;
          try {
-            const keywordTableDefinition = await queryInterface.describeTable('keyword');
-            if (keywordTableDefinition && !keywordTableDefinition.target_page) {
-               await queryInterface.addColumn('keyword', 'target_page', {
-                  type: DataTypes.STRING,
-                  allowNull: true,
-                  defaultValue: '',
-               }, { transaction: t });
+            keywordTableDefinition = await queryInterface.describeTable('keyword');
+         } catch (describeError) {
+            keywordTableDefinition = null;
+         }
+         if (!keywordTableDefinition) { return; }
+         if (!keywordTableDefinition.target_page) {
+            await queryInterface.addColumn('keyword', 'target_page', {
+               type: DataTypes.STRING,
+               allowNull: true,
+               defaultValue: '',
+            }, { transaction: t });
 
-               // Light backfill: copy a path-like tag into target_page for existing rows.
-               const [rows] = await queryInterface.sequelize.query(
-                  'SELECT ID, tags FROM keyword',
-                  { transaction: t },
-               );
-               for (const row of rows) {
-                  let parsedTags = [];
-                  try {
-                     parsedTags = row.tags ? JSON.parse(row.tags) : [];
-                  } catch (parseError) {
-                     parsedTags = [];
-                  }
-                  const pathTag = Array.isArray(parsedTags)
-                     ? parsedTags.find((tag) => typeof tag === 'string' && tag.trim().startsWith('/'))
-                     : undefined;
-                  if (pathTag) {
-                     await queryInterface.sequelize.query(
-                        'UPDATE keyword SET target_page = :targetPage WHERE ID = :id',
-                        { replacements: { targetPage: pathTag.trim(), id: row.ID }, transaction: t },
-                     );
-                  }
+            // Light backfill: copy a path-like tag into target_page for existing rows.
+            // "ID" is quoted: Postgres folds unquoted identifiers to lowercase, but the column
+            // was created quoted ("ID"), so unquoted ID would fail to resolve on Postgres.
+            const [rows] = await queryInterface.sequelize.query(
+               'SELECT "ID", tags FROM keyword',
+               { transaction: t },
+            );
+            for (const row of rows) {
+               let parsedTags = [];
+               try {
+                  parsedTags = row.tags ? JSON.parse(row.tags) : [];
+               } catch (parseError) {
+                  parsedTags = [];
+               }
+               const pathTag = Array.isArray(parsedTags)
+                  ? parsedTags.find((tag) => typeof tag === 'string' && tag.trim().startsWith('/'))
+                  : undefined;
+               if (pathTag) {
+                  await queryInterface.sequelize.query(
+                     'UPDATE keyword SET target_page = :targetPage WHERE "ID" = :id',
+                     { replacements: { targetPage: pathTag.trim(), id: row.ID }, transaction: t },
+                  );
                }
             }
-         } catch (error) {
-            console.log('error :', error);
          }
       });
    },

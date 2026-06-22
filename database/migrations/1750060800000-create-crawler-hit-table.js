@@ -25,63 +25,59 @@ module.exports = {
    up: async (arg) => {
       const queryInterface = resolveQueryInterface(arg);
       return queryInterface.sequelize.transaction(async (t) => {
+         // Idempotent: only create the table if it does not already exist.
+         let exists = false;
          try {
-            // Idempotent: only create the table if it does not already exist.
-            let exists = false;
-            try {
-               await queryInterface.describeTable('crawler_hit');
-               exists = true;
-            } catch (describeError) {
-               exists = false;
-            }
-            if (!exists) {
-               await queryInterface.createTable('crawler_hit', {
-                  id: {
-                     type: DataTypes.INTEGER,
-                     allowNull: false,
-                     primaryKey: true,
-                     autoIncrement: true,
-                  },
-                  domain: {
-                     type: DataTypes.STRING,
-                     allowNull: false,
-                  },
-                  bot: {
-                     type: DataTypes.STRING,
-                     allowNull: false,
-                  },
-                  owner: {
-                     type: DataTypes.STRING,
-                     allowNull: true,
-                     defaultValue: '',
-                  },
-                  isAiEngine: {
-                     type: DataTypes.BOOLEAN,
-                     allowNull: false,
-                     defaultValue: false,
-                  },
-                  path: {
-                     type: DataTypes.STRING,
-                     allowNull: true,
-                     defaultValue: '',
-                  },
-                  userAgent: {
-                     type: DataTypes.STRING,
-                     allowNull: true,
-                     defaultValue: '',
-                  },
-                  hitAt: {
-                     type: DataTypes.STRING,
-                     allowNull: false,
-                  },
-               }, { transaction: t });
+            await queryInterface.describeTable('crawler_hit');
+            exists = true;
+         } catch (describeError) {
+            exists = false;
+         }
+         if (!exists) {
+            await queryInterface.createTable('crawler_hit', {
+               id: {
+                  type: DataTypes.INTEGER,
+                  allowNull: false,
+                  primaryKey: true,
+                  autoIncrement: true,
+               },
+               domain: {
+                  type: DataTypes.STRING,
+                  allowNull: false,
+               },
+               bot: {
+                  type: DataTypes.STRING,
+                  allowNull: false,
+               },
+               owner: {
+                  type: DataTypes.STRING,
+                  allowNull: true,
+                  defaultValue: '',
+               },
+               isAiEngine: {
+                  type: DataTypes.BOOLEAN,
+                  allowNull: false,
+                  defaultValue: false,
+               },
+               path: {
+                  type: DataTypes.STRING,
+                  allowNull: true,
+                  defaultValue: '',
+               },
+               userAgent: {
+                  type: DataTypes.STRING,
+                  allowNull: true,
+                  defaultValue: '',
+               },
+               hitAt: {
+                  type: DataTypes.STRING,
+                  allowNull: false,
+               },
+            }, { transaction: t });
 
-               // Index the lookup columns the ai-crawlers report filters and sorts on.
-               await queryInterface.addIndex('crawler_hit', ['domain'], { transaction: t });
-               await queryInterface.addIndex('crawler_hit', ['hitAt'], { transaction: t });
-            }
-         } catch (error) {
-            console.log('error :', error);
+            // Index the lookup columns the ai-crawlers report filters and sorts on.
+            await queryInterface.addIndex('crawler_hit', ['domain'], { transaction: t });
+            await queryInterface.addIndex('crawler_hit', ['hitAt'], { transaction: t });
          }
       });
    },

@@ -21,25 +21,21 @@ module.exports = {
    up: async (arg) => {
       const queryInterface = resolveQueryInterface(arg);
       return queryInterface.sequelize.transaction(async (t) => {
+         // Idempotent: only touch the table when it exists and the column is absent.
+         let tableDefinition = null;
          try {
-            // Idempotent: only touch the table when it exists and the column is absent.
-            let tableDefinition = null;
-            try {
-               tableDefinition = await queryInterface.describeTable('s33k_event');
-            } catch (describeError) {
-               tableDefinition = null;
-            }
-            if (tableDefinition && !tableDefinition.is_bot) {
-               await queryInterface.addColumn('s33k_event', 'is_bot', {
-                  type: DataTypes.BOOLEAN,
-                  allowNull: false,
-                  defaultValue: false,
-               }, { transaction: t });
-               // Index is_bot so the human-only (is_bot = false) filter on every read stays cheap.
-               await queryInterface.addIndex('s33k_event', ['is_bot'], { transaction: t });
-            }
-         } catch (error) {
-            console.log('error :', error);
+            tableDefinition = await queryInterface.describeTable('s33k_event');
+         } catch (describeError) {
+            tableDefinition = null;
+         }
+         if (tableDefinition && !tableDefinition.is_bot) {
+            await queryInterface.addColumn('s33k_event', 'is_bot', {
+               type: DataTypes.BOOLEAN,
+               allowNull: false,
+               defaultValue: false,
+            }, { transaction: t });
+            // Index is_bot so the human-only (is_bot = false) filter on every read stays cheap.
+            await queryInterface.addIndex('s33k_event', ['is_bot'], { transaction: t });
          }
       });
    },

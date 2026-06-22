@@ -28,26 +28,22 @@ module.exports = {
    up: async (arg) => {
       const queryInterface = resolveQueryInterface(arg);
       return queryInterface.sequelize.transaction(async (t) => {
+         // Idempotent: the table may not exist yet on a brand-new DB built straight from
+         // models; only touch it when it is present and the column is absent.
+         let tableDefinition = null;
          try {
-            // Idempotent: the table may not exist yet on a brand-new DB built straight from
-            // models; only touch it when it is present and the column is absent.
-            let tableDefinition = null;
-            try {
-               tableDefinition = await queryInterface.describeTable('s33k_event');
-            } catch (describeError) {
-               tableDefinition = null;
-            }
-            if (tableDefinition && !tableDefinition.source) {
-               await queryInterface.addColumn('s33k_event', 'source', {
-                  type: DataTypes.STRING,
-                  allowNull: true,
-                  defaultValue: null,
-               }, { transaction: t });
-               // Index source so conversion-by-source grouping stays cheap.
-               await queryInterface.addIndex('s33k_event', ['source'], { transaction: t });
-            }
-         } catch (error) {
-            console.log('error :', error);
+            tableDefinition = await queryInterface.describeTable('s33k_event');
+         } catch (describeError) {
+            tableDefinition = null;
+         }
+         if (tableDefinition && !tableDefinition.source) {
+            await queryInterface.addColumn('s33k_event', 'source', {
+               type: DataTypes.STRING,
+               allowNull: true,
+               defaultValue: null,
+            }, { transaction: t });
+            // Index source so conversion-by-source grouping stays cheap.
+            await queryInterface.addIndex('s33k_event', ['source'], { transaction: t });
          }
       });
    },

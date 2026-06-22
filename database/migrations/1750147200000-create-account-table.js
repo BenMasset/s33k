@@ -22,69 +22,71 @@ module.exports = {
    up: async (arg) => {
       const queryInterface = resolveQueryInterface(arg);
       return queryInterface.sequelize.transaction(async (t) => {
+         // Idempotency probe ONLY: a missing table throws here, which is the expected
+         // "not yet created" signal, so it is caught and treated as exists=false. The
+         // create + seed path below is intentionally NOT wrapped: a real failure must
+         // throw out of up() so Umzug leaves this migration un-applied and retryable.
+         let exists = false;
          try {
-            // Idempotent: only create the table if it does not already exist.
-            let exists = false;
-            try {
-               await queryInterface.describeTable('account');
-               exists = true;
-            } catch (describeError) {
-               exists = false;
-            }
-            if (!exists) {
-               await queryInterface.createTable('account', {
-                  ID: {
-                     type: DataTypes.INTEGER,
-                     allowNull: false,
-                     primaryKey: true,
-                     autoIncrement: true,
-                  },
-                  name: {
-                     type: DataTypes.STRING,
-                     allowNull: true,
-                     defaultValue: '',
-                  },
-                  plan: {
-                     type: DataTypes.STRING,
-                     allowNull: true,
-                     defaultValue: 'free',
-                  },
-                  status: {
-                     type: DataTypes.STRING,
-                     allowNull: true,
-                     defaultValue: 'active',
-                  },
-                  createdAt: {
-                     type: DataTypes.DATE,
-                     allowNull: true,
-                  },
-                  updatedAt: {
-                     type: DataTypes.DATE,
-                     allowNull: true,
-                  },
-               }, { transaction: t });
-            }
+            await queryInterface.describeTable('account');
+            exists = true;
+         } catch (describeError) {
+            exists = false;
+         }
+         if (!exists) {
+            await queryInterface.createTable('account', {
+               ID: {
+                  type: DataTypes.INTEGER,
+                  allowNull: false,
+                  primaryKey: true,
+                  autoIncrement: true,
+               },
+               name: {
+                  type: DataTypes.STRING,
+                  allowNull: true,
+                  defaultValue: '',
+               },
+               plan: {
+                  type: DataTypes.STRING,
+                  allowNull: true,
+                  defaultValue: 'free',
+               },
+               status: {
+                  type: DataTypes.STRING,
+                  allowNull: true,
+                  defaultValue: 'active',
+               },
+               createdAt: {
+                  type: DataTypes.DATE,
+                  allowNull: true,
+               },
+               updatedAt: {
+                  type: DataTypes.DATE,
+                  allowNull: true,
+               },
+            }, { transaction: t });
+         }
 
-            // Seed the single admin account (ID = 1) if it does not already exist.
-            const [adminRows] = await queryInterface.sequelize.query(
-               'SELECT ID FROM account WHERE ID = 1',
-               { transaction: t },
-            );
-            if (!adminRows || adminRows.length === 0) {
-               const now = new Date().toISOString();
-               await queryInterface.sequelize.query(
-                  'INSERT INTO account (ID, name, plan, status, createdAt, updatedAt) '
-                  + 'VALUES (1, :name, :plan, :status, :createdAt, :updatedAt)',
-                  {
-                     replacements: {
-                        name: 'Admin', plan: 'admin', status: 'active', createdAt: now, updatedAt: now,
-                     },
-                     transaction: t,
+         // Seed the single admin account (ID = 1) if it does not already exist.
+         // Identifiers are quoted so the raw SQL works on Postgres, where the columns
+         // were created quoted ("ID", "createdAt", "updatedAt") and unquoted identifiers
+         // would otherwise fold to lowercase and miss them.
+         const [adminRows] = await queryInterface.sequelize.query(
+            'SELECT "ID" FROM account WHERE "ID" = 1',
+            { transaction: t },
+         );
+         if (!adminRows || adminRows.length === 0) {
+            const now = new Date().toISOString();
+            await queryInterface.sequelize.query(
+               'INSERT INTO account ("ID", name, plan, status, "createdAt", "updatedAt") '
+               + 'VALUES (1, :name, :plan, :status, :createdAt, :updatedAt)',
+               {
+                  replacements: {
+                     name: 'Admin', plan: 'admin', status: 'active', createdAt: now, updatedAt: now,
                   },
-               );
-            }
-         } catch (error) {
-            console.log('error :', error);
+                  transaction: t,
+               },
+            );
          }
       });
    },

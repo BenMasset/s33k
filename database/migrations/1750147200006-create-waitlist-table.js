@@ -22,56 +22,52 @@ module.exports = {
    up: async (arg) => {
       const queryInterface = resolveQueryInterface(arg);
       return queryInterface.sequelize.transaction(async (t) => {
+         // Idempotent: only create the table if it does not already exist.
+         let exists = false;
          try {
-            // Idempotent: only create the table if it does not already exist.
-            let exists = false;
-            try {
-               await queryInterface.describeTable('waitlist');
-               exists = true;
-            } catch (describeError) {
-               exists = false;
-            }
-            if (!exists) {
-               await queryInterface.createTable('waitlist', {
-                  ID: {
-                     type: DataTypes.INTEGER,
-                     allowNull: false,
-                     primaryKey: true,
-                     autoIncrement: true,
-                  },
-                  email: {
-                     type: DataTypes.STRING,
-                     allowNull: false,
-                  },
-                  domain: {
-                     type: DataTypes.STRING,
-                     allowNull: true,
-                  },
-                  note: {
-                     type: DataTypes.STRING,
-                     allowNull: true,
-                  },
-                  status: {
-                     type: DataTypes.STRING,
-                     allowNull: false,
-                     defaultValue: 'waiting',
-                  },
-                  createdAt: {
-                     type: DataTypes.DATE,
-                     allowNull: true,
-                  },
-                  updatedAt: {
-                     type: DataTypes.DATE,
-                     allowNull: true,
-                  },
-               }, { transaction: t });
+            await queryInterface.describeTable('waitlist');
+            exists = true;
+         } catch (describeError) {
+            exists = false;
+         }
+         if (!exists) {
+            await queryInterface.createTable('waitlist', {
+               ID: {
+                  type: DataTypes.INTEGER,
+                  allowNull: false,
+                  primaryKey: true,
+                  autoIncrement: true,
+               },
+               email: {
+                  type: DataTypes.STRING,
+                  allowNull: false,
+               },
+               domain: {
+                  type: DataTypes.STRING,
+                  allowNull: true,
+               },
+               note: {
+                  type: DataTypes.STRING,
+                  allowNull: true,
+               },
+               status: {
+                  type: DataTypes.STRING,
+                  allowNull: false,
+                  defaultValue: 'waiting',
+               },
+               createdAt: {
+                  type: DataTypes.DATE,
+                  allowNull: true,
+               },
+               updatedAt: {
+                  type: DataTypes.DATE,
+                  allowNull: true,
+               },
+            }, { transaction: t });
 
-               // Dedupe by email at the database level; index status for the admin listing.
-               await queryInterface.addIndex('waitlist', ['email'], { unique: true, transaction: t });
-               await queryInterface.addIndex('waitlist', ['status'], { transaction: t });
-            }
-         } catch (error) {
-            console.log('error :', error);
+            // Dedupe by email at the database level; index status for the admin listing.
+            await queryInterface.addIndex('waitlist', ['email'], { unique: true, transaction: t });
+            await queryInterface.addIndex('waitlist', ['status'], { transaction: t });
          }
       });
    },

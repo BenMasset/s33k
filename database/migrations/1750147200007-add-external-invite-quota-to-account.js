@@ -23,17 +23,19 @@ module.exports = {
    up: async (arg) => {
       const queryInterface = resolveQueryInterface(arg);
       return queryInterface.sequelize.transaction(async (t) => {
+         let accountTableDefinition = null;
          try {
-            const accountTableDefinition = await queryInterface.describeTable('account');
-            if (accountTableDefinition && !accountTableDefinition.external_invite_quota) {
-               await queryInterface.addColumn('account', 'external_invite_quota', {
-                  type: DataTypes.INTEGER,
-                  allowNull: true,
-                  defaultValue: 5,
-               }, { transaction: t });
-            }
-         } catch (error) {
-            console.log('error :', error);
+            accountTableDefinition = await queryInterface.describeTable('account');
+         } catch (describeError) {
+            accountTableDefinition = null;
+         }
+         if (!accountTableDefinition) { return; }
+         if (!accountTableDefinition.external_invite_quota) {
+            await queryInterface.addColumn('account', 'external_invite_quota', {
+               type: DataTypes.INTEGER,
+               allowNull: true,
+               defaultValue: 5,
+            }, { transaction: t });
          }
       });
    },

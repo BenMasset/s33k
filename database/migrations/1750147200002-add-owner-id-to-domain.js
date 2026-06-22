@@ -25,18 +25,23 @@ module.exports = {
    up: async (arg) => {
       const queryInterface = resolveQueryInterface(arg);
       return queryInterface.sequelize.transaction(async (t) => {
+         // Idempotency probe ONLY: a missing domain table throws here and is caught so the migration
+         // no-ops (an earlier migration owns the domain table). Everything below is deliberately
+         // UNWRAPPED so a real failure throws and the migration stays un-applied and retryable.
+         let domainTableDefinition = null;
          try {
-            const domainTableDefinition = await queryInterface.describeTable('domain');
-            if (domainTableDefinition && !domainTableDefinition.owner_id) {
-               await queryInterface.addColumn('domain', 'owner_id', {
-                  type: DataTypes.INTEGER,
-                  allowNull: true,
-               }, { transaction: t });
+            domainTableDefinition = await queryInterface.describeTable('domain');
+         } catch (describeError) {
+            domainTableDefinition = null;
+         }
+         if (!domainTableDefinition) { return; }
+         if (!domainTableDefinition.owner_id) {
+            await queryInterface.addColumn('domain', 'owner_id', {
+               type: DataTypes.INTEGER,
+               allowNull: true,
+            }, { transaction: t });
 
-               await queryInterface.addIndex('domain', ['owner_id'], { transaction: t });
-            }
-         } catch (error) {
-            console.log('error :', error);
+            await queryInterface.addIndex('domain', ['owner_id'], { transaction: t });
          }
       });
    },

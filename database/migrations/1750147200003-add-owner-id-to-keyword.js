@@ -26,18 +26,23 @@ module.exports = {
    up: async (arg) => {
       const queryInterface = resolveQueryInterface(arg);
       return queryInterface.sequelize.transaction(async (t) => {
+         // Idempotency probe ONLY: a missing keyword table throws here and is caught so the migration
+         // no-ops (an earlier migration owns the keyword table). Everything below is deliberately
+         // UNWRAPPED so a real failure throws and the migration stays un-applied and retryable.
+         let keywordTableDefinition = null;
          try {
-            const keywordTableDefinition = await queryInterface.describeTable('keyword');
-            if (keywordTableDefinition && !keywordTableDefinition.owner_id) {
-               await queryInterface.addColumn('keyword', 'owner_id', {
-                  type: DataTypes.INTEGER,
-                  allowNull: true,
-               }, { transaction: t });
+            keywordTableDefinition = await queryInterface.describeTable('keyword');
+         } catch (describeError) {
+            keywordTableDefinition = null;
+         }
+         if (!keywordTableDefinition) { return; }
+         if (!keywordTableDefinition.owner_id) {
+            await queryInterface.addColumn('keyword', 'owner_id', {
+               type: DataTypes.INTEGER,
+               allowNull: true,
+            }, { transaction: t });
 
-               await queryInterface.addIndex('keyword', ['owner_id'], { transaction: t });
-            }
-         } catch (error) {
-            console.log('error :', error);
+            await queryInterface.addIndex('keyword', ['owner_id'], { transaction: t });
          }
       });
    },

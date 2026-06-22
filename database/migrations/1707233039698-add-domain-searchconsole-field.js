@@ -4,13 +4,11 @@
 module.exports = {
    up: (queryInterface, Sequelize) => {
      return queryInterface.sequelize.transaction(async (t) => {
-      try {
-         const domainTableDefinition = await queryInterface.describeTable('domain');
-         if (domainTableDefinition && !domainTableDefinition.search_console) {
-            await queryInterface.addColumn('domain', 'search_console', { type: Sequelize.DataTypes.STRING }, { transaction: t });
-         }
-      } catch (error) {
-         console.log('error :', error);
+      let domainTableDefinition = null;
+      try { domainTableDefinition = await queryInterface.describeTable('domain'); } catch (describeError) { domainTableDefinition = null; }
+      if (!domainTableDefinition) { return; }
+      if (!domainTableDefinition.search_console) {
+         await queryInterface.addColumn('domain', 'search_console', { type: Sequelize.DataTypes.STRING }, { transaction: t });
       }
      });
    },

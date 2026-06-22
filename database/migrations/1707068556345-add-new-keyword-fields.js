@@ -4,21 +4,17 @@
 module.exports = {
    up: async (queryInterface, Sequelize) => {
       return queryInterface.sequelize.transaction(async (t) => {
-         try {
-            const keywordTableDefinition = await queryInterface.describeTable('keyword');
-            if (keywordTableDefinition) {
-               if (!keywordTableDefinition.city) {
-                  await queryInterface.addColumn('keyword', 'city', { type: Sequelize.DataTypes.STRING }, { transaction: t });
-               }
-               if (!keywordTableDefinition.latlong) {
-                  await queryInterface.addColumn('keyword', 'latlong', { type: Sequelize.DataTypes.STRING }, { transaction: t });
-               }
-               if (!keywordTableDefinition.settings) {
-                  await queryInterface.addColumn('keyword', 'settings', { type: Sequelize.DataTypes.STRING }, { transaction: t });
-               }
-            }
-         } catch (error) {
-            console.log('error :', error);
+         let keywordTableDefinition = null;
+         try { keywordTableDefinition = await queryInterface.describeTable('keyword'); } catch (describeError) { keywordTableDefinition = null; }
+         if (!keywordTableDefinition) { return; }
+         if (!keywordTableDefinition.city) {
+            await queryInterface.addColumn('keyword', 'city', { type: Sequelize.DataTypes.STRING }, { transaction: t });
+         }
+         if (!keywordTableDefinition.latlong) {
+            await queryInterface.addColumn('keyword', 'latlong', { type: Sequelize.DataTypes.STRING }, { transaction: t });
+         }
+         if (!keywordTableDefinition.settings) {
+            await queryInterface.addColumn('keyword', 'settings', { type: Sequelize.DataTypes.STRING }, { transaction: t });
          }
       });
    },

@@ -28,72 +28,68 @@ module.exports = {
    up: async (arg) => {
       const queryInterface = resolveQueryInterface(arg);
       return queryInterface.sequelize.transaction(async (t) => {
+         // Idempotent: only create the table if it does not already exist.
+         let exists = false;
          try {
-            // Idempotent: only create the table if it does not already exist.
-            let exists = false;
-            try {
-               await queryInterface.describeTable('s33k_event');
-               exists = true;
-            } catch (describeError) {
-               exists = false;
-            }
-            if (!exists) {
-               await queryInterface.createTable('s33k_event', {
-                  id: {
-                     type: DataTypes.BIGINT,
-                     allowNull: false,
-                     primaryKey: true,
-                     autoIncrement: true,
-                  },
-                  domain: {
-                     type: DataTypes.STRING,
-                     allowNull: false,
-                  },
-                  owner_id: {
-                     type: DataTypes.INTEGER,
-                     allowNull: true,
-                  },
-                  type: {
-                     type: DataTypes.STRING,
-                     allowNull: false,
-                  },
-                  page: {
-                     type: DataTypes.STRING,
-                     allowNull: true,
-                     defaultValue: '',
-                  },
-                  label: {
-                     type: DataTypes.STRING,
-                     allowNull: true,
-                     defaultValue: '',
-                  },
-                  selector: {
-                     type: DataTypes.STRING,
-                     allowNull: true,
-                     defaultValue: '',
-                  },
-                  value: {
-                     type: DataTypes.INTEGER,
-                     allowNull: true,
-                  },
-                  session: {
-                     type: DataTypes.STRING,
-                     allowNull: true,
-                     defaultValue: '',
-                  },
-                  created: {
-                     type: DataTypes.STRING,
-                     allowNull: false,
-                  },
-               }, { transaction: t });
+            await queryInterface.describeTable('s33k_event');
+            exists = true;
+         } catch (describeError) {
+            exists = false;
+         }
+         if (!exists) {
+            await queryInterface.createTable('s33k_event', {
+               id: {
+                  type: DataTypes.BIGINT,
+                  allowNull: false,
+                  primaryKey: true,
+                  autoIncrement: true,
+               },
+               domain: {
+                  type: DataTypes.STRING,
+                  allowNull: false,
+               },
+               owner_id: {
+                  type: DataTypes.INTEGER,
+                  allowNull: true,
+               },
+               type: {
+                  type: DataTypes.STRING,
+                  allowNull: false,
+               },
+               page: {
+                  type: DataTypes.STRING,
+                  allowNull: true,
+                  defaultValue: '',
+               },
+               label: {
+                  type: DataTypes.STRING,
+                  allowNull: true,
+                  defaultValue: '',
+               },
+               selector: {
+                  type: DataTypes.STRING,
+                  allowNull: true,
+                  defaultValue: '',
+               },
+               value: {
+                  type: DataTypes.INTEGER,
+                  allowNull: true,
+               },
+               session: {
+                  type: DataTypes.STRING,
+                  allowNull: true,
+                  defaultValue: '',
+               },
+               created: {
+                  type: DataTypes.STRING,
+                  allowNull: false,
+               },
+            }, { transaction: t });
 
-               // Index the columns the read surfaces filter, scope, and sort on.
-               await queryInterface.addIndex('s33k_event', ['domain'], { transaction: t });
-               await queryInterface.addIndex('s33k_event', ['owner_id'], { transaction: t });
-               await queryInterface.addIndex('s33k_event', ['created'], { transaction: t });
-            }
-         } catch (error) {
-            console.log('error :', error);
+            // Index the columns the read surfaces filter, scope, and sort on.
+            await queryInterface.addIndex('s33k_event', ['domain'], { transaction: t });
+            await queryInterface.addIndex('s33k_event', ['owner_id'], { transaction: t });
+            await queryInterface.addIndex('s33k_event', ['created'], { transaction: t });
          }
       });
    },

@@ -24,64 +24,63 @@ module.exports = {
    up: async (arg) => {
       const queryInterface = resolveQueryInterface(arg);
       return queryInterface.sequelize.transaction(async (t) => {
+         // Idempotency probe ONLY: a missing table throws here, which is the expected
+         // "not yet created" signal, so it is caught and treated as exists=false. The
+         // create/addIndex path below is intentionally NOT wrapped: a real failure must
+         // throw out of up() so Umzug leaves this migration un-applied and retryable.
+         let exists = false;
          try {
-            // Idempotent: only create the table if it does not already exist.
-            let exists = false;
-            try {
-               await queryInterface.describeTable('api_key');
-               exists = true;
-            } catch (describeError) {
-               exists = false;
-            }
-            if (!exists) {
-               await queryInterface.createTable('api_key', {
-                  ID: {
-                     type: DataTypes.INTEGER,
-                     allowNull: false,
-                     primaryKey: true,
-                     autoIncrement: true,
-                  },
-                  account_id: {
-                     type: DataTypes.INTEGER,
-                     allowNull: false,
-                  },
-                  name: {
-                     type: DataTypes.STRING,
-                     allowNull: true,
-                     defaultValue: '',
-                  },
-                  key_prefix: {
-                     type: DataTypes.STRING,
-                     allowNull: false,
-                  },
-                  key_hash: {
-                     type: DataTypes.STRING,
-                     allowNull: false,
-                  },
-                  last_used_at: {
-                     type: DataTypes.DATE,
-                     allowNull: true,
-                  },
-                  revoked_at: {
-                     type: DataTypes.DATE,
-                     allowNull: true,
-                  },
-                  createdAt: {
-                     type: DataTypes.DATE,
-                     allowNull: true,
-                  },
-                  updatedAt: {
-                     type: DataTypes.DATE,
-                     allowNull: true,
-                  },
-               }, { transaction: t });
+            await queryInterface.describeTable('api_key');
+            exists = true;
+         } catch (describeError) {
+            exists = false;
+         }
+         if (!exists) {
+            await queryInterface.createTable('api_key', {
+               ID: {
+                  type: DataTypes.INTEGER,
+                  allowNull: false,
+                  primaryKey: true,
+                  autoIncrement: true,
+               },
+               account_id: {
+                  type: DataTypes.INTEGER,
+                  allowNull: false,
+               },
+               name: {
+                  type: DataTypes.STRING,
+                  allowNull: true,
+                  defaultValue: '',
+               },
+               key_prefix: {
+                  type: DataTypes.STRING,
+                  allowNull: false,
+               },
+               key_hash: {
+                  type: DataTypes.STRING,
+                  allowNull: false,
+               },
+               last_used_at: {
+                  type: DataTypes.DATE,
+                  allowNull: true,
+               },
+               revoked_at: {
+                  type: DataTypes.DATE,
+                  allowNull: true,
+               },
+               createdAt: {
+                  type: DataTypes.DATE,
+                  allowNull: true,
+               },
+               updatedAt: {
+                  type: DataTypes.DATE,
+                  allowNull: true,
+               },
+            }, { transaction: t });
 
-               // Index the lookup columns the resolver filters on.
-               await queryInterface.addIndex('api_key', ['key_prefix'], { transaction: t });
-               await queryInterface.addIndex('api_key', ['account_id'], { transaction: t });
-            }
-         } catch (error) {
-            console.log('error :', error);
+            // Index the lookup columns the resolver filters on.
+            await queryInterface.addIndex('api_key', ['key_prefix'], { transaction: t });
+            await queryInterface.addIndex('api_key', ['account_id'], { transaction: t });
          }
       });
    },
