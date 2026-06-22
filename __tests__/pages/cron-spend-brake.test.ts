@@ -14,7 +14,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
  */
 
 jest.mock('../../database/database', () => ({ __esModule: true, default: { sync: jest.fn(async () => undefined) }, ensureSynced: jest.fn(async () => undefined) }));
-jest.mock('sequelize', () => ({ __esModule: true, Op: { in: Symbol('in') } }));
+jest.mock('sequelize', () => ({ __esModule: true, Op: { in: Symbol('in'), notIn: Symbol('notIn') } }));
 jest.mock('../../database/models/keyword', () => ({ __esModule: true, default: { update: jest.fn(), findAll: jest.fn() } }));
 jest.mock('../../database/models/domain', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../database/models/account', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
@@ -69,6 +69,18 @@ const makeRes = () => {
    return res as unknown as NextApiResponse & { statusCode: number, payload: Record<string, unknown> };
 };
 
+// The cron scrape now runs as a fire-and-forget background DRAIN (the handler returns started:true
+// immediately, then a paged loop scrapes the full set so a 1000-site instance is not starved past the
+// first page). The drain awaits mocked DB ops, so flush several macrotask ticks after the handler
+// returns to let it run to completion before asserting. The page mock below returns the rows ONCE then
+// [] (modelling the DB honoring Op.notIn / the cursor draining), so the drain terminates in one page.
+const flushDrain = async (ticks = 25) => {
+   for (let i = 0; i < ticks; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => { setTimeout(resolve, 0); });
+   }
+};
+
 beforeEach(() => {
    jest.clearAllMocks();
    process.env = { ...ORIGINAL_ENV };
@@ -83,7 +95,8 @@ afterEach(() => { process.env = { ...ORIGINAL_ENV }; });
 describe('POST /api/cron: spend brake skips inactive-account keywords', () => {
    it('drops keywords owned by an inactive account and keeps active + admin (null-owner) ones', async () => {
       // owner 2 active (trialing, future), owner 3 inactive (canceled), keyword 30 has null owner (admin/legacy).
-      mockKeyword.findAll.mockResolvedValue([kw(10, 2), kw(20, 3), kw(30, null)]);
+      // First drain page returns the rows; the next page is empty (cursor drained), so the drain ends.
+      mockKeyword.findAll.mockResolvedValueOnce([kw(10, 2), kw(20, 3), kw(30, null)]).mockResolvedValue([]);
       mockAccount.findAll.mockResolvedValue([
          { ID: 2, subscription_status: 'trialing', trial_ends_at: future },
          { ID: 3, subscription_status: 'canceled', trial_ends_at: null },
@@ -91,6 +104,7 @@ describe('POST /api/cron: spend brake skips inactive-account keywords', () => {
       const res = makeRes();
 
       await cronHandler(makeReq(), res);
+      await flushDrain();
 
       expect(res.statusCode).toBe(200);
       expect(mockRefresh).toHaveBeenCalledTimes(1);
@@ -102,10 +116,11 @@ describe('POST /api/cron: spend brake skips inactive-account keywords', () => {
 
    it('with MULTI_TENANT off, scrapes every keyword (no brake, single-tenant unchanged)', async () => {
       delete process.env.MULTI_TENANT;
-      mockKeyword.findAll.mockResolvedValue([kw(10, 2), kw(20, 3), kw(30, null)]);
+      mockKeyword.findAll.mockResolvedValueOnce([kw(10, 2), kw(20, 3), kw(30, null)]).mockResolvedValue([]);
       const res = makeRes();
 
       await cronHandler(makeReq(), res);
+      await flushDrain();
 
       expect(res.statusCode).toBe(200);
       const scraped = mockRefresh.mock.calls[0][0] as Array<{ ID: number }>;
