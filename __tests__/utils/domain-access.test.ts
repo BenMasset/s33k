@@ -11,8 +11,9 @@
  *      resolves to null for BOTH the read gate and the write gate.
  *   3. The write option (opts.write) still requires ownership today (owner-only), and the
  *      query it issues is owner-scoped exactly like the read gate.
- *   4. With MULTI_TENANT off / admin, the gate is unscoped (no owner_id key), so single-tenant
- *      behavior is a plain Domain.findOne({ domain }).
+ *   4. With MULTI_TENANT OFF, the gate is unscoped (no owner_id key), so single-tenant behavior is a
+ *      plain Domain.findOne({ domain }). With MULTI_TENANT ON, the admin/operator is scoped to its
+ *      OWN null-owner partition (owner_id: null), NOT unscoped (the operator-data-isolation fix).
  *
  * The Domain model is mocked so each call is a pure assertion on the where-clause the helper
  * built; scopeWhere runs for real so the scoped output is the genuine flag-gated value. The
@@ -90,14 +91,17 @@ describe('resolveDomainAccess with MULTI_TENANT on', () => {
       expect(mockDomain.findOne.mock.calls[0][0].where).toEqual({ domain: 'a.com', owner_id: TENANT_B.ID });
    });
 
-   it('admin is unscoped: the gate has no owner_id key (read or write)', async () => {
+   // OPERATOR-DATA-ISOLATION (flipped): under the flag the admin/operator gate is NO LONGER unscoped.
+   // It is scoped to the operator's own null-owner partition, so the gate carries owner_id: null (read
+   // AND write). This is what stops the operator's key from resolving another tenant's domain.
+   it('admin/operator gate is scoped to its own null-owner partition (read and write)', async () => {
       mockDomain.findOne.mockResolvedValue({ ID: 7, domain: 'a.com' });
 
       await resolveDomainAccess(ADMIN, 'a.com');
       await resolveDomainAccess(ADMIN, 'a.com', { write: true });
 
-      expect(Object.prototype.hasOwnProperty.call(mockDomain.findOne.mock.calls[0][0].where, 'owner_id')).toBe(false);
-      expect(Object.prototype.hasOwnProperty.call(mockDomain.findOne.mock.calls[1][0].where, 'owner_id')).toBe(false);
+      expect(mockDomain.findOne.mock.calls[0][0].where).toEqual({ domain: 'a.com', owner_id: null });
+      expect(mockDomain.findOne.mock.calls[1][0].where).toEqual({ domain: 'a.com', owner_id: null });
    });
 });
 

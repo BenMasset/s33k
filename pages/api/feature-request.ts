@@ -7,6 +7,7 @@ import ensureAdminAccount from '../../utils/ensureAdminAccount';
 import { isAdminAccount, ownerIdFor } from '../../utils/scope';
 import { crossCheckCapability } from '../../utils/knowledge';
 import { notifyFeatureRequest } from '../../utils/notify-feature-request';
+import { recordAudit } from '../../utils/auditLog';
 
 // Feature-request routes, the storage + admin side of the request_feature MCP flow.
 //
@@ -79,6 +80,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (!isAdminAccount(account)) {
          return res.status(403).json({ error: 'Admin access required.' });
       }
+      // Privileged instance action: the operator read every account's feature requests (metadata).
+      // Audit it (best-effort, never blocks).
+      await recordAudit({
+         actorAccountId: account.ID,
+         actorRole: 'admin',
+         action: 'feature-request.read',
+         route: '/api/feature-request',
+      });
       return listRequests(req, res);
    }
    return res.status(405).json({ error: 'Method Not Allowed. Use POST or GET.' });

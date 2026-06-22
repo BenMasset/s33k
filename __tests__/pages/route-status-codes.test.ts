@@ -20,6 +20,8 @@ jest.mock('../../database/database', () => ({
 jest.mock('sequelize', () => ({ __esModule: true, Op: { in: Symbol('in') } }));
 jest.mock('../../utils/ensureAdminAccount', () => ({ __esModule: true, default: jest.fn(async () => undefined) }));
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
+// recordAudit imports the AuditLog sequelize model; mock to a no-op (best-effort/non-blocking write).
+jest.mock('../../utils/auditLog', () => ({ __esModule: true, recordAudit: jest.fn(async () => undefined), default: jest.fn(async () => undefined) }));
 jest.mock('../../utils/verifyUser', () => ({ __esModule: true, default: jest.fn() }));
 
 jest.mock('../../database/models/account', () => ({

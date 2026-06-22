@@ -955,8 +955,9 @@ const capabilities: CapabilityEntry[] = [
       toolName: 'security_facts',
       category: 'security',
       title: 'Is s33k safe? Get the trust facts',
-      description: 'Returns s33k\'s complete, source-cited trust facts: no model training, tenant isolation, encryption at rest, data ownership, '
-         + 'open-source/self-hostable, and cookieless/no-PII tracking.',
+      description: 'Returns s33k\'s complete, source-cited trust facts: no model training, tenant isolation (the operator is a scoped tenant too, '
+         + 'not a master reader), encryption at rest (credentials + login email, with the honest plaintext-analytics residual), privileged-access '
+         + 'audit log, data ownership, open-source/self-hostable, and cookieless/no-PII tracking.',
       whenToUse: 'Use whenever a user asks whether s33k is safe, private, or trustworthy, or whether it trains on or shares their data.',
       examplePrompt: 'Is s33k safe? Do you train on my data?',
    },
@@ -1219,9 +1220,11 @@ const troubleshooting: TroubleshootingEntry[] = [
 // ---------------------------------------------------------------------------
 const trust = {
    summary: 'Start a trial with zero security fear. s33k cannot train on your data (no model-training pipeline exists), one '
-      + 'account can never see another\'s (proven by adversarial isolation tests), connected credentials are encrypted at '
-      + 'rest, tracking is cookieless with no PII, and you can export or hard-delete everything on demand. Every claim is '
-      + 'verifiable because s33k is open source and self-hostable. The full, source-cited facts come from '
+      + 'account can never see another\'s and in multi-tenant mode neither can the operator (it is a scoped tenant, not a '
+      + 'master reader, proven by adversarial isolation tests), connected credentials and your login email are encrypted at '
+      + 'rest (the analytics substrate is plaintext by necessity, the honest residual), privileged operator actions are '
+      + 'audit-logged, tracking is cookieless with no PII, and you can export or hard-delete everything on demand. Every '
+      + 'claim is verifiable because s33k is open source and self-hostable. The full, source-cited facts come from '
       + 'utils/securityFacts.ts (also served by the security_facts capability).',
    facts: securityFacts,
 };

@@ -154,17 +154,18 @@ describe('GET /api/export tenant scoping', () => {
       expect(mockEvent.findAll.mock.calls[0][0].where.domain[Op.in]).toEqual([]);
    });
 
-   it('does NOT scope the admin / single-tenant export (no owner_id key)', async () => {
+   // OPERATOR-DATA-ISOLATION (flipped): under the flag the operator export is scoped to its OWN
+   // null-owner partition (owner_id: null), so it returns only the operator's data, never all tenants.
+   it('scopes the admin/operator export to its own null-owner partition', async () => {
       asCaller(ADMIN);
-      mockDomain.findAll.mockResolvedValue([row({ ID: 1, domain: 'legacy.com', search_console: null })]);
+      mockDomain.findAll.mockResolvedValue([row({ ID: 1, domain: 'legacy.com', owner_id: null, search_console: null })]);
       const res = makeRes();
       await exportHandler(makeReq({ method: 'GET' }), res);
 
       const where = mockDomain.findAll.mock.calls[0][0].where;
-      expect(where).toEqual({});
-      expect(Object.prototype.hasOwnProperty.call(where, 'owner_id')).toBe(false);
-      // Keyword/event reads carry no owner_id scoping for the admin caller either.
-      expect(Object.prototype.hasOwnProperty.call(mockKeyword.findAll.mock.calls[0][0].where, 'owner_id')).toBe(false);
+      expect(where).toEqual({ owner_id: null });
+      // Keyword/event reads are scoped to owner_id null too (the operator's own data).
+      expect(mockKeyword.findAll.mock.calls[0][0].where).toMatchObject({ owner_id: null });
       expect((res.payload as Record<string, unknown>).accountId).toBe(ADMIN_ACCOUNT_ID);
    });
 });

@@ -22,14 +22,27 @@ class Account extends Model {
    @Column({ type: DataType.STRING, allowNull: true, defaultValue: '' })
    name!: string;
 
-   // The email this account was invited with. The lookup key for PASSWORDLESS magic-link login
-   // (/api/auth/request-link finds the account by this column). Set on signup in invite/accept.ts
-   // (acceptExternal stamps it from invite.email). Nullable so the seeded admin account (no email)
-   // and any pre-migration row are unaffected; a UNIQUE index (see the add-email-to-account
-   // migration) enforces at-most-one account per non-null email while permitting many NULLs. Only
-   // meaningful with MULTI_TENANT on (login routes hard-reject when the flag is off).
-   @Column({ type: DataType.STRING, allowNull: true })
+   // The email this account was invited with, ENCRYPTED AT REST. As of the encrypt-account-email
+   // migration this column holds the cryptr-encrypted (AES-256, keyed by SECRET) ciphertext of the
+   // address, NOT the plaintext: a DB dump no longer exposes login emails. It is decryptable to
+   // display the address (utils/accountEmail.decryptEmail) but is NOT used for lookup or uniqueness,
+   // because cryptr's random IV makes the ciphertext non-deterministic. The deterministic lookup +
+   // uniqueness moved to email_hash below. TEXT (not STRING) so the ciphertext never truncates on
+   // Postgres. Nullable: the seeded admin (no email) and any null-email account stay null. Set on
+   // signup in invite/accept.ts (createAccount encrypts invite.email). Only meaningful with
+   // MULTI_TENANT on (login routes hard-reject when the flag is off).
+   @Column({ type: DataType.TEXT, allowNull: true })
    email!: string | null;
+
+   // The deterministic blind index for the email: keyed HMAC-SHA256(SECRET, normalized email), hex
+   // (utils/accountEmail.emailHash). This is the LOOKUP KEY for magic-link login + signup dedupe
+   // (/api/auth/request-link and /api/signup query by this) and the column the UNIQUE index sits on,
+   // so it enforces at-most-one account per non-null email while permitting many NULLs (null email ->
+   // null hash). It is keyed by SECRET so a DB-dump attacker cannot brute-force the small email space
+   // or build a rainbow table without also stealing SECRET. Nullable + TEXT, additive. Set wherever
+   // email is set (createAccount). Only meaningful with MULTI_TENANT on.
+   @Column({ type: DataType.TEXT, allowNull: true })
+   email_hash!: string | null;
 
    @Column({ type: DataType.STRING, allowNull: true, defaultValue: 'free' })
    plan!: string;

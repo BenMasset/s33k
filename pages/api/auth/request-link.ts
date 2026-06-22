@@ -8,6 +8,7 @@ import { resolveBaseUrl } from '../../../utils/baseUrl';
 import { sendMagicLinkEmail } from '../../../utils/send-invite';
 import { isMultiTenantEnabled } from '../../../utils/scope';
 import { clientIp } from '../../../utils/collect-guards';
+import { emailHash } from '../../../utils/accountEmail';
 
 // PUBLIC passwordless-login REQUEST endpoint. A returning user who has an account but no key on
 // THIS device POSTs their email; if the email maps to an account we mail a one-time, 15-minute
@@ -129,9 +130,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       await ensureSynced();
       await ensureAdminAccount();
 
-      // Look the account up by email. If none, we STILL return SENT_OK below without creating a
-      // token or sending mail: the response is indistinguishable from the account-exists path.
-      const account = await Account.findOne({ where: { email } });
+      // Look the account up by the DETERMINISTIC email_hash blind index, not the plaintext email:
+      // account.email is now the cryptr ciphertext (random IV, non-deterministic), so it cannot be
+      // queried; email_hash = HMAC-SHA256(SECRET, normalized email) is stable and is the lookup key.
+      // If none matches, we STILL return SENT_OK below without creating a token or sending mail: the
+      // response is indistinguishable from the account-exists path (no enumeration).
+      const account = await Account.findOne({ where: { email_hash: emailHash(email) } });
 
       if (account && account.status === 'active') {
          // Create a single-use, 15-minute login token. It is an Invite row of type 'login' so it

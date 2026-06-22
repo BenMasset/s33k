@@ -137,17 +137,19 @@ describe('GET /api/weekly-digest: ownership gate', () => {
       expect(mockKeyword.findAll.mock.calls[0][0].where).toMatchObject({ domain: 'a.com', owner_id: TENANT.ID });
    });
 
-   it('admin is unscoped: no owner_id key on the ownership lookup or the pillar reads', async () => {
+   // OPERATOR-DATA-ISOLATION (flipped): under the flag the admin/operator is scoped to its OWN
+   // null-owner partition, so the ownership lookup and every pillar read carry owner_id: null.
+   it('admin/operator is scoped to its own null-owner partition (ownership lookup and pillar reads)', async () => {
       asCaller(ADMIN);
-      mockDomain.findOne.mockResolvedValue({ ID: 7, domain: 'a.com' });
+      mockDomain.findOne.mockResolvedValue({ ID: 7, domain: 'a.com', owner_id: null });
       mockEvent.findAll.mockResolvedValue([]);
       mockKeyword.findAll.mockResolvedValue([]);
 
       await weeklyDigestHandler(makeReq({ domain: 'a.com' }), makeRes());
 
-      expect(Object.prototype.hasOwnProperty.call(mockDomain.findOne.mock.calls[0][0].where, 'owner_id')).toBe(false);
-      expect(Object.prototype.hasOwnProperty.call(mockEvent.findAll.mock.calls[0][0].where, 'owner_id')).toBe(false);
-      expect(Object.prototype.hasOwnProperty.call(mockKeyword.findAll.mock.calls[0][0].where, 'owner_id')).toBe(false);
+      expect(mockDomain.findOne.mock.calls[0][0].where).toMatchObject({ owner_id: null });
+      expect(mockEvent.findAll.mock.calls[0][0].where).toMatchObject({ owner_id: null });
+      expect(mockKeyword.findAll.mock.calls[0][0].where).toMatchObject({ owner_id: null });
    });
 });
 

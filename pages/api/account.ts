@@ -4,8 +4,9 @@ import Account from '../../database/models/account';
 import ApiKey from '../../database/models/apiKey';
 import authorize from '../../utils/authorize';
 import ensureAdminAccount from '../../utils/ensureAdminAccount';
-import { isAdminAccount } from '../../utils/scope';
+import { isAdminAccount, ADMIN_ACCOUNT_ID } from '../../utils/scope';
 import { generateApiKey, hashApiKey, apiKeyPrefix } from '../../utils/resolveAccount';
+import { recordAudit } from '../../utils/auditLog';
 
 // Account-management routes. These are ADMIN-only: only the seeded admin account
 // (account.ID === ADMIN_ACCOUNT_ID) may create or list accounts. They are meaningful only
@@ -48,16 +49,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
    if (!isAdmin(account)) {
       return res.status(403).json({ error: 'Admin access required.' });
    }
+   const actorId = account ? account.ID : ADMIN_ACCOUNT_ID;
    if (req.method === 'POST') {
-      return createAccount(req, res);
+      return createAccount(req, res, actorId);
    }
    if (req.method === 'GET') {
-      return listAccounts(req, res);
+      return listAccounts(req, res, actorId);
    }
    return res.status(405).json({ error: 'Method Not Allowed.' });
 }
 
-const createAccount = async (req: NextApiRequest, res: NextApiResponse<AccountCreateRes>) => {
+const createAccount = async (req: NextApiRequest, res: NextApiResponse<AccountCreateRes>, actorId: number) => {
    const { name, plan } = req.body || {};
    if (!name || typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ error: 'Account name is Required!' });
@@ -79,6 +81,15 @@ const createAccount = async (req: NextApiRequest, res: NextApiResponse<AccountCr
          key_hash: hashApiKey(fullKey),
       });
 
+      // Privileged instance action: the operator created a new tenant account + first key. Audit it
+      // (metadata only). Best-effort, never blocks the response (recordAudit cannot throw).
+      await recordAudit({
+         actorAccountId: actorId,
+         actorRole: 'admin',
+         action: 'account.create',
+         targetAccountId: newAccount.ID,
+         route: '/api/account',
+      });
       const summary: AccountSummary = {
          ID: newAccount.ID, name: newAccount.name, plan: newAccount.plan, status: newAccount.status,
       };
@@ -89,10 +100,18 @@ const createAccount = async (req: NextApiRequest, res: NextApiResponse<AccountCr
    }
 };
 
-const listAccounts = async (req: NextApiRequest, res: NextApiResponse<AccountListRes>) => {
+// listAccounts returns ACCOUNT METADATA ONLY (id, name, plan, status, key count, last-used). It
+// queries ONLY the Account and ApiKey tables, NEVER tenant-content tables (Keyword, S33kEvent,
+// CrawlerHit, Domain rankings): the operator's instance-admin privilege exposes who the tenants are,
+// never what their data is. Keep it that way; do not add a tenant-content read here.
+const listAccounts = async (req: NextApiRequest, res: NextApiResponse<AccountListRes>, actorId: number) => {
    try {
       const accounts = await Account.findAll();
       const keys = await ApiKey.findAll({ where: { revoked_at: null } });
+      // Privileged instance action: the operator listed all tenant accounts (metadata). Audit it.
+      await recordAudit({
+         actorAccountId: actorId, actorRole: 'admin', action: 'account.list', route: '/api/account',
+      });
       const summaries: AccountSummary[] = accounts.map((acc) => {
          const accountKeys = keys.filter((k) => k.account_id === acc.ID);
          const lastUsedDates = accountKeys

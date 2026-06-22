@@ -6,6 +6,7 @@ import authorize from '../../utils/authorize';
 import ensureAdminAccount from '../../utils/ensureAdminAccount';
 import { isAdminAccount } from '../../utils/scope';
 import { generateApiKey, hashApiKey, apiKeyPrefix } from '../../utils/resolveAccount';
+import { recordAudit } from '../../utils/auditLog';
 
 // API-key management. Minting an extra key (POST) and revoking a key (DELETE) is allowed
 // for the admin account (any account_id) or for an account acting on ITS OWN keys. A
@@ -69,6 +70,17 @@ const mintKey = async (req: NextApiRequest, res: NextApiResponse<KeyCreateRes>, 
          key_prefix: apiKeyPrefix(fullKey),
          key_hash: hashApiKey(fullKey),
       });
+      // Audit a CROSS-ACCOUNT mint (the operator minting a key for an account that is not its own).
+      // A tenant minting its own key is an ordinary action, not privileged, so it is not logged.
+      if (account && account.ID !== accountId) {
+         await recordAudit({
+            actorAccountId: account.ID,
+            actorRole: 'admin',
+            action: 'account-key.mint',
+            targetAccountId: accountId,
+            route: '/api/account-key',
+         });
+      }
       return res.status(201).json({ apiKey: fullKey, keyId: created.ID });
    } catch (error) {
       console.log('[ERROR] Minting API Key: ', error);
@@ -93,6 +105,17 @@ const revokeKey = async (req: NextApiRequest, res: NextApiResponse<KeyDeleteRes>
       }
       key.revoked_at = new Date();
       await key.save();
+      // Audit a CROSS-ACCOUNT revoke (operator revoking another account's key). A tenant revoking its
+      // own key is ordinary and not logged.
+      if (account && account.ID !== key.account_id) {
+         await recordAudit({
+            actorAccountId: account.ID,
+            actorRole: 'admin',
+            action: 'account-key.revoke',
+            targetAccountId: key.account_id,
+            route: '/api/account-key',
+         });
+      }
       return res.status(200).json({ revoked: true });
    } catch (error) {
       console.log('[ERROR] Revoking API Key: ', error);

@@ -4,7 +4,10 @@ import Keyword from '../../database/models/keyword';
 import Domain from '../../database/models/domain';
 import { getAppSettings } from './settings';
 import authorize from '../../utils/authorize';
-import { scopeWhere, isMultiTenantEnabled, ADMIN_ACCOUNT_ID } from '../../utils/scope';
+import {
+   scopeWhere, isMultiTenantEnabled, ADMIN_ACCOUNT_ID, isAdminAccount, unscopedOperatorWhere,
+} from '../../utils/scope';
+import { recordAudit } from '../../utils/auditLog';
 import AccountModel from '../../database/models/account';
 import type Account from '../../database/models/account';
 import refreshAndUpdateKeywords from '../../utils/refresh';
@@ -72,13 +75,38 @@ const applySpendBrake = async (keywords: Keyword[], scope: Record<string, unknow
    });
 };
 
+// Resolve the keyword/domain scope for a cron run. The cron sweep is intentionally INSTANCE-WIDE
+// when the OPERATOR runs it (the operator owns the shared Serper key and refreshes every tenant's
+// rankings), so the operator gets unscopedOperatorWhere() = {} via the named escape hatch. Any
+// OTHER caller (a tenant key that somehow reaches cron) stays scoped to its own rows via scopeWhere,
+// so a tenant can never trigger an all-tenants scrape. With MULTI_TENANT off, isAdminAccount is true
+// for the single admin and scopeWhere is already {}, so this returns {} either way (byte-for-byte
+// unchanged). When the operator runs the sweep under flag-on, we audit-log the privileged all-tenants
+// access (best-effort, never blocks the run) so there is a record of every instance-wide data touch.
+const cronScopeFor = async (
+   account: Account | null | undefined,
+   action: string,
+): Promise<Record<string, unknown>> => {
+   if (isMultiTenantEnabled() && isAdminAccount(account)) {
+      await recordAudit({
+         actorAccountId: account ? account.ID : ADMIN_ACCOUNT_ID,
+         actorRole: 'admin',
+         action,
+         route: '/api/cron',
+         detail: 'operator-wide keyword sweep across all tenants',
+      });
+      return unscopedOperatorWhere();
+   }
+   return scopeWhere(account);
+};
+
 const cronRefreshkeywords = async (req: NextApiRequest, res: NextApiResponse<CRONRefreshRes>, account?: Account | null) => {
    try {
       const settings = await getAppSettings();
       if (!settings || (settings && settings.scraper_type === 'never')) {
          return res.status(400).json({ started: false, error: 'Scraper has not been set up yet.' });
       }
-      const scope = scopeWhere(account);
+      const scope = await cronScopeFor(account, 'cron.sweep');
       await Keyword.update({ updating: true }, { where: { ...scope } });
       let keywordQueries: Keyword[] = await Keyword.findAll({ where: { ...scope } });
       const allDomains: Domain[] = await Domain.findAll({ where: { ...scope } });
@@ -106,7 +134,7 @@ const cronRetryFailedKeywords = async (req: NextApiRequest, res: NextApiResponse
       if (!settings || (settings && settings.scraper_type === 'never')) {
          return res.status(400).json({ started: false, error: 'Scraper has not been set up yet.' });
       }
-      const scope = scopeWhere(account);
+      const scope = await cronScopeFor(account, 'cron.retry');
       let keywordQueries: Keyword[] = await Keyword.findAll({ where: { ...failedRetryWhere(), ...scope } });
       if (keywordQueries.length === 0) {
          return res.status(200).json({ started: true });

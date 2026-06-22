@@ -4,6 +4,7 @@ import {
    isMultiTenantEnabled,
    scopeWhere,
    ownerIdFor,
+   unscopedOperatorWhere,
 } from '../../utils/scope';
 
 /**
@@ -75,13 +76,23 @@ describe('scopeWhere (read scoping)', () => {
    describe('when MULTI_TENANT is on', () => {
       beforeEach(() => { process.env.MULTI_TENANT = 'true'; });
 
-      it('treats the admin account as the unscoped NULL-owner default', () => {
-         expect(scopeWhere(account(ADMIN_ACCOUNT_ID))).toEqual({});
+      // OPERATOR-DATA-ISOLATION: under the flag, the operator/admin is NO LONGER unscoped ({}). It is
+      // scoped to its OWN data, the legacy NULL-owner partition: { owner_id: null } (Sequelize's
+      // IS NULL). This is the change that closes the operator-master-read hole. scopeWhere returns {}
+      // ONLY when the flag is off (the single-owner self-host).
+      it('scopes the admin/operator to its OWN null-owner partition (NOT unscoped)', () => {
+         expect(scopeWhere(account(ADMIN_ACCOUNT_ID))).toEqual({ owner_id: null });
       });
 
-      it('treats a null/undefined account as the unscoped NULL-owner default', () => {
-         expect(scopeWhere(null)).toEqual({});
-         expect(scopeWhere(undefined)).toEqual({});
+      it('scopes a null/undefined account to the null-owner partition too (never {})', () => {
+         expect(scopeWhere(null)).toEqual({ owner_id: null });
+         expect(scopeWhere(undefined)).toEqual({ owner_id: null });
+      });
+
+      it('never returns an unscoped {} for ANY account under the flag', () => {
+         expect(scopeWhere(account(ADMIN_ACCOUNT_ID))).not.toEqual({});
+         expect(scopeWhere(null)).not.toEqual({});
+         expect(scopeWhere(account(7))).not.toEqual({});
       });
 
       it('scopes a real tenant to its own owner_id', () => {
@@ -127,6 +138,14 @@ describe('ownerIdFor (write stamping)', () => {
          expect(ownerIdFor(account(7))).toBe(7);
          expect(ownerIdFor(account(99))).toBe(99);
       });
+   });
+});
+
+describe('unscopedOperatorWhere (the ONE legitimate instance-wide read, cron only)', () => {
+   it('returns an unscoped {} so the cron sweep can scan every tenant', () => {
+      // This is the named escape hatch the cron rank sweep uses (gated on the operator). It is the
+      // ONLY way to get {} under the flag; scopeWhere never returns {} for the operator again.
+      expect(unscopedOperatorWhere()).toEqual({});
    });
 });
 

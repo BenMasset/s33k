@@ -36,6 +36,9 @@ jest.mock('../../database/models/apiKey', () => ({
    default: { create: jest.fn(), findAll: jest.fn(), findOne: jest.fn() },
 }));
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
+// recordAudit imports the AuditLog sequelize model; mock to a no-op (best-effort/non-blocking write).
+// The isolation contract under test (cross-account mint/revoke refused, admin gate) is unchanged by it.
+jest.mock('../../utils/auditLog', () => ({ __esModule: true, recordAudit: jest.fn(async () => undefined), default: jest.fn(async () => undefined) }));
 
 // eslint-disable-next-line import/first
 import type { NextApiRequest, NextApiResponse } from 'next';

@@ -7,6 +7,7 @@ import { isAdminAccount } from '../../utils/scope';
 import { rateLimit } from '../../utils/rate-limit';
 import { clientIp } from '../../utils/collect-guards';
 import { notifyWaitlist } from '../../utils/notify-waitlist';
+import { recordAudit } from '../../utils/auditLog';
 
 // Hard length caps on the PUBLIC waitlist write (audit area 1). This is the least-defended
 // unauthenticated write surface, so cap every field before persisting: an email max is 254 (RFC
@@ -131,6 +132,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (!isAdminAccount(account)) {
          return res.status(403).json({ error: 'Admin access required.' });
       }
+      // Privileged instance action: the operator read the waitlist (access-request metadata, not
+      // tenant content). Audit it (best-effort, never blocks).
+      await recordAudit({
+         actorAccountId: account.ID, actorRole: 'admin', action: 'waitlist.read', route: '/api/waitlist',
+      });
       return listWaitlist(res);
    }
    return res.status(405).json({ error: 'Method Not Allowed. Use POST or GET.' });

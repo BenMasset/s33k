@@ -19,6 +19,9 @@ jest.mock('../../database/models/keyword', () => ({ __esModule: true, default: {
 jest.mock('../../database/models/domain', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../database/models/account', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
+// recordAudit imports the AuditLog sequelize model; mock it to a no-op so the cron test stays pure
+// (the privileged-access audit write is itself best-effort/non-blocking). Cron scoping is asserted below.
+jest.mock('../../utils/auditLog', () => ({ __esModule: true, recordAudit: jest.fn(async () => undefined), default: jest.fn(async () => undefined) }));
 jest.mock('../../pages/api/settings', () => ({ __esModule: true, getAppSettings: jest.fn(async () => ({ scraper_type: 'serper' })) }));
 jest.mock('../../utils/refresh', () => ({ __esModule: true, default: jest.fn(async () => []) }));
 // utils/scraper imports cheerio (ESM jest cannot parse); mock the only symbol cron.ts pulls from it.

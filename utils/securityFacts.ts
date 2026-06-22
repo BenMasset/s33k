@@ -26,9 +26,12 @@ export const securityFacts: SecurityFacts = {
    principle: 'Verify us, don\'t trust us. s33k is open source and self-hostable, so every claim '
       + 'here can be confirmed by reading the code or by owning the deployment yourself.',
    summary: 'A trial user can start with zero security fear: s33k cannot train on your data (no '
-      + 'model-training pipeline exists in the code), one account can never see another\'s data '
-      + '(proven by adversarial isolation tests), connected credentials are encrypted at rest, '
-      + 'tracking is cookieless with no PII, and you can export or hard-delete everything on demand.',
+      + 'model-training pipeline exists in the code), one account can never see another\'s data and '
+      + 'in multi-tenant mode neither can the operator (proven by adversarial isolation tests), '
+      + 'connected credentials and your login email are encrypted at rest (the analytics substrate '
+      + 'is plaintext by necessity, the honest residual), privileged operator actions are '
+      + 'audit-logged, tracking is cookieless with no PII, and you can export or hard-delete '
+      + 'everything on demand.',
    facts: [
       {
          id: 'no_training',
@@ -47,15 +50,24 @@ export const securityFacts: SecurityFacts = {
       },
       {
          id: 'tenant_isolation',
-         question: 'Who else can see my data?',
-         answer: 'Only you. Every tenant-owned table is scoped to your account: most carry an '
-            + 'owner_id injected through one helper (scopeWhere / ownerIdFor in utils/scope.ts), and '
-            + 'the few keyed on the globally-unique domain name are scoped by '
-            + 'your owned-domain set, which cannot collide across accounts. Every read, create, and '
-            + 'delete goes through that scoping, so one account can never read or change another '
-            + 'account\'s rows. This is covered by adversarial isolation tests, not just claimed.',
+         question: 'Who else can see my data? Can the operator see it?',
+         answer: 'Only you, and NOT the operator either. Every tenant-owned table is scoped to your '
+            + 'account through one helper (scopeWhere / ownerIdFor in utils/scope.ts), and the few '
+            + 'keyed on the globally-unique domain name are scoped by your owned-domain set, which '
+            + 'cannot collide across accounts. Crucially, in multi-tenant mode the operator (the '
+            + 'seeded admin) is NOT an unscoped master reader: it is scoped to its OWN data (the '
+            + 'legacy null-owner partition), so the operator\'s admin key cannot read any other '
+            + 'tenant\'s domains, keywords, rankings, events, dashboards, or reports through any API '
+            + 'or MCP route. The operator keeps instance-admin powers (list accounts, mint keys, run '
+            + 'the rank sweep) that expose account metadata only, never tenant content, and the one '
+            + 'legitimate instance-wide read (the cron rank sweep on the shared SERP key) is named, '
+            + 'single-purpose, and audit-logged. The only unscoped-everything mode is a SINGLE-TENANT '
+            + 'self-host, where one operator legitimately owns all the data. This is covered by '
+            + 'adversarial isolation tests, including an explicit operator-cannot-read-another-tenant '
+            + 'test, not just claimed.',
          verifyIn: [
             'utils/scope.ts',
+            '__tests__/pages/operator-data-isolation.test.ts',
             '__tests__/pages/route-scope-isolation.test.ts',
             '__tests__/pages/account-routes-isolation.test.ts',
             '__tests__/utils/scope.test.ts',
@@ -63,17 +75,41 @@ export const securityFacts: SecurityFacts = {
       },
       {
          id: 'encryption_at_rest',
-         question: 'Are my connected credentials encrypted?',
-         answer: 'Yes. The credentials you connect (Google Search Console, Google Ads, the SERP '
-            + 'scraper key) are encrypted at rest with cryptr (AES-256) keyed by the app SECRET, '
-            + 'decrypted only in memory to make the call they belong to, and never logged, '
-            + 'exported, or sent to a model. API keys are stored as a SHA-256 hash, never as the '
-            + 'clear key.',
+         question: 'Are my credentials and login email encrypted? What is NOT encrypted?',
+         answer: 'Your connected credentials (Google Search Console, Google Ads, the SERP scraper '
+            + 'key) AND your login email are encrypted at rest with cryptr (AES-256) keyed by the app '
+            + 'SECRET, decrypted only in memory, and never logged, exported, or sent to a model. The '
+            + 'login-email lookup uses a separate keyed HMAC-SHA256 blind index (email_hash) so the '
+            + 'plaintext email never hits the database. API keys are stored as a SHA-256 hash, never '
+            + 'the clear key. THE HONEST RESIDUAL: your analytics substrate (autocapture events, '
+            + 'tracked keywords and their rank history, domain names, AI-crawler hits) is stored in '
+            + 'PLAINTEXT, because the server has to compute analytics over it (counts, sessions, '
+            + 'rank trends, cross-pillar joins), so it cannot be zero-knowledge. Anyone with physical '
+            + 'database or DB-credential access can read that analytics data; only the credentials '
+            + 'and the login email are encrypted. This is exactly why self-hosting is the strongest '
+            + 'guarantee: own the deployment, own that residual access.',
          verifyIn: [
             'pages/api/domains.ts',
             'pages/api/settings.ts',
             'utils/searchConsole.ts',
             'utils/adwords.ts',
+            'utils/accountEmail.ts',
+         ],
+      },
+      {
+         id: 'privileged_access_audit',
+         question: 'Is the operator\'s access logged?',
+         answer: 'Yes, in multi-tenant mode. Every privileged operator action (the cron rank sweep '
+            + 'across all tenants, listing or creating accounts, minting or revoking another '
+            + 'account\'s key, reading the waitlist or feature requests) is recorded in an audit_log '
+            + 'table as metadata only (actor, action, target account/domain, route, time), never '
+            + 'tenant content and never secrets. The operator reads the trail at GET /api/audit-log. '
+            + 'The writer is best-effort (never blocks a request) and is a no-op on a single-tenant '
+            + 'install, so that path is unchanged.',
+         verifyIn: [
+            'database/models/auditLog.ts',
+            'utils/auditLog.ts',
+            'pages/api/audit-log.ts',
          ],
       },
       {

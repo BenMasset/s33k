@@ -17,6 +17,8 @@ jest.mock('../../database/models/keyword', () => ({ __esModule: true, default: {
 jest.mock('../../database/models/domain', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../database/models/account', () => ({ __esModule: true, default: { findAll: jest.fn() } }));
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
+// recordAudit imports the AuditLog sequelize model; mock to a no-op (best-effort/non-blocking write).
+jest.mock('../../utils/auditLog', () => ({ __esModule: true, recordAudit: jest.fn(async () => undefined), default: jest.fn(async () => undefined) }));
 jest.mock('../../pages/api/settings', () => ({ __esModule: true, getAppSettings: jest.fn(async () => ({ scraper_type: 'serper' })) }));
 jest.mock('../../utils/refresh', () => ({ __esModule: true, default: jest.fn(async () => []) }));
 // scraper imports cheerio; the route only needs failedRetryWhere from it (stubbed to a sentinel where).

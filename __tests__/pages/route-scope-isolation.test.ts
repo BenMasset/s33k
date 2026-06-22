@@ -7,12 +7,16 @@
  *      { owner_id: <tenant ID> } in its where-clause, so one tenant can never
  *      read another tenant's rows. A regression that drops scopeWhere(account)
  *      from a query is caught here: the asserted where-clause would lose owner_id.
- *   2. The admin/legacy caller (ID = ADMIN_ACCOUNT_ID) is UNSCOPED: its where-clause
- *      has NO owner_id key, so legacy single-tenant data stays byte-for-byte visible.
+ *   2. The admin/operator caller (ID = ADMIN_ACCOUNT_ID) is SCOPED to its own null-owner
+ *      partition under the flag: its where-clause carries { owner_id: null } (NOT an empty
+ *      {} that would dump every tenant's rows). This is the operator-data-isolation fix; the
+ *      old "admin is unscoped under the flag" behavior was the operator-master-read hole.
+ *      (Flag-OFF single-tenant, tested elsewhere, still returns {}.)
  *   3. Creates STAMP owner_id: a tenant's bulkCreate rows carry owner_id = tenant ID;
- *      the admin's carry owner_id = null (matching legacy NULL-owner storage).
- *   4. Deletes are scoped the same way: a tenant destroy carries owner_id; admin's
- *      does not.
+ *      the admin's carry owner_id = null (matching legacy NULL-owner storage, which is now
+ *      also the operator's read scope).
+ *   4. Deletes are scoped the same way: a tenant destroy carries its owner_id; the admin's
+ *      carries owner_id: null.
  *
  * The DB layer is mocked to a no-op sync, the Domain/Keyword models are mocked so
  * every call is a pure assertion on the where-clause the route built, and authorize
@@ -144,14 +148,16 @@ describe('GET /api/domains where-clause scoping', () => {
       expect(where).toEqual({ owner_id: TENANT.ID });
    });
 
-   it('does NOT scope the admin read (no owner_id key)', async () => {
+   // OPERATOR-DATA-ISOLATION (flipped by the operator-no-see fix): under the flag the admin/operator
+   // is NO LONGER unscoped. It is scoped to its OWN null-owner partition, so the where carries
+   // { owner_id: null } (Sequelize IS NULL), never an empty {} that would dump every tenant's rows.
+   it('scopes the admin/operator read to its own null-owner partition', async () => {
       asCaller(ADMIN);
       mockDomain.findAll.mockResolvedValue([]);
       await domainsHandler(makeReq({ method: 'GET' }), makeRes());
 
       const where = mockDomain.findAll.mock.calls[0][0].where;
-      expect(where).toEqual({});
-      expect(Object.prototype.hasOwnProperty.call(where, 'owner_id')).toBe(false);
+      expect(where).toEqual({ owner_id: null });
    });
 });
 
@@ -194,7 +200,7 @@ describe('DELETE /api/domains where-clause scoping', () => {
       expect(mockKeyword.findAll.mock.calls[0][0].where).toEqual({ domain: 'a.com', owner_id: TENANT.ID });
    });
 
-   it('does NOT scope the admin delete', async () => {
+   it('scopes the admin/operator delete to its own null-owner partition', async () => {
       asCaller(ADMIN);
       mockDomain.findOne.mockResolvedValue(row({ ID: 1, domain: 'a.com' })); // ownership pre-check passes
       mockKeyword.findAll.mockResolvedValue([]);
@@ -202,8 +208,7 @@ describe('DELETE /api/domains where-clause scoping', () => {
       mockKeyword.destroy.mockResolvedValue(0);
       await domainsHandler(makeReq({ method: 'DELETE', query: { domain: 'a.com' } }), makeRes());
 
-      expect(mockDomain.destroy.mock.calls[0][0].where).toEqual({ domain: 'a.com' });
-      expect(Object.prototype.hasOwnProperty.call(mockDomain.destroy.mock.calls[0][0].where, 'owner_id')).toBe(false);
+      expect(mockDomain.destroy.mock.calls[0][0].where).toEqual({ domain: 'a.com', owner_id: null });
    });
 });
 
@@ -216,12 +221,12 @@ describe('GET /api/keywords where-clause scoping', () => {
       expect(mockKeyword.findAll.mock.calls[0][0].where).toEqual({ domain: 'a.com', owner_id: TENANT.ID });
    });
 
-   it('does NOT scope the admin keyword read', async () => {
+   it('scopes the admin/operator keyword read to its own null-owner partition', async () => {
       asCaller(ADMIN);
       mockKeyword.findAll.mockResolvedValue([]);
       await keywordsHandler(makeReq({ method: 'GET', query: { domain: 'a.com' } }), makeRes());
 
-      expect(mockKeyword.findAll.mock.calls[0][0].where).toEqual({ domain: 'a.com' });
+      expect(mockKeyword.findAll.mock.calls[0][0].where).toEqual({ domain: 'a.com', owner_id: null });
    });
 });
 
@@ -259,12 +264,12 @@ describe('DELETE /api/keywords where-clause scoping', () => {
       expect(where.owner_id).toBe(TENANT.ID);
    });
 
-   it('does NOT scope the admin keyword delete', async () => {
+   it('scopes the admin/operator keyword delete to its own null-owner partition', async () => {
       asCaller(ADMIN);
       mockKeyword.destroy.mockResolvedValue(1);
       await keywordsHandler(makeReq({ method: 'DELETE', query: { id: '5,6' } }), makeRes());
 
-      expect(Object.prototype.hasOwnProperty.call(mockKeyword.destroy.mock.calls[0][0].where, 'owner_id')).toBe(false);
+      expect(mockKeyword.destroy.mock.calls[0][0].where.owner_id).toBeNull();
    });
 });
 
@@ -277,11 +282,11 @@ describe('GET /api/domain (single resource) where-clause scoping', () => {
       expect(mockDomain.findOne.mock.calls[0][0].where).toEqual({ domain: 'a.com', owner_id: TENANT.ID });
    });
 
-   it('does NOT scope the admin single-domain read', async () => {
+   it('scopes the admin/operator single-domain read to its own null-owner partition', async () => {
       asCaller(ADMIN);
       mockDomain.findOne.mockResolvedValue(null);
       await domainHandler(makeReq({ method: 'GET', query: { domain: 'a.com' } }), makeRes());
 
-      expect(mockDomain.findOne.mock.calls[0][0].where).toEqual({ domain: 'a.com' });
+      expect(mockDomain.findOne.mock.calls[0][0].where).toEqual({ domain: 'a.com', owner_id: null });
    });
 });

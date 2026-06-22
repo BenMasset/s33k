@@ -7,6 +7,7 @@ import ensureAdminAccount from '../../../utils/ensureAdminAccount';
 import { generateApiKey, hashApiKey, apiKeyPrefix } from '../../../utils/resolveAccount';
 import { resolveBaseUrl } from '../../../utils/baseUrl';
 import { clientIp } from '../../../utils/collect-guards';
+import { encryptEmail, emailHash } from '../../../utils/accountEmail';
 
 // PUBLIC invite-accept endpoint. This route takes NO API key: the invite code IS the
 // credential. It is the one place outside the account-management routes that mints a real
@@ -197,20 +198,24 @@ const newAccountBase = (name: string, fallbackEmail: string | null) => ({
 });
 
 // Create the new external account, stamping email from the invite so the account is later findable
-// by magic-link login. If account.email's UNIQUE index rejects the create (some account already
-// holds this email), retry ONCE without the email so the invite (already claimed = single-use) is
-// not wasted: the user still gets a working account + key, just no login-email of its own. Any
+// by magic-link login. The email is ENCRYPTED AT REST: we store the cryptr ciphertext in `email` and
+// the deterministic HMAC blind index in `email_hash` (utils/accountEmail). The UNIQUE index now sits
+// on email_hash, so dedupe is by hash. If email_hash's UNIQUE index rejects the create (some account
+// already holds this email), retry ONCE without any email so the invite (already claimed = single-use)
+// is not wasted: the user still gets a working account + key, just no login-email of its own. Any
 // non-uniqueness error propagates to the caller's catch, which returns the generic 'Error Accepting
-// Invite.' rather than a 500.
+// Invite.' rather than a 500. fallbackEmail (for the display name) uses the plaintext, not the cipher.
 const createAccount = async (name: string, email: string | null): Promise<Account> => {
    const cleanEmail = email && email.trim() ? email.trim().toLowerCase() : null;
+   const encrypted = encryptEmail(cleanEmail);
+   const hash = emailHash(cleanEmail);
    try {
-      return await Account.create({ ...newAccountBase(name, cleanEmail), email: cleanEmail });
+      return await Account.create({ ...newAccountBase(name, cleanEmail), email: encrypted, email_hash: hash });
    } catch (error) {
       const errName = (error as { name?: string })?.name || '';
       if (cleanEmail && errName === 'SequelizeUniqueConstraintError') {
          // Email already owned by another account: mint the account without an email of its own.
-         return Account.create({ ...newAccountBase(name, cleanEmail), email: null });
+         return Account.create({ ...newAccountBase(name, cleanEmail), email: null, email_hash: null });
       }
       throw error;
    }

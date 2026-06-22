@@ -51,6 +51,12 @@ hard-won lesson, so the next session never relearns it.
   Postgres.
 
 ### Railway deploys: `railway up` is the deterministic path
+- **Run `railway up` from `~/Projects/s33k` (this repo root), NOT a sibling folder.** `railway up`
+  deploys whatever directory you are CURRENTLY in. Running it from e.g. `~/Projects/s33k-landing`
+  (even with `--service s33k`) does NOT deploy the app: that flag is ignored because the sibling
+  dir is not linked to the s33k project, so Railway creates a brand-new stray project named after
+  the dir and deploys that instead, leaving the app on old code. This actually happened (2026-06-22);
+  always `cd ~/Projects/s33k` first and confirm the build URL is project `s33k`/service `s33k`.
 - **`railway up` uploads the local working tree and deploys it. That is the deterministic deploy.**
 - **`railway add --repo` / git-push deploys build a STALE pinned commit** on API-created services
   (no auto-deploy webhook). The s33k service once shipped an old, unrelated commit this way and
@@ -79,6 +85,26 @@ hard-won lesson, so the next session never relearns it.
 ### Multi-tenant is flag-gated behind `MULTI_TENANT` (default off = byte-for-byte unchanged)
 - With the flag off, every caller resolves to admin, `scopeWhere` returns `{}`, and behavior is
   identical to single-tenant. Keep it that way: all multi-tenant changes are additive and flag-safe.
+
+### Operator data isolation (do not regress): `scopeWhere` returns `{}` ONLY when the flag is OFF
+- With `MULTI_TENANT` ON, NO account gets an unscoped `{}` from `scopeWhere(account)`, INCLUDING the
+  seeded admin/operator sentinel (ID 1). The operator is scoped to its OWN data, the legacy
+  `owner_id IS NULL` partition (getmasset lives here): `scopeWhere(operator)` returns
+  `{ owner_id: null }` (Sequelize IS NULL), so the operator's everyday admin key/cookie can no longer
+  read any other tenant's content through any API or hosted-MCP route. `ownerIdFor(operator)` still
+  stays `null`, so the operator's writes land on that same null-owner partition it reads.
+- The ONE legitimate instance-wide read (the cron SERP sweep that must scan EVERY tenant's keywords on
+  the shared Serper key) does NOT come through `scopeWhere`. It calls `unscopedOperatorWhere()` (a named
+  `{}` escape hatch in `utils/scope.ts`) at one call site (`pages/api/cron.ts`, gated on `isAdminAccount`),
+  and that privileged access is audit-logged. `scopeWhere` must never return `{}` for the operator under
+  the flag again. `isAdminAccount` stays the PRIVILEGE predicate (instance-admin powers); it no longer
+  implies an unscoped DATA read.
+- `account.email` is encrypted at rest (cryptr ciphertext in `email`), and the magic-link lookup +
+  dedupe key moved to a deterministic keyed-HMAC blind index `account.email_hash` (`utils/accountEmail.ts`).
+  Look up / dedupe by `email_hash`, never the (now non-deterministic) ciphertext.
+- Privileged operator actions write a best-effort `AuditLog` row via `utils/auditLog.recordAudit`
+  (no-op when the flag is off). The honest encryption residual (events/keywords/rankings are plaintext
+  because the server computes over them) is documented in `SECURITY.md` §3 and `utils/securityFacts.ts`.
 - **Data routes:** call `authorize()` (`utils/authorize.ts`) for auth + account resolution +
   member/whitelist enforcement, then spread `scopeWhere(account)` (`utils/scope.ts`) into EVERY
   `Domain` / `Keyword` / `CrawlerHit` / `S33kEvent` query, and stamp `ownerIdFor(account)` on every

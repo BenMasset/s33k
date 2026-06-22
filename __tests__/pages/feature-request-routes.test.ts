@@ -35,6 +35,8 @@ jest.mock('../../database/models/featureRequest', () => ({
    default: { create: jest.fn(), findAll: jest.fn() },
 }));
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
+// recordAudit imports the AuditLog sequelize model; mock to a no-op (best-effort/non-blocking write).
+jest.mock('../../utils/auditLog', () => ({ __esModule: true, recordAudit: jest.fn(async () => undefined), default: jest.fn(async () => undefined) }));
 jest.mock('../../utils/ensureAdminAccount', () => ({ __esModule: true, default: jest.fn(async () => undefined) }));
 // notify must never touch the network; stub it to a no-send result.
 jest.mock('../../utils/notify-feature-request', () => ({

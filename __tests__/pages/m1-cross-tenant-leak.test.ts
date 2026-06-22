@@ -243,8 +243,12 @@ describe('human-analytics route cross-tenant isolation', () => {
    });
 });
 
-describe('admin (single-tenant / legacy) stays unscoped', () => {
-   it('admin keyword read has no owner_id key', async () => {
+describe('admin/operator is scoped to its OWN null-owner partition (flag on)', () => {
+   // OPERATOR-DATA-ISOLATION: under the flag the operator is no longer a master reader. It reads its
+   // OWN data, the legacy null-owner rows (getmasset). The ownership pre-check resolves over
+   // { owner_id: null } and the keyword read is scoped { owner_id: null }, so the operator sees only
+   // its own partition, never another tenant's. (Flag-OFF single-tenant returns {}, tested in scope.test.)
+   it('operator keyword read is scoped to owner_id null (its own data), not unscoped', async () => {
       asCaller(ADMIN);
       mockKeyword.findAll.mockResolvedValue([]);
       const res = makeRes();
@@ -252,7 +256,10 @@ describe('admin (single-tenant / legacy) stays unscoped', () => {
       await keywordsHandler(makeReq('GET', { query: { domain: 'getmasset.com' } }), res);
 
       expect(res.statusCode).toBe(200);
-      expect(Object.prototype.hasOwnProperty.call(mockKeyword.findAll.mock.calls[0][0].where, 'owner_id')).toBe(false);
+      // The keyword read carries owner_id: null (the operator's own null-owner partition), never an
+      // unscoped {} that would let the operator read another tenant's keywords.
+      expect(mockKeyword.findAll.mock.calls[0][0].where).toMatchObject({ domain: 'getmasset.com', owner_id: null });
+      expect(mockKeyword.findAll.mock.calls[0][0].where).not.toEqual({ domain: 'getmasset.com' });
    });
 });
 

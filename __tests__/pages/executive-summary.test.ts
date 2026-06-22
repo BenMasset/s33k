@@ -143,17 +143,19 @@ describe('GET /api/executive-summary: ownership gate + scoping', () => {
       expect(mockKeyword.findAll.mock.calls[0][0].where).toMatchObject({ domain: 'a.com', owner_id: TENANT.ID });
    });
 
-   it('admin is unscoped: no owner_id key on the ownership lookup or pillar reads', async () => {
+   // OPERATOR-DATA-ISOLATION (flipped): under the flag the admin/operator is scoped to its OWN
+   // null-owner partition, so the ownership lookup and every pillar read carry owner_id: null.
+   it('admin/operator is scoped to its own null-owner partition (ownership lookup and pillar reads)', async () => {
       asCaller(ADMIN);
-      mockDomain.findOne.mockResolvedValue({ ID: 7, domain: 'a.com' });
+      mockDomain.findOne.mockResolvedValue({ ID: 7, domain: 'a.com', owner_id: null });
       const res = makeRes();
 
       await handler(makeReq({ domain: 'a.com' }), res);
 
-      const has = (where: Record<string, unknown>) => Object.prototype.hasOwnProperty.call(where, 'owner_id');
-      expect(has(mockDomain.findOne.mock.calls[0][0].where)).toBe(false);
-      expect(has(mockEvent.findAll.mock.calls[0][0].where)).toBe(false);
-      expect(has(mockKeyword.findAll.mock.calls[0][0].where)).toBe(false);
+      const scopedNull = (where: Record<string, unknown>) => expect(where).toMatchObject({ owner_id: null });
+      scopedNull(mockDomain.findOne.mock.calls[0][0].where);
+      scopedNull(mockEvent.findAll.mock.calls[0][0].where);
+      scopedNull(mockKeyword.findAll.mock.calls[0][0].where);
    });
 });
 

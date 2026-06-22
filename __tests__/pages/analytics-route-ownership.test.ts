@@ -87,14 +87,15 @@ beforeEach(() => {
 afterEach(() => { process.env = { ...ORIGINAL_ENV }; });
 
 describe('GET /api/human-traffic domain-ownership guard (analytics-provider shape)', () => {
-   it('admin ownership lookup is unscoped (no owner_id key)', async () => {
+   // OPERATOR-DATA-ISOLATION (flipped): under the flag the admin/operator ownership lookup is scoped
+   // to its own null-owner partition (owner_id: null), not unscoped.
+   it('admin/operator ownership lookup is scoped to its own null-owner partition', async () => {
       asCaller(ADMIN);
-      mockDomain.findOne.mockResolvedValue({ ID: 7, domain: 'a.com' });
+      mockDomain.findOne.mockResolvedValue({ ID: 7, domain: 'a.com', owner_id: null });
 
       await humanTrafficHandler(makeReq({ domain: 'a.com' }), makeRes());
 
-      expect(mockDomain.findOne.mock.calls[0][0].where).toEqual({ domain: 'a.com' });
-      expect(Object.prototype.hasOwnProperty.call(mockDomain.findOne.mock.calls[0][0].where, 'owner_id')).toBe(false);
+      expect(mockDomain.findOne.mock.calls[0][0].where).toEqual({ domain: 'a.com', owner_id: null });
    });
 
    it('403s a tenant requesting a domain it does NOT own and never calls the provider', async () => {

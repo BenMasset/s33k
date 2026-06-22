@@ -29,6 +29,8 @@ jest.mock('../../database/models/waitlist', () => ({
    default: { create: jest.fn(), findOne: jest.fn(), findAll: jest.fn() },
 }));
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
+// recordAudit imports the AuditLog sequelize model; mock to a no-op (best-effort/non-blocking write).
+jest.mock('../../utils/auditLog', () => ({ __esModule: true, recordAudit: jest.fn(async () => undefined), default: jest.fn(async () => undefined) }));
 // Mock the notify side effect so the new-signup-only firing contract is asserted directly, instead
 // of resting on RESEND_API_KEY being unset in jest (which silently no-ops the real notifier).
 jest.mock('../../utils/notify-waitlist', () => ({

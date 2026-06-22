@@ -69,6 +69,8 @@ import ApiKeyModel from '../../database/models/apiKey';
 import InviteModel from '../../database/models/invite';
 // eslint-disable-next-line import/first
 import { sendMagicLinkEmail } from '../../utils/send-invite';
+// eslint-disable-next-line import/first
+import { emailHash, decryptEmail } from '../../utils/accountEmail';
 
 const mockAccount = AccountModel as unknown as { create: jest.Mock, findOne: jest.Mock };
 const mockApiKey = ApiKeyModel as unknown as { create: jest.Mock, findOne: jest.Mock };
@@ -103,6 +105,9 @@ beforeEach(() => {
    jest.clearAllMocks();
    process.env = { ...ORIGINAL_ENV };
    process.env.MULTI_TENANT = 'true';
+   // SECRET keys the email blind-index (emailHash) + the at-rest email encryption (encryptEmail).
+   // The auth lookup is by email_hash now, so the tests need a stable SECRET to compute the hash.
+   process.env.SECRET = 'test-secret-for-email-hash';
    delete process.env.RESEND_API_KEY;
    mockSendMagicLink.mockResolvedValue({ sent: false });
    // Default claim wins (1 row); race tests override.
@@ -129,8 +134,10 @@ describe('POST /api/auth/request-link', () => {
 
       expect(res.statusCode).toBe(200);
       expect(res.payload.sent).toBe(true);
-      // Lookup is by the normalized (lowercased) email.
-      expect(mockAccount.findOne.mock.calls[0][0].where.email).toBe('user@co.com');
+      // Lookup is now by the deterministic email_hash blind index (the plaintext email is encrypted
+      // at rest and not queryable), computed from the normalized (lowercased) email.
+      expect(mockAccount.findOne.mock.calls[0][0].where.email_hash).toBe(emailHash('user@co.com'));
+      expect(mockAccount.findOne.mock.calls[0][0].where.email).toBeUndefined();
       // A single-use 'login' token targeting the account is created.
       const createArg = mockInvite.create.mock.calls[0][0];
       expect(createArg.type).toBe('login');
@@ -342,9 +349,14 @@ describe('POST /api/invite/accept acceptExternal: email stamping + collision', (
       await acceptHandler(makeReq({ body: { code: 'GOODEXT', name: 'New Co' } }), res);
 
       expect(res.statusCode).toBe(201);
-      // The new account carries the invite's (normalized) email.
+      // The new account carries the invite's email ENCRYPTED at rest (not plaintext), plus the
+      // deterministic email_hash for lookup/dedupe. The stored ciphertext is NOT the plaintext, and
+      // it decrypts back to the normalized address; the hash matches the normalized email.
       expect(mockAccount.create).toHaveBeenCalledTimes(1);
-      expect(mockAccount.create.mock.calls[0][0].email).toBe('founder@newco.com');
+      const created = mockAccount.create.mock.calls[0][0];
+      expect(created.email).not.toBe('founder@newco.com');
+      expect(decryptEmail(created.email)).toBe('founder@newco.com');
+      expect(created.email_hash).toBe(emailHash('founder@newco.com'));
       // Claim-before-mint still fires (status flip then stamp).
       expect(mockInvite.update).toHaveBeenCalledTimes(2);
       expect(mockInvite.update.mock.calls[0][0].status).toBe('accepted');
@@ -362,10 +374,12 @@ describe('POST /api/invite/accept acceptExternal: email stamping + collision', (
 
       expect(res.statusCode).toBe(201);
       expect(res.payload.accountId).toBe(101);
-      // Two create attempts: the first with email, the retry with email null.
+      // Two create attempts: the first with the encrypted email + hash, the retry with both null.
       expect(mockAccount.create).toHaveBeenCalledTimes(2);
-      expect(mockAccount.create.mock.calls[0][0].email).toBe('founder@newco.com');
+      expect(decryptEmail(mockAccount.create.mock.calls[0][0].email)).toBe('founder@newco.com');
+      expect(mockAccount.create.mock.calls[0][0].email_hash).toBe(emailHash('founder@newco.com'));
       expect(mockAccount.create.mock.calls[1][0].email).toBeNull();
+      expect(mockAccount.create.mock.calls[1][0].email_hash).toBeNull();
       // A working key was still minted.
       expect(mockApiKey.create).toHaveBeenCalledTimes(1);
    });

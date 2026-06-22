@@ -77,11 +77,20 @@ works on both SQLite and Postgres without change.
    "the admin account" and "NULL owner" as the same thing during the transition.
 2. **Additive migrations only.** No column is dropped, renamed, or made `NOT NULL` in
    the first wave. No data is moved. Backfill is optional and idempotent.
-3. **One scoping function, threaded everywhere.** Introduce a single
-   `scopeWhere(account)` helper that returns `{}` for the admin/legacy path and
-   `{ owner_id: account.id }` for a real tenant. Drop it into the existing `findAll` /
-   `update` / `destroy` calls. The blast radius is small because all access already
-   goes through a handful of calls.
+3. **One scoping function, threaded everywhere.** A single `scopeWhere(account)` helper
+   is dropped into the existing `findAll` / `update` / `destroy` calls. The blast radius
+   is small because all access already goes through a handful of calls. **Operator-data
+   isolation (updated):** `scopeWhere` returns the unscoped `{}` ONLY when
+   `MULTI_TENANT` is OFF (the legitimate single-owner self-host). With the flag ON, NO
+   account gets `{}` from `scopeWhere`, including the seeded admin/operator (ID 1): the
+   operator is scoped to its OWN data, the legacy `owner_id IS NULL` partition
+   (`scopeWhere` returns `{ owner_id: IS NULL }` for it), and a real tenant gets
+   `{ owner_id: account.id }`. The earlier "returns `{}` for the admin/legacy path"
+   behavior was the operator-master-read hole; it now applies only in single-tenant mode.
+   The ONE legitimate instance-wide read (the cron rank sweep on the shared SERP key)
+   uses a separate, named `unscopedOperatorWhere()` at one call site (`pages/api/cron.ts`,
+   gated on the operator) and is audit-logged, so `scopeWhere` never returns `{}` for the
+   operator under the flag again.
 4. **The API key is the tenant boundary.** Each account gets its own Bearer key. The
    key resolves to an account; the account scopes the query. This keeps the product
    MCP-controllable: a tenant points their MCP server at their own key and sees only
