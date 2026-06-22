@@ -96,8 +96,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
          // ONE per-site price, QUANTITY = number of sites: this is the whole per-unit model. The
          // webhook reads this quantity back as account.paid_sites to set the caps.
          line_items: [{ price: priceId, quantity: sites }],
-         success_url: `${baseUrl}/?billing=success`,
-         cancel_url: `${baseUrl}/?billing=cancelled`,
+         success_url: `${baseUrl}/welcome?billing=success`,
+         cancel_url: `${baseUrl}/welcome?billing=cancelled`,
          // Carry the account id on the session + subscription so the webhook can resolve the account
          // even before the customer id has propagated locally.
          client_reference_id: String(row.ID),

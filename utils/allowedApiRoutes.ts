@@ -151,6 +151,13 @@ export const isAllowedApiRoute = (req: NextApiRequest): boolean => Boolean(
 // any read, every query keyed on the one domain via scopeWhere) and are now EXPLICITLY ADDED: they are
 // read-only, single-domain reports a shared analytics viewer should see, and leaving them out only
 // surfaced a confusing 401 on tools the MCP surface already advertises.
+//
+// THE STATIC PRODUCT-INFO EXCEPTION: /api/security and /api/help are added at the BOTTOM of the list
+// but do NOT follow the per-domain-gate derivation above, on purpose. They are not per-domain reads at
+// all: each returns a FIXED, account-independent payload (trust facts / product knowledge), identical
+// for every caller, reading no req.query.domain and no tenant row. They are safe for a share key for
+// the same reason they would be safe for the public, the "is it tenant data?" question is no, not the
+// "does it gate per-domain?" question. See their entries below and each route's header comment.
 export const scopedKeyAllowedRoutes: string[] = [
    'GET:/api/start-here',
    'GET:/api/dashboard',
@@ -211,14 +218,46 @@ export const scopedKeyAllowedRoutes: string[] = [
    'GET:/api/weekly-digest',
    'GET:/api/executive-summary',
    'GET:/api/competitor-visibility',
+   // STATIC PRODUCT-INFO routes (NOT tenant-scoped). These two read NOTHING from any account:
+   // /api/security returns the fixed trust facts (utils/securityFacts.ts) and /api/help returns the
+   // fixed product knowledge (utils/knowledge.ts), the SAME response for every caller. Neither reads
+   // req.query.domain, calls resolveDomainAccess, or touches a Domain/Keyword/event/account row, so
+   // adding them widens the share-key surface ONLY to "what is this product and is it safe", with zero
+   // tenant-data exposure. They are authed purely to travel the Bearer-key path (see each route's
+   // header comment). Added so a read-only shared viewer can read the product/trust info the MCP
+   // surface advertises (security_facts, help) instead of hitting a confusing 401.
+   'GET:/api/security',
+   'GET:/api/help',
+];
+
+// scopedKeyDomainlessRoutes is the SMALL subset of the allowlist that returns STATIC, account-
+// independent product info and so does NOT take a ?domain= at all. authorize() normally requires a
+// scoped share key to present a ?domain= equal to its scoped_domain (the per-domain gate), but these
+// routes ignore the domain entirely and read no tenant row, so requiring a domain on them only forces
+// a meaningless query param. Keeping this as an EXPLICIT, named, tiny list (rather than skipping the
+// domain check for every allowlisted route) means the domain-equality gate still applies to every
+// per-domain data route; only proven-domain-independent static info is exempt. Anything added here
+// MUST return the same response for every caller (no tenant data, no req.query.domain read).
+export const scopedKeyDomainlessRoutes: string[] = [
+   'GET:/api/security',
+   'GET:/api/help',
 ];
 
 // isScopedKeyAllowedRoute returns true ONLY for a GET request whose route is in the positive
 // scoped-key allowlist. A non-GET method, a missing method/url, or any route not in the list
 // returns false (DENY). authorize() additionally requires the canonical ?domain= to equal the
-// key's scoped_domain, so this gate plus the domain-equality check together confine a share key
-// to per-domain reads of exactly its one domain.
+// key's scoped_domain (EXCEPT for isScopedKeyDomainlessRoute static routes), so this gate plus the
+// domain-equality check together confine a share key to per-domain reads of exactly its one domain.
 export const isScopedKeyAllowedRoute = (req: NextApiRequest): boolean => Boolean(
    req.url && req.method === 'GET'
    && scopedKeyAllowedRoutes.includes(`GET:${req.url.replace(/\?(.*)/, '')}`),
+);
+
+// isScopedKeyDomainlessRoute is true ONLY for a GET request to one of the static product-info routes
+// that take no domain. Used by authorize() to skip the domain-equality check for these (and only
+// these) routes. Every entry is also in scopedKeyAllowedRoutes, so this can only RELAX the domain
+// requirement on already-allowed static routes, never allow a new route.
+export const isScopedKeyDomainlessRoute = (req: NextApiRequest): boolean => Boolean(
+   req.url && req.method === 'GET'
+   && scopedKeyDomainlessRoutes.includes(`GET:${req.url.replace(/\?(.*)/, '')}`),
 );

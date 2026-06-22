@@ -80,8 +80,10 @@ const providerStub = (over: Partial<Record<string, unknown>> = {}) => ({
 beforeEach(() => {
    jest.clearAllMocks();
    mockAuthorize.mockResolvedValue({ authorized: true, account: null, error: undefined });
-   // Owned by default (resolveDomainAccess does Domain.findOne under the hood).
-   mockDomain.findOne.mockResolvedValue(row({ ID: 1, domain: 'getmasset.com' }));
+   // Owned by default (resolveDomainAccess does Domain.findOne under the hood), WITH a provisioned
+   // per-domain tracking website id: the realistic onboarded state where the only step left is putting
+   // the tracking script on the site. start_here emits a real copyable snippet only when this id exists.
+   mockDomain.findOne.mockResolvedValue(row({ ID: 1, domain: 'getmasset.com', umami_website_id: 'wid-default-1' }));
    mockDomain.findAll.mockResolvedValue([]);
    mockKeyword.count.mockResolvedValue(0);
    mockEvent.count.mockResolvedValue(0);
@@ -284,9 +286,11 @@ describe('GET /api/start-here', () => {
       expect(res.payload.percentComplete).toBe(0);
    });
 
-   it('NO-LEAK: never emits a real env tracking website id for a not-owned domain; uses YOUR_SITE_ID placeholder', async () => {
+   it('NO-LEAK + AUDIT FIX: for a not-owned domain it emits NO copyable snippet (no broken placeholder) and tells the user to add their site', async () => {
       // A shared env website id (would belong to whatever domain provisioned it). It must NEVER reach
-      // a caller for a domain they do not own; start_here renders a clearly-fake placeholder instead.
+      // a caller for a domain they do not own. The audit-fixed behavior is to emit NO snippet at all
+      // (rather than a YOUR_SITE_ID placeholder a user could paste verbatim and collect nothing): the
+      // snippet is empty and the note directs the user to add their site first so s33k mints a real one.
       const SENTINEL = 'env-secret-website-id-04075da4';
       const prev = process.env.UMAMI_WEBSITE_ID;
       process.env.UMAMI_WEBSITE_ID = SENTINEL;
@@ -299,10 +303,13 @@ describe('GET /api/start-here', () => {
          // The whole serialized response must not contain the env id anywhere (snippet, websiteId, note).
          const serialized = JSON.stringify(res.payload);
          expect(serialized).not.toContain(SENTINEL);
-         // The snippet shows its SHAPE with the fake placeholder, and the note tells the user to add their site.
-         expect(res.payload.install.websiteId).toBe('YOUR_SITE_ID');
-         expect(res.payload.install.snippet).toContain('YOUR_SITE_ID');
+         // No copyable snippet and no placeholder: empty snippet/websiteId, and the note tells the user to add their site.
+         expect(res.payload.install.snippet).toBe('');
+         expect(res.payload.install.websiteId).toBe('');
+         expect(serialized).not.toContain('YOUR_SITE_ID');
          expect(res.payload.install.note.toLowerCase()).toContain('add your site first');
+         // The rendered walkthrough must not print a paste line for a non-existent snippet.
+         expect(res.payload.rendered).not.toContain('Paste this one line');
       } finally {
          if (prev === undefined) { delete process.env.UMAMI_WEBSITE_ID; } else { process.env.UMAMI_WEBSITE_ID = prev; }
       }

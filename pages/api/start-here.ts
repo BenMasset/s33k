@@ -186,23 +186,36 @@ const getStartHere = async (req: NextApiRequest, res: NextApiResponse<StartHereR
          // the domain AND it has a provisioned umami_website_id. We NEVER fall back to a shared env
          // website id, because that id belongs to whatever domain provisioned it (e.g. getmasset.com),
          // and emitting it here for a not-owned/not-yet-added domain would hand the caller another
-         // site's real tracking tag. When there is no owned id we render a clearly-fake YOUR_SITE_ID
-         // placeholder so the snippet still shows its SHAPE, and the note tells the user to add their
-         // site first so s33k can mint their own. start_here still never walls (it returns the
-         // onboarding 200), it just refuses to print someone else's id.
+         // site's real tracking tag.
+         //
+         // AUDIT FIX: when there is no owned id we now emit NO copyable snippet at all (snippet '').
+         // The previous behavior printed a YOUR_SITE_ID placeholder snippet; an LLM (or user) could
+         // paste that verbatim and it would silently collect nothing, since YOUR_SITE_ID is not a real
+         // website id. A copyable-but-broken command is worse than no command. Instead the note tells
+         // the user to add their site first so s33k mints their own real snippet, and the renderer
+         // skips the paste line when the snippet is empty. start_here still never walls (it returns the
+         // onboarding 200); it just refuses to hand out a snippet that would not work.
          const ownedWebsiteId = (owned && owned.umami_website_id) ? String(owned.umami_website_id) : '';
-         const guides = getInstallGuides(domain, ownedWebsiteId || 'YOUR_SITE_ID');
-         const install: InstallPayload = {
-            snippet: guides.snippet,
-            scriptUrl: guides.scriptUrl,
-            websiteId: guides.websiteId,
-            platforms: guides.platforms.map((p) => ({ platform: p.platform, steps: p.steps })),
-            note: ownedWebsiteId
-               ? 'Paste this one line into your site head. It is the gating step for the Analytics and AI-search '
-                  + 'pillars. Ask install_instructions for steps on any specific platform.'
-               : 'Add your site first (run onboard) and s33k will mint your own tracking snippet here. The line above '
-                  + 'shows the shape: the YOUR_SITE_ID placeholder is replaced with your real site id once it is added.',
-         };
+         const install: InstallPayload = ownedWebsiteId
+            ? (() => {
+               const guides = getInstallGuides(domain, ownedWebsiteId);
+               return {
+                  snippet: guides.snippet,
+                  scriptUrl: guides.scriptUrl,
+                  websiteId: guides.websiteId,
+                  platforms: guides.platforms.map((p) => ({ platform: p.platform, steps: p.steps })),
+                  note: 'Paste this one line into your site head. It is the gating step for the Analytics and AI-search '
+                     + 'pillars. Ask install_instructions for steps on any specific platform.',
+               };
+            })()
+            : {
+               snippet: '',
+               scriptUrl: '',
+               websiteId: '',
+               platforms: [],
+               note: 'Add your site first (run onboard). s33k will then mint your own tracking snippet, and a later '
+                  + 'start_here (or install_instructions) will hand you the ready-to-paste line with your real site id.',
+            };
          const onboarding = buildOnboarding(domain, setup, install);
          return res.status(200).json(withBilling({ ...onboarding, error: null }));
       }

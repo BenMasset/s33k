@@ -1130,7 +1130,10 @@ const setup = {
       + 'https://app.s33k.io/api/mcp, and an Authorization: Bearer <key> header, e.g. { "mcpServers": { "s33k": { "url": '
       + '"https://app.s33k.io/api/mcp", "headers": { "Authorization": "Bearer <key>" } } } }. '
       + 'CHATGPT OR ANY OTHER MCP CLIENT: point it at the URL https://app.s33k.io/api/mcp and send the Authorization: Bearer <key> header. '
-      + 'Same hosted endpoint and same Bearer key for every client; only the config file or command differs.',
+      + 'Same hosted endpoint and same Bearer key for every client; only the config file or command differs. '
+      + 'LOST YOUR KEY (returning hosted user): if you signed up by email and no longer have your s33k API key, log in at '
+      + 'https://app.s33k.io/auth/login to get a one-time login link by email; opening it mints a fresh key (your old key keeps working) '
+      + 'that you paste into the connect config above.',
    fiveMinutesToValue: 'The bar is install-to-real-data in about five minutes. The fastest path is the onboard capability: '
       + 'give s33k one bare domain and it creates the domain, discovers keywords, queues live Google rank scrapes, '
       + 'provisions an analytics website, and hands back the tracking snippet. Rankings appear shortly after onboarding '

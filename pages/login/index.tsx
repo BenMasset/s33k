@@ -1,8 +1,14 @@
 import type { NextPage } from 'next';
 import Head from 'next/head';
+import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useState } from 'react';
 import Icon from '../../components/common/Icon';
+
+// LEGACY self-host password login. This is the single-tenant / self-hosted path: an operator logs in
+// with the instance APP_USER / APP_PASSWORD. It is NOT the multi-tenant path. Multi-tenant users who
+// signed up by email and lost their API key log in at /auth/login (the magic-link page) instead, which
+// is why this page links there under "lost your key". Do not remove /login: self-hosters depend on it.
 
 type LoginError = {
    type: string,
@@ -63,14 +69,14 @@ const Login: NextPage = () => {
    return (
       <div className={'Login'}>
          <Head>
-            <title>Login - SerpBear</title>
+            <title>Login - s33k</title>
          </Head>
          <div className='flex items-center justify-center w-full h-screen'>
             <div className='w-80 mt-[-300px]'>
                <h3 className="py-7 text-2xl font-bold text-blue-700 text-center">
                   <span className=' relative top-[3px] mr-1'>
                      <Icon type="logo" size={30} color="#364AFF" />
-                  </span> SerpBear
+                  </span> s33k
                </h3>
                <div className='relative bg-[white] rounded-md text-sm border p-5'>
                   <div className="settings__section__input mb-5">
@@ -109,6 +115,12 @@ const Login: NextPage = () => {
                      </div>
                   }
                </div>
+               <p className='mt-4 text-center text-xs text-gray-500'>
+                  Signed up by email and lost your key?
+                  <Link href='/auth/login' className='ml-1 font-semibold text-blue-700'>
+                     Log in to get a fresh one
+                  </Link>
+               </p>
             </div>
          </div>
 

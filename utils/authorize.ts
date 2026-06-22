@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import resolveAccount, { ResolvedAccount } from './resolveAccount';
-import { isAllowedApiRoute, isScopedKeyAllowedRoute } from './allowedApiRoutes';
+import { isAllowedApiRoute, isScopedKeyAllowedRoute, isScopedKeyDomainlessRoute } from './allowedApiRoutes';
 import { canonicalizeDomain } from './canonical-domain';
 
 // authorize is the multi-tenant-aware entry point for data routes. It resolves the
@@ -48,9 +48,16 @@ const authorize = async (req: NextApiRequest, res: NextApiResponse): Promise<Res
       if (!isScopedKeyAllowedRoute(req)) {
          return { authorized: false, account: null, error: 'This Route cannot be accessed with a share key.' };
       }
-      const requestedDomain = canonicalizeDomain(req.query.domain);
-      if (!requestedDomain || requestedDomain !== canonicalizeDomain(scopedDomain)) {
-         return { authorized: false, account: null, error: `This key is limited to ${scopedDomain}.` };
+      // The domain-equality gate applies to every per-domain DATA route. It is skipped ONLY for the
+      // tiny isScopedKeyDomainlessRoute set: static product-info routes (/api/security, /api/help)
+      // that take no domain and return the same account-independent payload for every caller. Those
+      // routes are still inside the GET-only + positive-allowlist gates above, so skipping the domain
+      // check here exposes no tenant data; it only avoids forcing a meaningless ?domain= on static info.
+      if (!isScopedKeyDomainlessRoute(req)) {
+         const requestedDomain = canonicalizeDomain(req.query.domain);
+         if (!requestedDomain || requestedDomain !== canonicalizeDomain(scopedDomain)) {
+            return { authorized: false, account: null, error: `This key is limited to ${scopedDomain}.` };
+         }
       }
    }
 

@@ -291,12 +291,16 @@ RATE_LIMIT_BACKEND=postgres
 
 ### 7h. Postgres backups (before public launch)
 
-Before you invite real, paying users, enable Railway Postgres automated backups on the s33k project's Postgres service. With public SaaS, the database holds every tenant's account, subscription state, and tracked data; the `/app/data` volume snapshot in section 8 covers a SQLite install but NOT the prod Postgres. Turn on the Postgres provider's automated backups (Railway Postgres -> Backups) and confirm at least one successful snapshot exists.
+Before you invite real, paying users, set up backups for the s33k project's Postgres service. With public SaaS, the database holds every tenant's account, subscription state, and tracked data. The full runbook (enable Railway automated backups, take manual `pg_dump` logical backups, restore, and run a restore drill) is **[BACKUP.md](./BACKUP.md)**; follow it. At minimum, before launch: enable Railway Postgres automated backups (Railway Postgres -> Backups, daily, retain 7+ days) and confirm at least one successful snapshot exists.
 
 ---
 
 ## 8. Day-2 operations
 
-- **Backups:** the whole state is the volume at `/app/data`. Snapshot it (Railway volume backup, or periodically `GET /api/domains` + `GET /api/keywords?domain=...` and store the JSON).
-- **Upgrades:** push to the connected branch; Railway rebuilds the image. The volume persists across the redeploy, so data is kept.
+- **Backups + restore (canonical runbook):** see **[BACKUP.md](./BACKUP.md)**. Under the current Postgres model, durability is the Postgres database, not a volume: enable Railway automated Postgres backups and keep periodic `pg_dump` logical backups, and rehearse a restore drill. (HISTORICAL, self-host SQLite only: the `/app/data` volume snapshot below is the old SQLite-on-volume model and does NOT cover the prod Postgres. Note also that `GET /api/export` is a per-tenant export of one tenant's own data, NOT a system backup.)
+- **Upgrades:** run `railway up` from this repo root to deploy the working tree (the deterministic deploy; see `CLAUDE.md` section A). The Postgres database persists across the redeploy, so data is kept.
 - **Logs:** Railway service "Logs". `[SECURITY]` lines mean a credential is still a demo/placeholder value and the boot was refused.
+
+> HISTORICAL (self-host SQLite only): the line below describes the abandoned SQLite-on-volume model. It does not apply to the Postgres production deploy. See BACKUP.md.
+
+- **(Historical) SQLite-on-volume backup:** the whole state was the volume at `/app/data`; you snapshotted it (Railway volume backup, or periodically `GET /api/domains` + `GET /api/keywords?domain=...` and stored the JSON).

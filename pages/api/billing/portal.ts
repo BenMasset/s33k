@@ -39,6 +39,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
          return res.status(400).json({ error: 'No billing account yet. Subscribe first.' });
       }
       const baseUrl = resolveBaseUrl(req);
+      // Return to the dashboard (not /welcome): the portal is for an EXISTING subscriber managing
+      // their card/plan, so the right landing after they finish is their live dashboard, not the
+      // post-checkout confirmation pointer. /welcome is the first-time pay-loop landing only.
       const session = await stripe.billingPortal.sessions.create({
          customer: row.stripe_customer_id,
          return_url: `${baseUrl}/`,

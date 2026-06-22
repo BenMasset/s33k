@@ -15,7 +15,7 @@ const Footer = ({ currentVersion = '' }: FooterProps) => {
    return (
       <footer className='text-center flex flex-1 justify-center pb-5 items-end'>
          <span className='text-gray-500 text-xs'>
-            <a className='cursor-pointer' onClick={() => setShowChangelog(true)}>SerpBear v{currentVersion || '0.0.0'}</a>
+            <a className='cursor-pointer' onClick={() => setShowChangelog(true)}>s33k v{currentVersion || '0.0.0'}</a>
             {currentVersion && latestVersionNum && `v${currentVersion}` !== latestVersionNum && (
                <a className='cursor-pointer text-indigo-700 font-semibold' onClick={() => setShowChangelog(true)}>
                   {' '}| Update to Version {latestVersionNum} (latest)

@@ -48,7 +48,7 @@ const ChangeLog = ({ closeChangeLog }: ChangeLogProps) => {
       return [];
    }, [changeLogData]);
 
-   return <SidePanel title='SerpBear Changelog' closePanel={onClose}>
+   return <SidePanel title='s33k Changelog' closePanel={onClose}>
             <React.Suspense fallback={<ChangeLogloader />}>
                {!isLoading && changeLogs.length > 0 && (
                   <div className='changelog-body bg-[#f8f9ff] px-6 pt-4 pb-10 overflow-y-auto styled-scrollbar'>

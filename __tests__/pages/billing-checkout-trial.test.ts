@@ -114,3 +114,20 @@ describe('POST /api/billing/checkout: trial_end pass-through', () => {
       expect(arg.subscription_data.metadata.s33k_account_id).toBe('42');
    });
 });
+
+describe('POST /api/billing/checkout: success_url / cancel_url point at /welcome', () => {
+   // The pay-loop UX requires Stripe to return the user to the branded /welcome page, not the bare
+   // dashboard, so the post-checkout confirmation (and the neutral cancelled state) render correctly.
+   it('sets success_url and cancel_url to /welcome with the billing param', async () => {
+      const row = { ID: 42, name: 'Acme', stripe_customer_id: 'cus_42', trial_ends_at: null, save: jest.fn(async () => undefined) };
+      mockAccount.findOne.mockResolvedValue(row);
+      const res = makeRes();
+
+      await checkoutHandler(makeReq(1), res);
+
+      expect(res.statusCode).toBe(200);
+      const arg = mockSessionsCreate.mock.calls[0][0] as Record<string, any>;
+      expect(arg.success_url).toBe('https://app.s33k.io/welcome?billing=success');
+      expect(arg.cancel_url).toBe('https://app.s33k.io/welcome?billing=cancelled');
+   });
+});

@@ -83,12 +83,12 @@ const Domains: NextPage = () => {
          )}
          {migrationStatus?.hasMigrations && (
                <div className=' p-3 bg-black text-white text-sm text-center'>
-                  You need to Update your database. Stop Serpbear and run this command to update your database:
+                  You need to Update your database. Stop s33k and run this command to update your database:
                   <code className=' bg-gray-700 px-2 py-0 ml-1'>npm run db:migrate</code>
                </div>
          )}
          <Head>
-            <title>Domains - SerpBear</title>
+            <title>Domains - s33k</title>
          </Head>
          <TopBar showSettings={() => setShowSettings(true)} showAddModal={() => setShowAddDomain(true)} />
 

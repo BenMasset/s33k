@@ -105,10 +105,10 @@ const sendNotificationEmail = async (domain: Domain, settings: SettingsType, acc
       smtp_password = '',
       notification_email = '',
       notification_email_from = '',
-      notification_email_from_name = 'SerpBear',
+      notification_email_from_name = 's33k',
      } = settings;
 
-   const fromEmail = `${notification_email_from_name} <${notification_email_from || 'no-reply@serpbear.com'}>`;
+   const fromEmail = `${notification_email_from_name} <${notification_email_from || 'no-reply@s33k.io'}>`;
    const mailerSettings:any = { host: smtp_server, port: parseInt(smtp_port, 10) };
    if (smtp_username || smtp_password) {
       mailerSettings.auth = {};
@@ -158,14 +158,14 @@ export const composeAndSendDailyBrief = async (domain: Domain, settings: Setting
       smtp_password = '',
       notification_email = '',
       notification_email_from = '',
-      notification_email_from_name = 'SerpBear',
+      notification_email_from_name = 's33k',
    } = settings;
    const domainName = domain.domain;
    try {
       const brief = await composeDailyBriefForDomain(domainName, dailyBriefPeriod(), account);
       const html = renderDailyBriefHtml(brief);
 
-      const fromEmail = `${notification_email_from_name} <${notification_email_from || 'no-reply@serpbear.com'}>`;
+      const fromEmail = `${notification_email_from_name} <${notification_email_from || 'no-reply@s33k.io'}>`;
       const mailerSettings:any = { host: smtp_server, port: parseInt(smtp_port, 10) };
       if (smtp_username || smtp_password) {
          mailerSettings.auth = {};

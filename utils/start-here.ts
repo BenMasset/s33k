@@ -258,13 +258,20 @@ const renderOnboarding = (
       out.push('');
    }
    out.push('INSTALL S33K ON YOUR SITE (the gating step for analytics):');
-   out.push(`   Paste this one line into your site head:`);
-   out.push(`   ${install.snippet}`);
-   if (install.platforms.length > 0) {
-      const first = install.platforms[0];
-      out.push(`   ${first.platform}:`);
-      first.steps.forEach((step, i) => out.push(`     ${i + 1}. ${step}`));
-      out.push('   Ask install_instructions for steps on WordPress, Webflow, Shopify, GTM, and more.');
+   // Only print a paste line when there is a REAL snippet (the caller owns the domain and it has a
+   // provisioned website id). With no real snippet we print the note instead of a broken placeholder
+   // command, so nothing copyable here would silently collect nothing.
+   if (install.snippet) {
+      out.push(`   Paste this one line into your site head:`);
+      out.push(`   ${install.snippet}`);
+      if (install.platforms.length > 0) {
+         const first = install.platforms[0];
+         out.push(`   ${first.platform}:`);
+         first.steps.forEach((step, i) => out.push(`     ${i + 1}. ${step}`));
+         out.push('   Ask install_instructions for steps on WordPress, Webflow, Shopify, GTM, and more.');
+      }
+   } else {
+      out.push(`   ${install.note}`);
    }
    out.push('');
    out.push('WHAT YOU UNLOCK WHEN SETUP IS DONE:');
