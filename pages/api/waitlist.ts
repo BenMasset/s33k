@@ -90,6 +90,27 @@ const toSummary = (row: Waitlist): WaitlistSummary => ({
 });
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+   // CORS for the PUBLIC request-access form. It posts cross-origin from the s33k.io landing site to
+   // this API host, so without these headers the browser preflight (OPTIONS) is rejected and the
+   // form's POST never fires (it then fails silently). Scope to the landing host(s): echo only an
+   // allowlisted Origin (env-overridable), and answer the preflight 204 before any DB work. A
+   // non-allowlisted origin gets no ACAO header (so a random site cannot POST the form from a
+   // browser); curl and same-origin calls are unaffected.
+   const allowedOrigins = (process.env.WAITLIST_ALLOWED_ORIGINS
+      || 'https://s33k.io,https://www.s33k.io,https://app.s33k.io')
+      .split(',').map((o) => o.trim()).filter(Boolean);
+   const origin = typeof req.headers.origin === 'string' ? req.headers.origin : '';
+   if (origin && allowedOrigins.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      res.setHeader('Access-Control-Max-Age', '86400');
+   }
+   if (req.method === 'OPTIONS') {
+      return res.status(204).end();
+   }
+
    await ensureSynced();
    await ensureAdminAccount();
 

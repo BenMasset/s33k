@@ -63,21 +63,27 @@ const asCaller = (account: unknown) => {
    mockAuthorize.mockResolvedValue({ authorized: true, account, role: 'admin' });
 };
 
-const makeReq = (opts: { method?: string, body?: unknown, ip?: string } = {}): NextApiRequest => ({
+const makeReq = (opts: { method?: string, body?: unknown, ip?: string, origin?: string } = {}): NextApiRequest => ({
    method: opts.method || 'POST',
    body: opts.body || {},
    query: {},
    // A per-test IP keeps each test on its OWN rate-limit bucket so they never interfere.
-   headers: opts.ip ? { 'x-forwarded-for': opts.ip } : {},
+   headers: {
+      ...(opts.ip ? { 'x-forwarded-for': opts.ip } : {}),
+      ...(opts.origin ? { origin: opts.origin } : {}),
+   },
 } as unknown as NextApiRequest);
 
 const makeRes = () => {
    const res: Record<string, unknown> = {};
    res.statusCode = 200;
+   res.headers = {} as Record<string, unknown>;
    res.status = jest.fn((code: number) => { res.statusCode = code; return res; });
    res.json = jest.fn((payload: unknown) => { res.payload = payload; return res; });
-   res.setHeader = jest.fn(() => res);
-   return res as unknown as NextApiResponse & { statusCode: number, payload: Record<string, unknown> };
+   res.setHeader = jest.fn((k: string, v: unknown) => { (res.headers as Record<string, unknown>)[k] = v; return res; });
+   res.end = jest.fn(() => res);
+   return res as unknown as NextApiResponse
+      & { statusCode: number, payload: Record<string, unknown>, headers: Record<string, unknown> };
 };
 
 beforeEach(() => {
@@ -89,6 +95,36 @@ beforeEach(() => {
 });
 
 afterEach(() => { process.env = { ...ORIGINAL_ENV }; });
+
+describe('CORS for the public request-access form (cross-origin from s33k.io)', () => {
+   it('answers the browser preflight (OPTIONS) from the landing with 204 + the allowed origin', async () => {
+      const req = makeReq({ method: 'OPTIONS', origin: 'https://s33k.io' });
+      const res = makeRes();
+      await waitlistHandler(req, res);
+      expect(res.statusCode).toBe(204);
+      expect(res.end).toHaveBeenCalled();
+      expect(res.headers['Access-Control-Allow-Origin']).toBe('https://s33k.io');
+      expect(String(res.headers['Access-Control-Allow-Methods'])).toContain('POST');
+   });
+
+   it('sets the allow-origin header on a real cross-origin POST so the browser can read the response', async () => {
+      mockWaitlist.findOne.mockResolvedValue(null);
+      mockWaitlist.create.mockResolvedValue({ ID: 9 });
+      const req = makeReq({ method: 'POST', origin: 'https://www.s33k.io', body: { email: 'cors@person.com' } });
+      const res = makeRes();
+      await waitlistHandler(req, res);
+      expect(res.statusCode).toBe(201);
+      expect(res.headers['Access-Control-Allow-Origin']).toBe('https://www.s33k.io');
+   });
+
+   it('does NOT echo an allow-origin header for a non-allowlisted origin', async () => {
+      const req = makeReq({ method: 'OPTIONS', origin: 'https://evil.example.com' });
+      const res = makeRes();
+      await waitlistHandler(req, res);
+      expect(res.statusCode).toBe(204);
+      expect(res.headers['Access-Control-Allow-Origin']).toBeUndefined();
+   });
+});
 
 describe('POST /api/waitlist: create', () => {
    it('creates a fresh waiting row for a new email and returns a thank-you', async () => {
