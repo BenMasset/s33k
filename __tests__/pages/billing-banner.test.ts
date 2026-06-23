@@ -99,7 +99,7 @@ beforeEach(() => {
 });
 
 describe('start_here billing banner', () => {
-   it('surfaces a "trial ends in N days" banner for a trial ending soon, pointing at billing_status then start_checkout', async () => {
+   it('surfaces a "trial ends in N days" banner for a trial ending soon, with a one-click subscribe link', async () => {
       mockAuthorize.mockResolvedValue({ authorized: true, account: account({ subscription_status: 'trialing', trial_ends_at: inDays(2) }), error: undefined });
       const res = makeRes();
       await startHereHandler(makeReq({ domain: 'getmasset.com' }), res);
@@ -108,8 +108,9 @@ describe('start_here billing banner', () => {
       expect(res.payload.billing).toBeDefined();
       expect(res.payload.billing.state).toBe('trial-ending');
       expect(res.payload.billing.headline).toMatch(/Your free trial ends in \d+ days?/);
-      expect(res.payload.billing.nextStep).toContain('billing_status');
-      expect(res.payload.billing.nextStep).toContain('start_checkout');
+      // nextStep is now a one-click pre-authenticated pay link (not "call start_checkout" jargon).
+      expect(res.payload.billing.nextStep).toContain('one click');
+      expect(res.payload.billing.nextStep).toContain('/api/subscribe?token=');
    });
 
    it('surfaces a "trial has ended, subscribe" banner for a locked (expired-trial) account', async () => {
@@ -120,9 +121,8 @@ describe('start_here billing banner', () => {
       expect(res.statusCode).toBe(200);
       expect(res.payload.billing).toBeDefined();
       expect(res.payload.billing.state).toBe('locked');
-      expect(res.payload.billing.headline).toBe('Your free trial has ended, subscribe to keep your sites running.');
-      expect(res.payload.billing.nextStep).toContain('billing_status');
-      expect(res.payload.billing.nextStep).toContain('start_checkout');
+      expect(res.payload.billing.headline).toMatch(/your free trial has ended/i);
+      expect(res.payload.billing.nextStep).toContain('/api/subscribe?token=');
    });
 
    it('surfaces a locked banner for a canceled subscription', async () => {
@@ -166,8 +166,9 @@ describe('dashboard billing annotation', () => {
       expect(res.payload.billing).toBeDefined();
       expect(res.payload.billing.locked).toBe(true);
       expect(res.payload.billing.action).toBe('start_checkout');
-      expect(res.payload.billing.message).toContain('billing_status');
-      expect(res.payload.billing.message).toContain('start_checkout');
+      // Human-first message + a one-click pre-authenticated pay link.
+      expect(res.payload.billing.message).toMatch(/your 14-day free trial has ended/i);
+      expect(res.payload.billing.message).toContain('/api/subscribe?token=');
    });
 
    it('stays SILENT (no billing field) for a healthy active account', async () => {

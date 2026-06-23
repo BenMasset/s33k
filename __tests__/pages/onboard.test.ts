@@ -359,7 +359,7 @@ describe('POST /api/onboard site cap (billing, MULTI_TENANT on)', () => {
       await onboardHandler(makeReq({ body: { domain: 'second.com' } }), res);
 
       expect(res.statusCode).toBe(403);
-      expect((res.payload as { error?: string }).error).toMatch(/site limit reached/i);
+      expect((res.payload as { error?: string }).error).toMatch(/plan allows \(1;/i);
       expect(mockDomain.create).not.toHaveBeenCalled();
    });
 
@@ -388,7 +388,7 @@ describe('POST /api/onboard site cap (billing, MULTI_TENANT on)', () => {
       await onboardHandler(makeReq({ body: { domain: 'overcap.com' } }), res);
 
       expect(res.statusCode).toBe(403);
-      expect((res.payload as { error?: string }).error).toMatch(/site limit reached.*max 2/i);
+      expect((res.payload as { error?: string }).error).toMatch(/plan allows \(2;/i);
       expect(mockDomain.create).not.toHaveBeenCalled();
    });
 

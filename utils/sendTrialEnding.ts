@@ -11,6 +11,7 @@
 
 import type Account from '../database/models/account';
 import { decryptEmail } from './accountEmail';
+import { subscribeUrl } from './subscribeLink';
 
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 
@@ -41,15 +42,15 @@ const safeLink = (link: string): string => {
    }
 };
 
-// The subscribe destination. resolveBaseUrl (utils/baseUrl.ts) needs a request and the email sender
-// has none, so we use the header-INDEPENDENT NEXT_PUBLIC_APP_URL directly (the only safe source for a
-// link built outside a request; prod always sets it, see DEPLOY.md). The /billing page is where the
-// account starts Checkout. If NEXT_PUBLIC_APP_URL is unset (dev without it) we still send, with a
-// best-effort relative-ish base of the configured value or a bare path; the send is best-effort
-// regardless. Trailing slash is stripped to mirror resolveBaseUrl.
-const subscribeLink = (): string => {
-   const base = (process.env.NEXT_PUBLIC_APP_URL || '').trim().replace(/\/$/, '');
-   return base ? `${base}/billing` : '/billing';
+// The ONE-CLICK subscribe destination for this account. resolveBaseUrl (utils/baseUrl.ts) needs a
+// request and the email sender has none, so we use the header-INDEPENDENT NEXT_PUBLIC_APP_URL directly
+// (the only safe base for a link built outside a request; prod always sets it, see DEPLOY.md, and we
+// fall back to the known prod host so the link is never empty). subscribeUrl mints a pre-authenticated
+// signed-token /api/subscribe link, so clicking the email button lands the user straight on Stripe
+// Checkout with NO login. If a token cannot be minted (no SECRET) we fall back to the /welcome page.
+const subscribeLinkFor = (account: Account): string => {
+   const base = (process.env.NEXT_PUBLIC_APP_URL || '').trim().replace(/\/$/, '') || 'https://app.s33k.io';
+   return subscribeUrl(account, base) || `${base}/welcome`;
 };
 
 // Whole days from now until the trial end. Floors at 0 (an already-expired trial reads "today"). A
@@ -132,7 +133,7 @@ export const sendTrialEnding = async (account: Account): Promise<void> => {
       if (!to || !to.trim()) { return; }
 
       const days = daysLeft(account.trial_ends_at);
-      const link = subscribeLink();
+      const link = subscribeLinkFor(account);
 
       const response = await fetch(RESEND_ENDPOINT, {
          method: 'POST',

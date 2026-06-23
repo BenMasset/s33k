@@ -40,6 +40,8 @@ import { getInstallGuides, InstallGuides } from '../../utils/install-guides';
 import { isAccountActive, resolveCaps } from '../../utils/plans';
 import { reserveSite, CapExceeded } from '../../utils/caps-guard';
 import { rateLimit } from '../../utils/rate-limit';
+import { resolveBaseUrl } from '../../utils/baseUrl';
+import { trialEndedMessage, planLimitMessage, payPathHint } from '../../utils/billing-copy';
 
 // Local control-flow signal: the canonical domain is already registered by ANY account. Thrown from
 // inside the reserveSite createFn so the check-and-insert stays atomic, then mapped to the existing
@@ -158,15 +160,17 @@ const onboardDomain = async (req: NextApiRequest, res: NextApiResponse<OnboardRe
                return res.status(400).json({ error: 'This domain is already registered.' });
             }
             if (capError instanceof CapExceeded) {
-               const locked = !isAccountActive(account);
-               // Append the in-LLM fix path so the user can resolve it without leaving their AI client.
-               // Caps-guard logic above is untouched; only this user-facing string changed.
-               const fixHint = ' Your trial has ended or you have reached your plan limit. '
-                  + 'Call billing_status then start_checkout to subscribe or add sites.';
-               const message = (locked
-                  ? 'Your trial has ended or your subscription is inactive. Subscribe to add sites and resume tracking.'
-                  : `Site limit reached for your plan (max ${capError.limit}; ${capError.existing} already tracked). Upgrade to add more.`)
-                  + fixHint;
+               // Human-first wall copy + a one-click pay link (utils/billing-copy). A LOCKED account
+               // (trial expired / inactive) gets the trial-ended message; an ACTIVE account at its paid
+               // site limit gets the plan-limit message. Caps-guard logic above is untouched.
+               const baseUrl = resolveBaseUrl(req);
+               const message = !isAccountActive(account)
+                  ? trialEndedMessage(account, baseUrl)
+                  : planLimitMessage(
+                     `You are tracking the most sites your plan allows (${capError.limit}; ${capError.existing} in use).`,
+                     account,
+                     baseUrl,
+                  );
                return res.status(403).json({ error: message });
             }
             throw capError;
@@ -280,8 +284,8 @@ const onboardDomain = async (req: NextApiRequest, res: NextApiResponse<OnboardRe
          // We DID recommend keywords, but the account's keyword allowance is already full (a re-onboard,
          // or a multi-site account at its cap), so the COGS guard clamped the add to zero. Say so and
          // point at the fix, rather than the misleading "could not detect keywords" message below.
-         capNote = 'Your plan\'s keyword allowance is full, so no new keywords were added. '
-            + 'Remove some keywords, or call billing_status then start_checkout to add sites and track more.';
+         capNote = 'Your plan\'s keyword allowance is full, so no new keywords were added. Remove some keywords to '
+            + `make room, or add a site to track more.${payPathHint(account, resolveBaseUrl(req))}`;
       } else if (!discoveryError) {
          // Discovery succeeded but produced no candidate keywords (a JS-rendered or sparse site, or a
          // site Firecrawl could not analyze). Tell the user plainly and point them at the manual paths.

@@ -55,6 +55,8 @@ import {
    OnboardingResult, ReadyResult,
 } from '../../utils/start-here';
 import { isAccountActive } from '../../utils/plans';
+import { resolveBaseUrl } from '../../utils/baseUrl';
+import { subscribeUrl } from '../../utils/subscribeLink';
 
 // The billing banner start_here surfaces ABOVE everything else when a trial is ending soon or the
 // account is locked. It is the highest-priority thing to say: a near-expiry or expired account must
@@ -82,14 +84,20 @@ type StartHereResponse =
 // trialing account with the trial ending in <= TRIAL_ENDING_SOON_DAYS days gets the "trial ending"
 // banner. With MULTI_TENANT off / the admin sentinel, isAccountActive is always true and the trial
 // columns are absent, so this returns undefined and the single-tenant path is byte-for-byte unchanged.
-const billingBannerFor = (account?: Account | null, now = Date.now()): BillingBanner | undefined => {
+const billingBannerFor = (account: Account | null | undefined, baseUrl: string, now = Date.now()): BillingBanner | undefined => {
    if (!account) { return undefined; }
-   const fixSteps = 'Call billing_status to see your status, then start_checkout to subscribe ($7/site/month).';
+   // Prefer a one-click pre-authenticated pay link (utils/subscribeLink); fall back to naming the
+   // in-LLM tool path when a link cannot be minted (no SECRET / baseUrl). Same link for both states:
+   // a locked account subscribes to resume, a trial-ending account can subscribe early.
+   const link = subscribeUrl(account, baseUrl);
+   const nextStep = link
+      ? `Subscribe and continue in one click: ${link}`
+      : 'Call billing_status to see your status, then start_checkout to subscribe ($7/site/month).';
    if (!isAccountActive(account)) {
       return {
          state: 'locked',
-         headline: 'Your free trial has ended, subscribe to keep your sites running.',
-         nextStep: fixSteps,
+         headline: 'Your free trial has ended. Subscribe to keep your sites running, your data and reports are safe.',
+         nextStep,
       };
    }
    if (account.subscription_status === 'trialing' && account.trial_ends_at) {
@@ -101,7 +109,7 @@ const billingBannerFor = (account?: Account | null, now = Date.now()): BillingBa
             return {
                state: 'trial-ending',
                headline: `Your free trial ends in ${n} day${n === 1 ? '' : 's'}.`,
-               nextStep: fixSteps,
+               nextStep,
             };
          }
       }
@@ -124,7 +132,7 @@ const getStartHere = async (req: NextApiRequest, res: NextApiResponse<StartHereR
    // Highest-priority thing to surface: the billing banner. Computed once from the resolved account
    // and spread into every response below (additive; undefined on a healthy active / single-tenant
    // account, so it never appears there). Reads are never gated; this only annotates.
-   const billing = billingBannerFor(account);
+   const billing = billingBannerFor(account, resolveBaseUrl(req));
    const withBilling = <T extends object>(payload: T): T & { billing?: BillingBanner } => (
       billing ? { ...payload, billing } : payload
    );

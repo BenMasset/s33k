@@ -97,7 +97,7 @@ describe('POST /api/keywords: billing keyword cap', () => {
       const res = makeRes();
       await keywordsHandler(makeReq({ keywords: oneKeyword() }), res);
       expect(res.statusCode).toBe(403);
-      expect(res.payload.error).toMatch(/limit reached for your plan/i);
+      expect(res.payload.error).toMatch(/most keywords your plan allows/i);
       expect(mockKeyword.bulkCreate).not.toHaveBeenCalled();
    });
 

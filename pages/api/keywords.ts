@@ -10,6 +10,8 @@ import { canonicalizeDomain } from '../../utils/canonical-domain';
 import { MAX_KEYWORDS_PER_REQUEST, MAX_KEYWORDS_PER_DOMAIN } from '../../utils/limits';
 import { isAccountActive } from '../../utils/plans';
 import { reserveKeywordSlots, CapExceeded } from '../../utils/caps-guard';
+import { resolveBaseUrl } from '../../utils/baseUrl';
+import { trialEndedMessage, planLimitMessage } from '../../utils/billing-copy';
 import { rateLimit } from '../../utils/rate-limit';
 import type Account from '../../database/models/account';
 import parseKeywords from '../../utils/parseKeywords';
@@ -228,16 +230,17 @@ const addKeywords = async (req: NextApiRequest, res: NextApiResponse<KeywordsGet
          // (locked) account shows the trial/subscription message; an active account at its plan cap
          // shows the limit-reached/upgrade message. Any other error stays the generic 400.
          if (error instanceof CapExceeded) {
-            const locked = !isAccountActive(account);
-            // Append the in-LLM fix path so the user can resolve it without leaving their AI client:
-            // check status, then start checkout to subscribe or add sites. Caps-guard logic above is
-            // untouched; only this user-facing string changed.
-            const fixHint = ' Your trial has ended or you have reached your plan limit. '
-               + 'Call billing_status then start_checkout to subscribe or add sites.';
-            const message = (locked
-               ? 'Your trial has ended or your subscription is inactive. Subscribe to add keywords and resume rank tracking.'
-               : `Keyword limit reached for your plan (max ${error.limit}; ${error.existing} already tracked). Upgrade to add more.`)
-               + fixHint;
+            // Human-first wall copy + a one-click pay link (utils/billing-copy). A LOCKED account
+            // (trial expired / inactive) gets the trial-ended message; an ACTIVE account at its plan
+            // keyword cap gets the plan-limit message. Caps-guard logic above is untouched.
+            const baseUrl = resolveBaseUrl(req);
+            const message = !isAccountActive(account)
+               ? trialEndedMessage(account, baseUrl)
+               : planLimitMessage(
+                  `You are tracking the most keywords your plan allows (${error.limit}; ${error.existing} in use).`,
+                  account,
+                  baseUrl,
+               );
             return res.status(403).json({ error: message });
          }
          console.log('[ERROR] Adding New Keywords ', error);

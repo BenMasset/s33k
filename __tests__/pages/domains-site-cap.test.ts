@@ -85,7 +85,7 @@ describe('POST /api/domains: billing site cap', () => {
       const res = makeRes();
       await domainsHandler(makeReq({ method: 'POST', body: { domains: ['second-site.com'] } }), res);
       expect(res.statusCode).toBe(403);
-      expect(res.payload.error).toMatch(/Site limit reached for your plan/i);
+      expect(res.payload.error).toMatch(/most sites your plan allows/i);
       expect(mockDomain.bulkCreate).not.toHaveBeenCalled();
    });
 
@@ -112,7 +112,7 @@ describe('POST /api/domains: billing site cap', () => {
       const res = makeRes();
       await domainsHandler(makeReq({ method: 'POST', body: { domains: ['fourth-site.com'] } }), res);
       expect(res.statusCode).toBe(403);
-      expect(res.payload.error).toMatch(/Site limit reached for your plan/i);
+      expect(res.payload.error).toMatch(/most sites your plan allows/i);
       expect(mockDomain.bulkCreate).not.toHaveBeenCalled();
    });
 

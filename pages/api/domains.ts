@@ -14,6 +14,8 @@ import { checkSerchConsoleIntegration, removeLocalSCData } from '../../utils/sea
 import { removeFromRetryQueue } from '../../utils/scraper';
 import { resolveCaps, isAccountActive } from '../../utils/plans';
 import { rateLimit } from '../../utils/rate-limit';
+import { resolveBaseUrl } from '../../utils/baseUrl';
+import { trialEndedMessage, planLimitMessage } from '../../utils/billing-copy';
 
 type DomainsGetRes = {
    domains: DomainType[]
@@ -143,15 +145,16 @@ const addDomain = async (req: NextApiRequest, res: NextApiResponse<DomainsAddRes
       const caps = resolveCaps(account);
       const existingSites = await Domain.count({ where: { ...scopeWhere(account) } });
       if (existingSites + domainsToAdd.length > caps.sites) {
-         const locked = !isAccountActive(account);
-         // Append the in-LLM fix path so the user can resolve it without leaving their AI client.
-         // Caps logic above is untouched; only this user-facing string changed.
-         const fixHint = ' Your trial has ended or you have reached your plan limit. '
-            + 'Call billing_status then start_checkout to subscribe or add sites.';
-         const message = (locked
-            ? 'Your trial has ended or your subscription is inactive. Subscribe to add a site and resume tracking.'
-            : `Site limit reached for your plan (max ${caps.sites}; ${existingSites} already tracked). Upgrade to add more.`)
-            + fixHint;
+         // Human-first wall copy + a one-click pay link (utils/billing-copy). Caps logic above is
+         // untouched; only this user-facing string changed.
+         const baseUrl = resolveBaseUrl(req);
+         const message = !isAccountActive(account)
+            ? trialEndedMessage(account, baseUrl)
+            : planLimitMessage(
+               `You are tracking the most sites your plan allows (${caps.sites}; ${existingSites} in use).`,
+               account,
+               baseUrl,
+            );
          return res.status(403).json({ domains: null, error: message });
       }
 

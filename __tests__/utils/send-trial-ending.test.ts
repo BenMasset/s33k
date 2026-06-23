@@ -29,6 +29,8 @@ beforeEach(() => {
    process.env = { ...ORIGINAL_ENV };
    process.env.RESEND_API_KEY = 're_test';
    process.env.NEXT_PUBLIC_APP_URL = 'https://app.s33k.io';
+   // SECRET lets the email mint the one-click pre-authenticated /api/subscribe link.
+   process.env.SECRET = 'test-secret-for-subscribe-token-0123456789';
    // Default: the account has a decryptable email.
    mockDecrypt.mockReturnValue('user@example.com');
    (global as unknown as { fetch: jest.Mock }).fetch = jest.fn(async () => ({ ok: true, text: async () => '' }));
@@ -48,8 +50,9 @@ describe('sendTrialEnding', () => {
       expect(body.to).toBe('user@example.com');
       // 3 days out rounds to "in 3 days" (the boundary; ceil of just-under-3-days is 3).
       expect(body.subject).toContain('days');
-      expect(body.html).toContain('https://app.s33k.io/billing');
-      expect(body.text).toContain('https://app.s33k.io/billing');
+      // The CTA is the one-click pre-authenticated subscribe link (not the old /billing page).
+      expect(body.html).toContain('https://app.s33k.io/api/subscribe?token=');
+      expect(body.text).toContain('https://app.s33k.io/api/subscribe?token=');
       // The Authorization header carries the key but the value is never returned to a caller; assert
       // the request is shaped right without leaking the key anywhere this test surfaces it.
       expect((opts as { headers: Record<string, string> }).headers.Authorization).toBe('Bearer re_test');

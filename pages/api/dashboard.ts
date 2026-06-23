@@ -22,6 +22,8 @@ import {
 import { selectSuggestedQuestions, SuggestedQuestion } from '../../utils/suggested-questions';
 import { renderDashboard } from '../../utils/dashboard-render';
 import { isAccountActive } from '../../utils/plans';
+import { resolveBaseUrl } from '../../utils/baseUrl';
+import { trialEndedMessage } from '../../utils/billing-copy';
 
 /*
  * ============================================================================
@@ -67,12 +69,14 @@ type DashboardApiResponse = {
 // active (so the field is simply absent on a healthy account, never a noisy locked:false). With
 // MULTI_TENANT off / the admin sentinel, isAccountActive is always true, so this is never emitted
 // in single-tenant: the flag-off path stays byte-for-byte unchanged.
-const billingLockFor = (account?: Account | null): BillingLock | undefined => {
+const billingLockFor = (account: Account | null | undefined, baseUrl: string): BillingLock | undefined => {
    if (isAccountActive(account)) { return undefined; }
    return {
       locked: true,
-      message: 'Your free trial has ended or your subscription is inactive. Reads still work, but tracking is paused. '
-         + 'Call billing_status then start_checkout to subscribe and resume.',
+      // Human-first wall copy + a one-click pay link (utils/billing-copy), so the LLM relays a real
+      // clickable link, not "call start_checkout". action stays start_checkout for LLM clients that
+      // prefer the tool path.
+      message: trialEndedMessage(account, baseUrl),
       action: 'start_checkout',
    };
 };
@@ -100,7 +104,7 @@ const getDashboard = async (req: NextApiRequest, res: NextApiResponse<DashboardA
 
    // Non-blocking billing annotation, computed once and spread into every response below. Reads are
    // NEVER capped here; an inactive account still gets the full overview, just flagged.
-   const billing = billingLockFor(account);
+   const billing = billingLockFor(account, resolveBaseUrl(req));
 
    try {
       const provider = getAnalyticsProvider();
