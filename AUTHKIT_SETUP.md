@@ -22,7 +22,10 @@ or single-tenant install is untouched. To turn it off instantly, unset `AUTHKIT_
 4. Add a **Resource Indicator** equal to your MCP resource URL, exactly:
    `https://app.s33k.io/api/mcp` (must match `MCP_RESOURCE_URL` byte for byte). Tokens are then issued
    with `aud` = this value, which s33k verifies.
-5. Copy your **AuthKit domain** (looks like `https://your-app.authkit.app`).
+5. **Include `email` (and `email_verified`) in the ACCESS token claims.** s33k only ever sees the
+   access token, not the id token, and it links you to your account by that email. If email is on the
+   id token but not the access token, every connection fails with a clear 403 (see Troubleshooting).
+6. Copy your **AuthKit domain** (looks like `https://your-app.authkit.app`).
 
 ## 2. Environment (Railway `s33k` service)
 
@@ -73,7 +76,20 @@ If the first returns 404, AuthKit is not enabled (check `MULTI_TENANT` and `AUTH
   403 ("s33k is invite-only: connect with the email you were invited with"). That is intended, s33k is
   invite-only. Make sure the tester's AuthKit email equals their invited email.
 
-## 6. Security notes (for the Tyler review after live testing)
+## 6. Troubleshooting
+
+- **"The authorization token has no email claim" (403):** AuthKit is signing you in fine, but the
+  ACCESS token has no `email`. Add `email` (and `email_verified`) to the access-token claims in WorkOS
+  (dashboard step 5). This is the most common first-run failure.
+- **"No s33k account for this email" (403):** you signed in to AuthKit with an email that has no s33k
+  account. s33k is invite-only; connect with the exact email you were invited with.
+- **"Invalid or expired authorization token" (401):** the token failed signature / issuer / audience /
+  expiry. Confirm `AUTHKIT_DOMAIN` and `MCP_RESOURCE_URL` match the WorkOS dashboard exactly (the
+  Resource Indicator must equal `MCP_RESOURCE_URL` byte for byte), then reconnect.
+- **/.well-known/oauth-protected-resource returns 404:** AuthKit is not enabled. Check `MULTI_TENANT=true`
+  and `AUTHKIT_DOMAIN`.
+
+## 7. Security notes (for the Tyler review after live testing)
 
 - An OAuth connection is resolved to the account's **own** s33k API key (minted once, stored
   cryptr-encrypted at rest). The MCP route then behaves identically to a pasted key, so `authorize()`

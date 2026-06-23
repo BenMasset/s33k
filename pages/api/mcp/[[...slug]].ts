@@ -49,6 +49,7 @@ import {
    verifyAuthKitToken,
    resolveAccountKeyForAuthKit,
    wwwAuthenticate,
+   AuthKitClaimError,
 } from '../../../utils/authkit';
 
 // Resolve the base URL for the internal loopback call to s33k's own REST API. We ALWAYS call the
@@ -151,7 +152,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return;
          }
          effectiveKey = resolution.key;
-      } catch {
+      } catch (err) {
+         if (err instanceof AuthKitClaimError) {
+            // The token is validly signed but is missing a claim we need (e.g. no email on the access
+            // token, the most common first-run misconfiguration). Re-authorizing will not help, so 403
+            // with the actionable reason rather than another OAuth challenge that would just loop.
+            sendJsonRpcError(res, 403, -32003, err.message);
+            return;
+         }
          // Bad signature, wrong issuer/audience, or expired: challenge the client to re-authorize.
          sendOAuthChallenge(res, 'Invalid or expired authorization token');
          return;

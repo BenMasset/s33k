@@ -94,6 +94,12 @@ const getJwks = (domain: string): ReturnType<typeof createRemoteJWKSet> => {
 
 export type AuthKitIdentity = { sub: string, email: string };
 
+// A token that is VALIDLY SIGNED (passed jose) but is missing a claim we require (sub / email) or
+// whose email is not verified. This is distinct from a signature/issuer/audience/expiry failure:
+// re-authorizing will not fix a missing claim, so the route turns this into an actionable 403 rather
+// than another OAuth challenge. The message is user-facing and tells the operator exactly what to fix.
+export class AuthKitClaimError extends Error {}
+
 // Verify an AuthKit access token: signature against AuthKit's JWKS, issuer === AUTHKIT_DOMAIN, and
 // audience === our MCP resource URL (so a token minted for a DIFFERENT resource cannot be replayed
 // here). Returns the verified user id + email. Throws on any failure; the caller turns that into a 401.
@@ -109,9 +115,17 @@ export const verifyAuthKitToken = async (token: string): Promise<AuthKitIdentity
    const email = typeof payload.email === 'string' ? payload.email : '';
    // email_verified is honored when present (AuthKit verifies emails, but a false claim is a hard no).
    const emailVerified = (payload as { email_verified?: unknown }).email_verified;
-   if (!sub) { throw new Error('AuthKit token is missing a subject.'); }
-   if (!email) { throw new Error('AuthKit token is missing an email.'); }
-   if (emailVerified === false) { throw new Error('AuthKit token email is not verified.'); }
+   if (!sub) {
+      throw new AuthKitClaimError('The authorization token has no subject claim. Reconnect, and contact support if this persists.');
+   }
+   if (!email) {
+      // The MCP server only ever sees the ACCESS token, so email must be a claim on the access token,
+      // not just the id token. This is the most likely first-run misconfiguration.
+      throw new AuthKitClaimError('The authorization token has no email claim. In WorkOS, include email in the ACCESS token claims (the MCP server only sees the access token), then reconnect.');
+   }
+   if (emailVerified === false) {
+      throw new AuthKitClaimError('Your email is not verified with your login provider. Verify it, then reconnect.');
+   }
    return { sub, email };
 };
 
