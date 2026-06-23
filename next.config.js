@@ -20,6 +20,16 @@ const nextConfig = {
   // cross-origin embed, so a wrong CSP/COEP/COOP/CORS default would silently break the product.
   // The headers below are all safe for cross-origin <script> loads and sendBeacon/fetch POSTs:
   // X-Frame-Options only blocks iframe embedding of the app UI, not script loads or beacons.
+  // OAuth discovery documents live at /.well-known/... by spec (RFC 9728 / RFC 8414), but Next's
+  // pages router serves API handlers under /api. These rewrites map the well-known paths to the
+  // handlers without changing the public URL the MCP client fetches. Both handlers 404 unless AuthKit
+  // is configured, so on an unconfigured install these paths simply return 404.
+  async rewrites() {
+    return [
+      { source: '/.well-known/oauth-protected-resource', destination: '/api/oauth-protected-resource' },
+      { source: '/.well-known/oauth-authorization-server', destination: '/api/oauth-authorization-server' },
+    ];
+  },
   async headers() {
     return [
       {

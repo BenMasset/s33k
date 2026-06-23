@@ -98,6 +98,25 @@ class Account extends Model {
    // The webhook stamps this from subscription.items.data[0].quantity. INTEGER, nullable, additive.
    @Column({ type: DataType.INTEGER, allowNull: true })
    paid_sites!: number | null;
+
+   // === WorkOS AuthKit OAuth linkage (lets normal Claude / ChatGPT connect over MCP) ============
+   // The WorkOS user id (the `sub` of a verified AuthKit access token) this account is linked to, set
+   // the first time the user connects the hosted MCP via AuthKit OAuth (utils/authkit). The INITIAL
+   // join is by verified email (email_hash); thereafter we resolve by this stable id. Carries a UNIQUE
+   // index (one account per WorkOS user, many NULLs permitted, exactly like email_hash), so a single
+   // WorkOS identity can never silently map to two accounts. Nullable + TEXT, additive, only meaningful
+   // with MULTI_TENANT on and AUTHKIT_DOMAIN set.
+   @Column({ type: DataType.TEXT, allowNull: true })
+   workos_user_id!: string | null;
+
+   // A per-account s33k API key minted for the AuthKit-OAuth MCP path, stored cryptr-ENCRYPTED AT REST
+   // (AES-256, keyed by SECRET), the SAME at-rest protection as `email`. Once a token is verified and
+   // mapped to this account, the MCP route decrypts this to bind the per-request fetchImpl, so the
+   // existing key -> authorize() -> scope machinery applies UNCHANGED (no authorize() change, the whole
+   // point: an OAuth connection is held to exactly the scope a pasted key would be). A DB dump without
+   // SECRET cannot use it. Re-minted automatically if the underlying ApiKey is later revoked/missing.
+   @Column({ type: DataType.TEXT, allowNull: true })
+   mcp_oauth_key_enc!: string | null;
 }
 
 export default Account;

@@ -43,6 +43,13 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { registerS33kTools, FetchImpl } from '../../../mcp/src/tools';
 import { ensureSynced } from '../../../database/database';
 import { rateLimit } from '../../../utils/rate-limit';
+import {
+   authkitEnabled,
+   looksLikeJwt,
+   verifyAuthKitToken,
+   resolveAccountKeyForAuthKit,
+   wwwAuthenticate,
+} from '../../../utils/authkit';
 
 // Resolve the base URL for the internal loopback call to s33k's own REST API. We ALWAYS call the
 // same local process (127.0.0.1 on PORT): the API we proxy is OURS and runs in THIS container, so
@@ -102,24 +109,62 @@ const sendJsonRpcError = (res: NextApiResponse, status: number, code: number, me
    res.status(status).json({ jsonrpc: '2.0', error: { code, message }, id: null });
 };
 
+// Send a 401 that begins the MCP OAuth flow: the WWW-Authenticate header points the client at our
+// protected-resource metadata so it can discover AuthKit and authorize. Used (only when AuthKit is
+// enabled) for a missing token, or a token that fails signature/issuer/audience verification.
+const sendOAuthChallenge = (res: NextApiResponse, description: string): void => {
+   res.setHeader('WWW-Authenticate', wwwAuthenticate(description));
+   sendJsonRpcError(res, 401, -32001, description);
+};
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse): Promise<void> {
    // Cold-start safety net only; migrations run on boot. Cheap awaited no-op after the first call.
    await ensureSynced();
 
-   // SECURITY GATE: no Bearer key, no connection. We reject here, before any MCP server is built,
-   // so an unauthenticated request never reaches tool registration or the transport.
+   // SECURITY GATE: no credential, no connection. We reject here, before any MCP server is built, so
+   // an unauthenticated request never reaches tool registration or the transport. With AuthKit on, a
+   // missing token returns the OAuth challenge (WWW-Authenticate) so normal Claude / ChatGPT can begin
+   // the flow; otherwise the legacy static-key 401, byte-for-byte as before.
    const bearer = extractBearer(req);
+   const oauthOn = authkitEnabled();
    if (!bearer) {
+      if (oauthOn) { sendOAuthChallenge(res, 'Authorization needed'); return; }
       sendJsonRpcError(res, 401, -32001, 'Missing Authorization: Bearer <s33k API key>. The hosted s33k MCP requires a key per connection.');
       return;
    }
 
+   // Resolve the connection's EFFECTIVE s33k key. A static s33k key (no dots) is used directly: the
+   // legacy path, unchanged. An AuthKit access token (a JWT, only when AuthKit is enabled) is verified
+   // and mapped to the caller's account, and we then use THAT account's own key. Either way, the rest
+   // of this handler sees a normal per-account key and authorize() scopes the connection EXACTLY as a
+   // pasted key would be. This added branch is the entire OAuth surface; everything downstream is
+   // identical for both paths.
+   let effectiveKey = bearer;
+   if (oauthOn && looksLikeJwt(bearer)) {
+      try {
+         const identity = await verifyAuthKitToken(bearer);
+         const resolution = await resolveAccountKeyForAuthKit(identity);
+         if (resolution.error || !resolution.key) {
+            // Authenticated but not provisioned (no linked account / inactive / email conflict).
+            // Re-authorizing will not help, so 403 with the reason rather than another OAuth challenge.
+            sendJsonRpcError(res, 403, -32003, resolution.error || 'No s33k account is linked to this login.');
+            return;
+         }
+         effectiveKey = resolution.key;
+      } catch {
+         // Bad signature, wrong issuer/audience, or expired: challenge the client to re-authorize.
+         sendOAuthChallenge(res, 'Invalid or expired authorization token');
+         return;
+      }
+   }
+
    // Per-key abuse brake on this public surface. A single (possibly leaked) key is held to a generous
    // budget so a runaway client or a stolen key cannot fan out unbounded loopback work (crawls, SERP
-   // scrapes) from one connection. Keyed on the bearer so distinct keys never throttle each other; the
-   // limiter's global ceiling additionally bounds a unique-key flood. Checked AFTER the no-Bearer 401
-   // so anonymous floods still take the cheaper rejection and we never track empty keys.
-   const gate = rateLimit(`mcp:${bearer}`, { limit: 240, windowMs: 60000 });
+   // scrapes) from one connection. Keyed on the EFFECTIVE key (the account's key for OAuth, the pasted
+   // key for static) so it is stable per account and distinct keys never throttle each other; the
+   // limiter's global ceiling additionally bounds a unique-key flood. Checked AFTER the no-credential
+   // rejection so anonymous floods still take the cheaper path and we never track empty keys.
+   const gate = rateLimit(`mcp:${effectiveKey}`, { limit: 240, windowMs: 60000 });
    if (!gate.allowed) {
       res.setHeader('Retry-After', Math.ceil(gate.retryAfterMs / 1000).toString());
       sendJsonRpcError(res, 429, -32002, 'Rate limit exceeded for this key. Slow down and retry shortly.');
@@ -127,7 +172,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
    }
 
    const baseUrl = resolveBaseUrl();
-   const fetchImpl = makeFetchImpl(baseUrl, bearer);
+   const fetchImpl = makeFetchImpl(baseUrl, effectiveKey);
 
    // Per-request, stateless server + transport. Building these fresh for every request is what makes
    // cross-connection key leakage impossible: this server only ever knows THIS request's key.
