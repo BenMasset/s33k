@@ -29,7 +29,14 @@ jest.mock('../../database/models/domain', () => ({
 }));
 jest.mock('../../database/models/keyword', () => ({
    __esModule: true,
-   default: { bulkCreate: jest.fn() },
+   default: { bulkCreate: jest.fn(), count: jest.fn(async () => 0) },
+}));
+// Firecrawl is OFF by default for the existing cases, so onboarding uses the heuristic discovery
+// path they assert. The dedicated "Firecrawl recommendation" block below overrides per-test.
+jest.mock('../../utils/firecrawl', () => ({
+   __esModule: true,
+   firecrawlConfigured: jest.fn(() => false),
+   extractKeywords: jest.fn(async () => ({ businessName: '', keywords: [], error: 'Firecrawl is not configured.' })),
 }));
 jest.mock('../../utils/authorize', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('../../utils/refresh', () => ({ __esModule: true, default: jest.fn(async () => undefined) }));
@@ -59,15 +66,19 @@ import { createUmamiWebsite } from '../../utils/umami-provision';
 // eslint-disable-next-line import/first
 import { getAppSettings } from '../../pages/api/settings';
 // eslint-disable-next-line import/first
+import { firecrawlConfigured, extractKeywords } from '../../utils/firecrawl';
+// eslint-disable-next-line import/first
 import { __resetGenericRateLimit } from '../../utils/rate-limit';
 
 const mockSettings = getAppSettings as unknown as jest.Mock;
 const mockDomain = DomainModel as unknown as { findOne: jest.Mock, create: jest.Mock, count: jest.Mock };
-const mockKeyword = KeywordModel as unknown as { bulkCreate: jest.Mock };
+const mockKeyword = KeywordModel as unknown as { bulkCreate: jest.Mock, count: jest.Mock };
 const mockAuthorize = authorizeFn as unknown as jest.Mock;
 const mockRefresh = refreshFn as unknown as jest.Mock;
 const mockDiscover = discoverKeywords as unknown as jest.Mock;
 const mockProvision = createUmamiWebsite as unknown as jest.Mock;
+const mockFirecrawlConfigured = firecrawlConfigured as unknown as jest.Mock;
+const mockExtract = extractKeywords as unknown as jest.Mock;
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -183,11 +194,11 @@ describe('POST /api/onboard happy path', () => {
       expect(mockProvision).not.toHaveBeenCalled();
    });
 
-   it('caps the number of added keywords at the onboard max', async () => {
+   it('caps the number of added keywords at the onboard max (50)', async () => {
       mockDomain.findOne.mockResolvedValue(null);
       mockDomain.create.mockResolvedValue(domainRow({ ID: 12, domain: 'big.com' }));
-      // One page with 40 unique candidate keywords.
-      const many = Array.from({ length: 40 }, (_v, i) => `keyword phrase ${i}`);
+      // One page with 70 unique candidate keywords; the onboard cap (50) must clamp it.
+      const many = Array.from({ length: 70 }, (_v, i) => `keyword phrase ${i}`);
       mockDiscover.mockResolvedValue({
          domain: 'big.com',
          candidates: [{ page: 'https://big.com/', suggestedKeywords: many }],
@@ -198,8 +209,8 @@ describe('POST /api/onboard happy path', () => {
       await onboardHandler(makeReq({ body: { domain: 'big.com' } }), res);
 
       const created = mockKeyword.bulkCreate.mock.calls[0][0] as any[];
-      expect(created.length).toBe(20);
-      expect(res.payload.discoveredKeywords.length).toBe(20);
+      expect(created.length).toBe(50);
+      expect(res.payload.discoveredKeywords.length).toBe(50);
    });
 });
 
@@ -509,5 +520,77 @@ describe('POST /api/onboard guards', () => {
       const res = makeRes();
       await onboardHandler(makeReq({ body: {} }), res);
       expect(res.statusCode).toBe(400);
+   });
+});
+
+describe('POST /api/onboard Firecrawl recommendation', () => {
+   beforeEach(() => {
+      mockFirecrawlConfigured.mockReturnValue(true);
+      mockKeyword.bulkCreate.mockImplementation(async (rows: any[]) => rows.map((k) => keywordRow(k)));
+      mockDomain.findOne.mockResolvedValue(null);
+      mockDomain.create.mockResolvedValue(domainRow({ ID: 30, domain: 'firecrawl.com' }));
+   });
+   // Restore the file-wide defaults so the configured-mock cannot bleed into other suites.
+   afterEach(() => {
+      mockFirecrawlConfigured.mockReturnValue(false);
+      mockExtract.mockResolvedValue({ businessName: '', keywords: [], error: 'Firecrawl is not configured.' });
+   });
+
+   it('adds the Firecrawl-recommended keywords (not the heuristic) and surfaces the business name', async () => {
+      mockExtract.mockResolvedValue({
+         businessName: 'Firecrawl Co',
+         keywords: [
+            { keyword: 'ai content management software', targetPage: '/software' },
+            { keyword: 'dam for marketing teams', targetPage: '/dam' },
+         ],
+      });
+      // The heuristic would return something different; assert it is NOT used.
+      mockDiscover.mockResolvedValue({ domain: 'firecrawl.com', candidates: [{ page: 'https://firecrawl.com/x', suggestedKeywords: ['heuristic only'] }] });
+
+      const res = makeRes();
+      await onboardHandler(makeReq({ body: { domain: 'firecrawl.com' } }), res);
+
+      expect(res.statusCode).toBe(201);
+      expect(mockDiscover).not.toHaveBeenCalled();
+      expect(res.payload.businessName).toBe('Firecrawl Co');
+      const created = mockKeyword.bulkCreate.mock.calls[0][0] as any[];
+      expect(created.map((k) => k.keyword)).toEqual(['ai content management software', 'dam for marketing teams']);
+      // target pages from Firecrawl are carried through to the scoreboard join
+      expect(created.find((k) => k.keyword === 'ai content management software').target_page).toBe('/software');
+      expect(res.payload.discoveredKeywords).toEqual(['ai content management software', 'dam for marketing teams']);
+   });
+
+   it('falls back to the heuristic crawler when Firecrawl returns no keywords', async () => {
+      mockExtract.mockResolvedValue({ businessName: '', keywords: [], error: 'Firecrawl extract timed out.' });
+      mockDiscover.mockResolvedValue({ domain: 'firecrawl.com', candidates: [{ page: 'https://firecrawl.com/', suggestedKeywords: ['fallback keyword'] }] });
+
+      const res = makeRes();
+      await onboardHandler(makeReq({ body: { domain: 'firecrawl.com' } }), res);
+
+      expect(res.statusCode).toBe(201);
+      expect(mockExtract).toHaveBeenCalled();
+      expect(mockDiscover).toHaveBeenCalled(); // fell back
+      const created = mockKeyword.bulkCreate.mock.calls[0][0] as any[];
+      expect(created.map((k) => k.keyword)).toEqual(['fallback keyword']);
+   });
+
+   it('clamps Firecrawl recommendations to the account remaining keyword allowance (COGS guard)', async () => {
+      // Active 1-site tenant (cap 50) that already tracks 48 keywords -> only 2 slots remain.
+      asCaller({ ID: 9, status: 'active', subscription_status: 'active', paid_sites: 1 });
+      process.env.MULTI_TENANT = 'true';
+      mockDomain.create.mockResolvedValue(domainRow({ ID: 31, domain: 'capped.com', owner_id: 9 }));
+      mockDomain.count.mockResolvedValue(0); // 0 existing sites, so the site cap (1) allows this onboard
+      mockKeyword.count.mockResolvedValue(48); // 48 of 50 keyword allowance already used
+      mockExtract.mockResolvedValue({
+         businessName: 'Capped',
+         keywords: Array.from({ length: 10 }, (_v, i) => ({ keyword: `cap kw ${i}`, targetPage: '/' })),
+      });
+
+      const res = makeRes();
+      await onboardHandler(makeReq({ body: { domain: 'capped.com' } }), res);
+
+      expect(res.statusCode).toBe(201);
+      const created = mockKeyword.bulkCreate.mock.calls[0][0] as any[];
+      expect(created.length).toBe(2); // clamped to the 2 remaining slots, not 10
    });
 });

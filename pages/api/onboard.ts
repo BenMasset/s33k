@@ -34,9 +34,10 @@ import parseKeywords from '../../utils/parseKeywords';
 import refreshAndUpdateKeywords from '../../utils/refresh';
 import { getAppSettings } from './settings';
 import { discoverKeywords } from '../../utils/keyword-discovery';
+import { firecrawlConfigured, extractKeywords } from '../../utils/firecrawl';
 import { createUmamiWebsite } from '../../utils/umami-provision';
 import { getInstallGuides, InstallGuides } from '../../utils/install-guides';
-import { isAccountActive } from '../../utils/plans';
+import { isAccountActive, resolveCaps } from '../../utils/plans';
 import { reserveSite, CapExceeded } from '../../utils/caps-guard';
 import { rateLimit } from '../../utils/rate-limit';
 
@@ -51,9 +52,12 @@ class DomainAlreadyRegistered extends Error {
    }
 }
 
-// Default cap on how many discovered keywords are added during onboarding. Keeps the
-// starting set focused and bounds the per-onboard SERP cost. The user can prune or extend.
-const MAX_ONBOARD_KEYWORDS = 20;
+// Default cap on how many recommended keywords are added during onboarding. 50 = the per-site
+// keyword allowance, so a fresh single-site account gets a full starting set from one scrape and
+// the user just says "yes". The actual add is still clamped to the account's REMAINING allowance
+// (see the allowance check below) so re-onboarding or a multi-site account can never bust the cap
+// and inflate SERP COGS. The user can prune or extend afterward.
+const MAX_ONBOARD_KEYWORDS = 50;
 
 // A friendly pointer, returned on every successful onboard, that the dashboard is now the place
 // to start. A brand-new user (or someone a domain was just shared with) is told in plain language
@@ -62,6 +66,7 @@ type FirstRunHint = { title: string, detail: string, nextTool: string };
 
 type OnboardResponse = {
    domain?: string,
+   businessName?: string,
    discoveredKeywords?: string[],
    addedKeywords?: KeywordType[],
    rankingsPending?: boolean,
@@ -168,27 +173,64 @@ const onboardDomain = async (req: NextApiRequest, res: NextApiResponse<OnboardRe
          }
       }
 
-      // 2. Heuristically discover candidate target keywords per page (no LLM). Crawl
-      //    failures surface as a discovery error but never abort onboarding.
-      const discovery = await discoverKeywords(domain);
-
-      // Flatten per-page candidates into a globally deduped, capped list while remembering
-      // which page each keyword came from so it joins to a target_page in the scoreboard.
+      // 2. Recommend candidate target keywords from a single scrape. PREFER Firecrawl: it scrapes the
+      //    site and its LLM synthesizes the top keyword phrases from the business name, page titles,
+      //    and pillar pages (the "just say yes" path, no manual typing). FALL BACK to the heuristic
+      //    crawler when Firecrawl is unconfigured, errors, or times out, so onboarding never breaks.
+      //    Either way, build a globally deduped list remembering each keyword's best target page so it
+      //    joins to a target_page in the scoreboard. discoveryError carries whichever source's error.
       const seen = new Set<string>();
       const selected: { keyword: string, target_page: string }[] = [];
-      for (const candidate of discovery.candidates) {
-         let targetPath = '';
-         try { targetPath = new URL(candidate.page).pathname || '/'; } catch { targetPath = ''; }
-         for (const keyword of candidate.suggestedKeywords) {
-            const key = keyword.toLowerCase();
-            if (!seen.has(key)) {
-               seen.add(key);
-               selected.push({ keyword, target_page: targetPath });
+      let businessName = '';
+      let discoveryError: string | undefined;
+      let usedFirecrawl = false;
+
+      if (firecrawlConfigured()) {
+         const fc = await extractKeywords(domain);
+         if (fc.keywords.length > 0) {
+            usedFirecrawl = true;
+            businessName = fc.businessName;
+            for (const rec of fc.keywords) {
+               const key = rec.keyword.toLowerCase();
+               if (!seen.has(key)) {
+                  seen.add(key);
+                  selected.push({ keyword: rec.keyword, target_page: rec.targetPage || '/' });
+               }
+               if (selected.length >= MAX_ONBOARD_KEYWORDS) { break; }
+            }
+         } else {
+            discoveryError = fc.error;
+         }
+      }
+
+      if (!usedFirecrawl) {
+         // Heuristic fallback (also the path when no Firecrawl key is set): crawl a few pages and
+         // derive candidates from on-page signals. Crawl failures surface as a note, never abort.
+         const discovery = await discoverKeywords(domain);
+         if (discovery.error) { discoveryError = discovery.error; }
+         for (const candidate of discovery.candidates) {
+            let targetPath = '';
+            try { targetPath = new URL(candidate.page).pathname || '/'; } catch { targetPath = ''; }
+            for (const keyword of candidate.suggestedKeywords) {
+               const key = keyword.toLowerCase();
+               if (!seen.has(key)) {
+                  seen.add(key);
+                  selected.push({ keyword, target_page: targetPath });
+               }
+               if (selected.length >= MAX_ONBOARD_KEYWORDS) { break; }
             }
             if (selected.length >= MAX_ONBOARD_KEYWORDS) { break; }
          }
-         if (selected.length >= MAX_ONBOARD_KEYWORDS) { break; }
       }
+
+      // COGS guard: clamp the additions to the account's REMAINING keyword allowance so onboarding (or
+      // a re-onboard, or a multi-site account) can never push total tracked keywords past the paid cap
+      // and inflate the weekly SERP spend. resolveCaps returns the very-high UNLIMITED cap when
+      // MULTI_TENANT is off / for the admin sentinel, so this is a no-op in single-tenant. The existing
+      // count is scoped to the caller's own rows (scopeWhere), so one tenant's usage never reads another's.
+      const existingKeywordCount = await Keyword.count({ where: { ...scopeWhere(account) } });
+      const remainingAllowance = Math.max(0, resolveCaps(account).keywords - existingKeywordCount);
+      const toAddSelected = selected.slice(0, remainingAllowance);
 
       // 3. Add the selected keywords exactly like pages/api/keywords.ts addKeywords does,
       //    then queue the background SERP scrape (rankings appear shortly).
@@ -200,8 +242,9 @@ const onboardDomain = async (req: NextApiRequest, res: NextApiResponse<OnboardRe
       let rankingsPending = false;
       let scraperNote: string | null = null;
       let emptyKeywordsNote: string | null = null;
-      if (selected.length > 0) {
-         const keywordsToAdd: any = selected.map((item) => ({
+      let capNote: string | null = null;
+      if (toAddSelected.length > 0) {
+         const keywordsToAdd: any = toAddSelected.map((item) => ({
             keyword: item.keyword,
             device: 'desktop',
             domain,
@@ -233,10 +276,16 @@ const onboardDomain = async (req: NextApiRequest, res: NextApiResponse<OnboardRe
             scraperNote = 'Rank tracking is not configured on this instance yet, so live Google positions will not appear '
                + 'until a SERP source is connected.';
          }
-      } else if (!discovery.error) {
-         // The crawl succeeded but produced no candidate keywords (a JS-rendered or sparse site).
-         // Tell the user plainly and point them at the manual paths instead of silently adding nothing.
-         emptyKeywordsNote = `We could not auto-detect keywords from ${domain} (pages may be JS-rendered or sparse). `
+      } else if (selected.length > 0) {
+         // We DID recommend keywords, but the account's keyword allowance is already full (a re-onboard,
+         // or a multi-site account at its cap), so the COGS guard clamped the add to zero. Say so and
+         // point at the fix, rather than the misleading "could not detect keywords" message below.
+         capNote = 'Your plan\'s keyword allowance is full, so no new keywords were added. '
+            + 'Remove some keywords, or call billing_status then start_checkout to add sites and track more.';
+      } else if (!discoveryError) {
+         // Discovery succeeded but produced no candidate keywords (a JS-rendered or sparse site, or a
+         // site Firecrawl could not analyze). Tell the user plainly and point them at the manual paths.
+         emptyKeywordsNote = `We could not auto-detect keywords from ${domain} (the site may be sparse or unreachable). `
             + 'Add a few with add_keyword, or connect Google Search Console.';
       }
 
@@ -288,14 +337,18 @@ const onboardDomain = async (req: NextApiRequest, res: NextApiResponse<OnboardRe
             + 'Rankings refresh weekly after.'
          : null;
 
-      // Combine ALL warnings rather than letting one silently win (note-precedence fix). discovery.error
-      // (crawl failed), the analytics-not-provisioned note, the no-scraper note, and the empty-keywords
-      // note can each be independently true; join the ones that fired so none is lost.
-      const notes = [note, discovery.error, scraperNote, emptyKeywordsNote].filter(Boolean);
+      // Combine ALL warnings rather than letting one silently win (note-precedence fix). The discovery
+      // error (Firecrawl or crawl failed), the analytics-not-provisioned note, the no-scraper note, the
+      // cap-full note, and the empty-keywords note can each be independently true; join the ones that
+      // fired so none is lost. discoveryError is only surfaced when it actually blocked keyword adds (we
+      // added nothing), so a Firecrawl miss that silently fell back to a working heuristic stays quiet.
+      const discoveryNote = (toAddSelected.length === 0 && discoveryError) ? discoveryError : null;
+      const notes = [note, discoveryNote, scraperNote, capNote, emptyKeywordsNote].filter(Boolean);
 
       return res.status(201).json({
          domain,
-         discoveredKeywords: selected.map((item) => item.keyword),
+         businessName: businessName || undefined,
+         discoveredKeywords: toAddSelected.map((item) => item.keyword),
          addedKeywords,
          rankingsPending,
          siteId,
