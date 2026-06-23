@@ -1,2 +1,3 @@
 - [s33k codebase review](project_s33k_codebase_review.md) — CTO review 2026-06-19: sound tool, isolation seam well-built, must-fix = file-backed global state + one raw-vs-canonical keywords query; build vindicated Ben's "try anyway"
 - [s33k review gate](project_s33k_review_gate.md) — the recurring deploy-gate checks (scoping, share-key denial, MCP count integrity, SSRF pinning); 2026-06-19 start_here review shipped clean
+- [s33k keyword grader](project_s33k_keyword_grader.md) — 2026-06-23 review: deterministic onboarding keyword grader, verdict SHIP; should-fix = non-latin keywords silently dropped + scrape/extract evidence mismatch; grader files are untracked, must git add

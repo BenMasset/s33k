@@ -96,6 +96,25 @@ describe('utils/firecrawl', () => {
       expect(extractBody.urls).toEqual(['https://getmasset.com']);
    });
 
+   it('returns the scraped pillar pages (the crawl) alongside the keywords on success', async () => {
+      process.env.FIRECRAWL_API_KEY = 'fc-test-key';
+      global.fetch = jest.fn(async (url: string) => {
+         if (String(url).includes('/map')) { return jsonResponse({ success: true, links: ['https://getmasset.com/software'] }); }
+         if (String(url).includes('/scrape')) {
+            return jsonResponse({ success: true, data: { markdown: 'Masset is AI-ready DAM software for marketing teams.', metadata: { title: 'Masset' } } });
+         }
+         if (String(url).includes('/extract')) { return jsonResponse({ success: true, data: { businessName: 'Masset', keywords: [{ keyword: 'ai-ready dam', targetPage: '/' }] } }); }
+         return jsonResponse({}, false);
+      }) as unknown as typeof fetch;
+
+      const mod = await loadModule();
+      const result = await mod.extractKeywords('getmasset.com');
+      expect(result.keywords.length).toBe(1);
+      expect(Array.isArray(result.pages)).toBe(true);
+      expect((result.pages || []).length).toBeGreaterThan(0);
+      expect((result.pages || [])[0]).toEqual(expect.objectContaining({ title: 'Masset', text: expect.stringContaining('AI-ready DAM software') }));
+   });
+
    it('returns an error (no throw) when the extract start fails', async () => {
       process.env.FIRECRAWL_API_KEY = 'fc-test-key';
       global.fetch = jest.fn(async (url: string) => {

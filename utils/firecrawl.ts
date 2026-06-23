@@ -20,7 +20,17 @@
  * surface is Firecrawl's, not ours; we still only ever send a canonicalized public domain.
  */
 
+import type { CrawlPage } from './keyword-grader';
+
 const FIRECRAWL_BASE = 'https://api.firecrawl.dev/v1';
+
+// How many pillar pages we /scrape for content (the crawl the grader scores against). Kept equal to
+// MAX_PILLAR_URLS (15) so the grader judges relevance against the SAME pages the candidates were drawn
+// from: scoring against fewer pages than the extractor saw could orphan a candidate that maps to a
+// deeper pillar page. The scrapes run CONCURRENTLY with /extract so they add no wall-clock, and each
+// page's text is truncated to keep the grader's corpus bounded.
+const MAX_SCRAPE_PAGES = 15;
+const SCRAPE_TEXT_CAP = 6000;
 
 // Total wall-clock budget for the whole map+extract during onboarding, measured from the start of
 // extractKeywords (it bounds the map call, the extract start, AND the poll loop). Kept WELL UNDER the
@@ -52,6 +62,10 @@ export type RecommendedKeyword = { keyword: string, targetPage: string };
 export type FirecrawlResult = {
    businessName: string,
    keywords: RecommendedKeyword[],
+   // The scraped pillar pages (the "crawl"), populated on the success path so the deterministic
+   // keyword-grader can score candidates for relevance + topical authority. Absent on error paths
+   // (onboard falls back to the heuristic there, where no grading runs).
+   pages?: CrawlPage[],
    error?: string,
 };
 
@@ -131,20 +145,49 @@ const mapSite = async (homepage: string): Promise<string[]> => {
    }
 };
 
+// Scrape the pillar pages for their text (the "crawl" the grader scores against). Runs all scrapes
+// CONCURRENTLY and never throws: a page that fails/times out is simply omitted. Returns up to
+// MAX_SCRAPE_PAGES CrawlPage{url,title,text}, each text truncated to SCRAPE_TEXT_CAP so the grader's
+// corpus stays bounded. Used only to feed relevance/authority scoring, so partial content is fine.
+const scrapePages = async (urls: string[]): Promise<CrawlPage[]> => {
+   const targets = urls.slice(0, MAX_SCRAPE_PAGES);
+   const results = await Promise.all(targets.map(async (url): Promise<CrawlPage | null> => {
+      const res = await timedFetch(`${FIRECRAWL_BASE}/scrape`, {
+         method: 'POST', headers: authHeaders(), body: JSON.stringify({ url, formats: ['markdown'] }),
+      }, CALL_TIMEOUT_MS);
+      if (!res || !res.ok) { return null; }
+      try {
+         const body = await res.json();
+         const data = (body && body.data) || {};
+         const md = typeof data.markdown === 'string' ? data.markdown : '';
+         const title = (data.metadata && typeof data.metadata.title === 'string') ? data.metadata.title : '';
+         if (!md && !title) { return null; }
+         return { url, title, text: md.slice(0, SCRAPE_TEXT_CAP) };
+      } catch {
+         return null;
+      }
+   }));
+   return results.filter((p): p is CrawlPage => p !== null);
+};
+
 // The SEO-analyst instruction Firecrawl's LLM follows. Encodes the business-name -> meta-titles ->
 // pillar-pages method and the "phrases a real searcher types, not brand/nav" quality bar.
 const EXTRACT_PROMPT = [
    'You are an expert SEO analyst. From these pages of one business website, recommend the top 50',
-   'keyword phrases this business should track in Google rankings: the phrases they are most likely',
-   'trying to rank for. Method, in order: (1) identify the business or brand name and do NOT return it',
-   'as a keyword unless it is also a core product/category term; (2) read each page title tag to infer',
-   'the keyword that page targets; (3) identify the pillar pages (the main product, service, solution,',
-   'or cornerstone-content pages) and infer the phrases those pages are trying to rank for. Prefer',
-   'multi-word commercial or informational phrases a real searcher would type (e.g. "ai content',
-   'management software"), NOT single brand words, navigation labels (home, about, contact, login),',
-   'or generic one-word terms. Return up to 50 UNIQUE phrases, most important first. For each, give the',
-   'site-relative path of the page it best maps to (e.g. "/software"), or "/" if unsure. Keep phrases',
-   'lowercase and under 7 words.',
+   'keyword phrases this business should track in Google rankings: the phrases a real buyer would type',
+   'into Google to find what this business sells. Method, in order: (1) identify the business/brand name',
+   'and do NOT return it alone unless it is also a core product/category term; (2) read each page title',
+   'to infer the keyword that page targets; (3) identify the pillar pages (the main product, service,',
+   'solution, or cornerstone-content pages) and infer the commercial phrases those pages try to rank for.',
+   'STRONGLY PREFER multi-word mid-tail phrases with clear commercial intent: "[category] software",',
+   '"[product] for [segment]", "[competitor] alternative", "best [category] tool". These are worth the',
+   'most. DO NOT return: single generic words ("software", "platform", "agents", "apps", "security");',
+   'navigation labels or site-section / doc-chrome headers ("home", "about us", "pricing", "all guides",',
+   '"knowledge base", "featured topics", "explore docs", "events", "press", "showcase"); or marketing',
+   'slogans / taglines / headlines from the page ("backed by incredible investors", "it comes with',
+   'receipts"). Those are not search queries. Return up to 50 UNIQUE phrases, best/most-commercial first.',
+   'For each, give the site-relative path of the page it best maps to (e.g. "/software"), or "/" if',
+   'unsure. Keep phrases lowercase and under 7 words.',
 ].join(' ');
 
 const EXTRACT_SCHEMA = {
@@ -215,6 +258,11 @@ export async function extractKeywords(domain: string): Promise<FirecrawlResult> 
       const links = await mapSite(homepage);
       const urls = selectPillarUrls(homepage, links);
 
+      // Scrape the pillar pages for grader content CONCURRENTLY with the extract job, so the page
+      // content adds no wall-clock (it resolves while we poll the extract). Awaited at the success
+      // returns below. scrapePages never throws (failed pages are omitted), so this cannot break extract.
+      const pagesPromise = scrapePages(urls);
+
       const startRes = await timedFetch(`${FIRECRAWL_BASE}/extract`, {
          method: 'POST',
          headers: authHeaders(),
@@ -228,7 +276,7 @@ export async function extractKeywords(domain: string): Promise<FirecrawlResult> 
 
       // Some Firecrawl responses return data inline (sync); others return a job id to poll (async).
       if (started.data && !started.id) {
-         return { ...normalizeKeywords(started.data) };
+         return { ...normalizeKeywords(started.data), pages: await pagesPromise };
       }
       const jobId = started.id;
       if (!jobId) { return { businessName: '', keywords: [], error: 'Firecrawl returned no job id.' }; }
@@ -243,7 +291,7 @@ export async function extractKeywords(domain: string): Promise<FirecrawlResult> 
             // eslint-disable-next-line no-await-in-loop
             const poll = await pollRes.json().catch(() => null);
             if (poll && poll.status === 'completed') {
-               return { ...normalizeKeywords(poll.data) };
+               return { ...normalizeKeywords(poll.data), pages: await pagesPromise };
             }
             if (poll && (poll.status === 'failed' || poll.status === 'cancelled')) {
                return { businessName: '', keywords: [], error: 'Firecrawl extract failed.' };

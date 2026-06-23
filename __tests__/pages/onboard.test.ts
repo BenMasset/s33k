@@ -560,6 +560,40 @@ describe('POST /api/onboard Firecrawl recommendation', () => {
       expect(res.payload.discoveredKeywords).toEqual(['ai content management software', 'dam for marketing teams']);
    });
 
+   it('GRADES Firecrawl candidates against the scraped pages and adds only the quality ones (junk dropped)', async () => {
+      // Firecrawl returns a mix of real terms + nav/doc-chrome junk, plus the scraped pages (crawl).
+      // The deterministic grader (run for real, not mocked) must keep the relevant commercial terms and
+      // drop the junk before anything is tracked.
+      mockExtract.mockResolvedValue({
+         businessName: 'Acme',
+         keywords: [
+            { keyword: 'agents', targetPage: '/' },
+            { keyword: 'all guides', targetPage: '/' },
+            { keyword: 'about us', targetPage: '/' },
+            { keyword: 'infrastructure for ai', targetPage: '/' },
+            { keyword: 'fluid compute', targetPage: '/' },
+         ],
+         pages: [
+            { url: 'https://acme.com/', title: 'Acme: Infrastructure for AI', text: 'Acme is the infrastructure for ai. Fluid compute scales your workloads. Trusted by 40% of teams.' },
+            { url: 'https://acme.com/pricing', title: 'Pricing', text: 'Pricing for infrastructure for ai and fluid compute. Plans for teams. 99% uptime.' },
+            { url: 'https://acme.com/product', title: 'Product', text: 'Infrastructure for ai and fluid compute, built in. Over 100000 developers.' },
+         ],
+      });
+
+      const res = makeRes();
+      await onboardHandler(makeReq({ body: { domain: 'firecrawl.com' } }), res);
+
+      expect(res.statusCode).toBe(201);
+      const created = mockKeyword.bulkCreate.mock.calls[0][0] as any[];
+      const addedKw = created.map((k) => k.keyword);
+      expect(addedKw).toContain('infrastructure for ai');
+      expect(addedKw).toContain('fluid compute');
+      // The nav/doc-chrome junk was graded out, never tracked.
+      expect(addedKw).not.toContain('agents');
+      expect(addedKw).not.toContain('all guides');
+      expect(addedKw).not.toContain('about us');
+   });
+
    it('falls back to the heuristic crawler when Firecrawl returns no keywords', async () => {
       mockExtract.mockResolvedValue({ businessName: '', keywords: [], error: 'Firecrawl extract timed out.' });
       mockDiscover.mockResolvedValue({ domain: 'firecrawl.com', candidates: [{ page: 'https://firecrawl.com/', suggestedKeywords: ['fallback keyword'] }] });

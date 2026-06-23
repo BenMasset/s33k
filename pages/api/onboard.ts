@@ -35,6 +35,7 @@ import refreshAndUpdateKeywords from '../../utils/refresh';
 import { getAppSettings } from './settings';
 import { discoverKeywords } from '../../utils/keyword-discovery';
 import { firecrawlConfigured, extractKeywords } from '../../utils/firecrawl';
+import { gradeKeywords } from '../../utils/keyword-grader';
 import { createUmamiWebsite } from '../../utils/umami-provision';
 import { getInstallGuides, InstallGuides } from '../../utils/install-guides';
 import { isAccountActive, resolveCaps } from '../../utils/plans';
@@ -194,7 +195,21 @@ const onboardDomain = async (req: NextApiRequest, res: NextApiResponse<OnboardRe
          if (fc.keywords.length > 0) {
             usedFirecrawl = true;
             businessName = fc.businessName;
-            for (const rec of fc.keywords) {
+            // QUALITY GRADER (deterministic Rubric 1, no LLM/no API key): score Firecrawl's raw
+            // candidates against the scraped pages and keep only the ones that earn tracking, ranked
+            // best-first. This is what strips the nav/doc-chrome junk ("agents", "all guides") and keeps
+            // the real commercial terms. We can only grade when we actually have scraped page content;
+            // with no pages (scrape failed) we cannot judge relevance, so we use Firecrawl's order as-is.
+            // If grading runs but NOTHING clears the gate (a thin/odd site), we still take the top-ranked
+            // candidates rather than return nothing, so onboarding is never empty (the junk still sinks).
+            let chosen: { keyword: string, targetPage: string }[] = fc.keywords;
+            if (fc.pages && fc.pages.length > 0) {
+               const graded = gradeKeywords(fc.keywords, fc.pages, { businessName: fc.businessName });
+               const passers = graded.filter((g) => g.pass);
+               const ranked = passers.length > 0 ? passers : graded;
+               chosen = ranked.map((g) => ({ keyword: g.keyword, targetPage: g.targetPage }));
+            }
+            for (const rec of chosen) {
                const key = rec.keyword.toLowerCase();
                if (!seen.has(key)) {
                   seen.add(key);
