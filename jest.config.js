@@ -37,6 +37,10 @@ const esmPackages = [
   'strict-event-emitter',
   'is-node-process',
   'graphql',
+  // jose v6 ships ESM-only (exports '.' -> dist/webapi/index.js, no CJS build), so jest's CJS
+  // transform must transpile it. utils/authkit.ts imports it to validate AuthKit JWTs; the crypto
+  // calls are lazy, so transpiling only lets the route + authkit suites load under jest.
+  'jose',
 ];
 
 module.exports = async () => {

@@ -29,6 +29,14 @@ jest.mock('../../database/database', () => ({
    ensureSynced: jest.fn().mockResolvedValue(undefined),
 }));
 
+// The route now imports utils/authkit, which statically imports the Account/ApiKey sequelize models.
+// Loading the real models pulls sequelize (and its ESM esm-browser uuid) into jest-jsdom, which jest
+// cannot parse. These tests never exercise the AuthKit OAuth path (static-key + 401 behavior only), so
+// stub the models out exactly as the resolveAccount unit test does. Pure-helper authkit imports
+// (looksLikeJwt, the metadata builders) do not touch these.
+jest.mock('../../database/models/account', () => ({ __esModule: true, default: { findOne: jest.fn(), create: jest.fn() } }));
+jest.mock('../../database/models/apiKey', () => ({ __esModule: true, default: { findOne: jest.fn(), create: jest.fn() } }));
+
 // A capturing fake transport: records construction options and resolves handleRequest immediately.
 const transportInstances: { options: unknown, handleRequest: jest.Mock, close: jest.Mock }[] = [];
 jest.mock('@modelcontextprotocol/sdk/server/streamableHttp.js', () => ({
